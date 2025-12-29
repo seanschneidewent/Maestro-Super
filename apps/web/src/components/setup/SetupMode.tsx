@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { AnnotationsPanel } from './AnnotationsPanel';
 import { ModeToggle } from '../ModeToggle';
-import { AppMode, ContextPointer, ProjectFile } from '../../types';
+import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
 import { Upload, Plus, BrainCircuit } from 'lucide-react';
 
 interface SetupModeProps {
@@ -15,9 +15,90 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [pointers, setPointers] = useState<ContextPointer[]>([]);
   const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'pen' | 'text'>('select');
+  const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const handleDeletePointer = (id: string) => {
     setPointers(prev => prev.filter(p => p.id !== id));
+  };
+
+  const getFileType = (filename: string): FileType => {
+    const ext = filename.toLowerCase().split('.').pop();
+    switch (ext) {
+      case 'pdf': return FileType.PDF;
+      case 'csv': return FileType.CSV;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'webp': return FileType.IMAGE;
+      default: return FileType.PDF;
+    }
+  };
+
+  const sortFiles = (files: ProjectFile[]): ProjectFile[] => {
+    return files.sort((a, b) => {
+      // Folders first, then files
+      const aIsFolder = a.type === FileType.FOLDER;
+      const bIsFolder = b.type === FileType.FOLDER;
+      if (aIsFolder && !bIsFolder) return -1;
+      if (!aIsFolder && bIsFolder) return 1;
+      // Alphabetically within each group
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    }).map(file => ({
+      ...file,
+      children: file.children ? sortFiles(file.children) : undefined
+    }));
+  };
+
+  const handleFolderUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    // Sort files by path first to ensure consistent processing order
+    const sortedFiles = Array.from(files).sort((a, b) =>
+      a.webkitRelativePath.localeCompare(b.webkitRelativePath, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    // Build folder structure from file paths
+    const fileMap = new Map<string, ProjectFile>();
+    const rootFiles: ProjectFile[] = [];
+
+    sortedFiles.forEach(file => {
+      const pathParts = file.webkitRelativePath.split('/');
+      let currentPath = '';
+
+      pathParts.forEach((part, index) => {
+        const isLast = index === pathParts.length - 1;
+        const parentPath = currentPath;
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+        if (!fileMap.has(currentPath)) {
+          const newFile: ProjectFile = {
+            id: crypto.randomUUID(),
+            name: part,
+            type: isLast ? getFileType(part) : FileType.FOLDER,
+            children: isLast ? undefined : [],
+            parentId: parentPath ? fileMap.get(parentPath)?.id : undefined,
+          };
+
+          fileMap.set(currentPath, newFile);
+
+          if (parentPath && fileMap.has(parentPath)) {
+            const parent = fileMap.get(parentPath)!;
+            parent.children = parent.children || [];
+            parent.children.push(newFile);
+          } else if (index === 0) {
+            rootFiles.push(newFile);
+          }
+        }
+      });
+    });
+
+    // Sort the final tree: folders first, then files, alphabetically
+    setUploadedFiles(sortFiles(rootFiles));
+    // Reset input so the same folder can be selected again
+    e.target.value = '';
   };
 
   return (
@@ -41,15 +122,25 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
         </div>
 
         <FolderTree
-          files={[]}
+          files={uploadedFiles}
           onFileSelect={setSelectedFile}
           selectedFileId={selectedFile?.id || null}
         />
 
         {/* Upload Prompts */}
         <div className="p-4 border-t border-white/5">
-            <button className="w-full py-3.5 rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 text-cyan-200 text-sm font-medium hover:border-cyan-400/50 hover:from-cyan-600/30 hover:to-blue-600/30 transition-all shadow-lg shadow-cyan-900/10 group">
-                <span className="group-hover:drop-shadow-[0_0_8px_rgba(6,182,212,0.5)] transition-all">+ Upload Project Master</span>
+            <input
+              ref={folderInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFolderUpload}
+              {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+            />
+            <button
+              onClick={() => folderInputRef.current?.click()}
+              className="w-full py-3.5 rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 text-cyan-200 text-sm font-medium hover:border-cyan-400/50 hover:from-cyan-600/30 hover:to-blue-600/30 transition-all shadow-lg shadow-cyan-900/10 group"
+            >
+                <span className="group-hover:drop-shadow-[0_0_8px_rgba(6,182,212,0.5)] transition-all">+ Upload Plans</span>
             </button>
         </div>
       </div>
