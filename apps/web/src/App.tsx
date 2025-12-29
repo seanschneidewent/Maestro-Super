@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SetupMode } from './components/setup/SetupMode';
 import { UseMode } from './components/use/UseMode';
 import { AppMode } from './types';
-import { Settings, LogOut, Layout, Construction } from 'lucide-react';
+import { Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.LOGIN);
@@ -70,44 +70,9 @@ const App: React.FC = () => {
     );
   }
 
-  return (
-    <div className="relative">
-      {/* Mode Switcher - Floating Pill */}
-      <div className="fixed bottom-5 left-5 z-50 glass rounded-2xl p-1.5 toolbar-float animate-fade-in">
-        <div className="flex items-center gap-1">
-           <button
-              onClick={() => setMode(AppMode.SETUP)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                mode === AppMode.SETUP
-                  ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-           >
-              <Settings size={14} /> Setup
-           </button>
-           <button
-              onClick={() => setMode(AppMode.USE)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                mode === AppMode.USE
-                  ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-           >
-              <Construction size={14} /> Field
-           </button>
-           <div className="w-px h-6 bg-white/10 mx-1"></div>
-           <button
-             onClick={() => setMode(AppMode.LOGIN)}
-             className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
-           >
-              <LogOut size={14} />
-           </button>
-        </div>
-      </div>
-
-      {mode === AppMode.SETUP ? <SetupMode /> : <UseMode />}
-    </div>
-  );
+  return mode === AppMode.SETUP
+    ? <SetupMode mode={mode} setMode={setMode} />
+    : <UseMode mode={mode} setMode={setMode} />;
 };
 
 export default App;

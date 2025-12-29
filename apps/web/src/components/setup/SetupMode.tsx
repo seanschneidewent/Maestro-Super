@@ -3,10 +3,16 @@ import { MOCK_FILE_TREE } from '../../constants';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { AnnotationsPanel } from './AnnotationsPanel';
-import { ContextPointer, ProjectFile } from '../../types';
+import { ModeToggle } from '../ModeToggle';
+import { AppMode, ContextPointer, ProjectFile } from '../../types';
 import { Upload, Plus, BrainCircuit } from 'lucide-react';
 
-export const SetupMode: React.FC = () => {
+interface SetupModeProps {
+  mode: AppMode;
+  setMode: (mode: AppMode) => void;
+}
+
+export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [pointers, setPointers] = useState<ContextPointer[]>([]);
   const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'pen' | 'text'>('select');
@@ -19,7 +25,8 @@ export const SetupMode: React.FC = () => {
     <div className="flex h-screen w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
       {/* Sidebar: File Tree */}
       <div className="w-72 border-r border-slate-800/50 flex flex-col glass-panel">
-        <div className="p-4 border-b border-white/5 flex justify-between items-center">
+        <div className="p-4 border-b border-white/5 space-y-3">
+            <ModeToggle mode={mode} setMode={setMode} />
             <h1 className="font-bold text-lg tracking-tight text-white">
               Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Setup</span>
             </h1>

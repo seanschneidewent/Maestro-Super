@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
 import { MOCK_FILE_TREE, SAMPLE_IMAGE_URL } from '../../constants';
-import { ProjectFile, FileType } from '../../types';
+import { AppMode, ProjectFile, FileType } from '../../types';
 import { Folder, FileText, ChevronRight, ChevronDown, ChevronLeft, Lightbulb, X } from 'lucide-react';
 import { AgentPanel } from './AgentPanel';
+import { ModeToggle } from '../ModeToggle';
 
-export const UseMode: React.FC = () => {
+interface UseModeProps {
+  mode: AppMode;
+  setMode: (mode: AppMode) => void;
+}
+
+export const UseMode: React.FC<UseModeProps> = ({ mode, setMode }) => {
   const [activePanel, setActivePanel] = useState<'specs' | 'agent' | null>('specs');
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>('Architectural');
@@ -19,7 +25,8 @@ export const UseMode: React.FC = () => {
       <div
         className={`absolute left-0 top-0 bottom-0 bg-white/80 backdrop-blur-xl border-r border-slate-200/50 transition-all duration-500 ease-out z-20 shadow-elevation-3 ${activePanel === 'specs' ? 'translate-x-0 w-80' : '-translate-x-full w-80'}`}
       >
-        <div className="h-16 flex items-center px-5 border-b border-slate-200/50 bg-white/50">
+        <div className="px-5 py-4 border-b border-slate-200/50 bg-white/50 space-y-3">
+            <ModeToggle mode={mode} setMode={setMode} variant="light" />
             <h1 className="font-bold text-xl text-slate-800">
               Project<span className="text-cyan-600">Plans</span>
             </h1>
