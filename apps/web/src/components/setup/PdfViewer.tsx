@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Pen, Square, Type } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, MousePointer2, Pen, Square, Type, FileText } from 'lucide-react';
 import { ContextPointer } from '../../types';
-import { SAMPLE_IMAGE_URL } from '../../constants';
 import { GeminiService } from '../../services/geminiService';
 
 interface PdfViewerProps {
@@ -147,17 +146,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ fileId, pointers, setPoint
                 transform: `scale(${scale})` 
             }}
         >
-          {/* Mock PDF Image */}
-          <img 
+          {/* PDF Content - will be rendered from actual file */}
+          <div
             ref={imageRef}
-            src={SAMPLE_IMAGE_URL} 
-            alt="Plan" 
-            className="w-full h-auto select-none pointer-events-auto bg-white"
+            className="w-full h-[600px] select-none pointer-events-auto bg-white flex items-center justify-center border border-slate-200"
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onDragStart={(e) => e.preventDefault()}
-          />
+          >
+            <div className="text-center text-slate-400">
+              <FileText size={48} className="mx-auto mb-3 text-slate-300" />
+              <p className="text-sm">PDF content will render here</p>
+            </div>
+          </div>
 
           {/* Render Existing Pointers */}
           {pointers.map(p => (

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { MOCK_FILE_TREE, SAMPLE_IMAGE_URL } from '../../constants';
-import { AppMode, ProjectFile, FileType } from '../../types';
-import { Folder, FileText, ChevronRight, ChevronDown, ChevronLeft, Lightbulb, X } from 'lucide-react';
+import { AppMode, ProjectFile } from '../../types';
+import { Folder, FileText, ChevronRight, ChevronLeft } from 'lucide-react';
 import { AgentPanel } from './AgentPanel';
 import { ModeToggle } from '../ModeToggle';
 
@@ -13,10 +12,10 @@ interface UseModeProps {
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode }) => {
   const [activePanel, setActivePanel] = useState<'specs' | 'agent' | null>('specs');
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>('Architectural');
-  
-  // Categorized files logic (simplified from Mock Tree)
-  const categories = MOCK_FILE_TREE[0].children || [];
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
+  // Empty state - files will come from backend
+  const categories: ProjectFile[] = [];
 
   return (
     <div className="flex h-screen w-full bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 overflow-hidden font-sans relative blueprint-grid">
@@ -130,39 +129,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode }) => {
 
            {/* Viewer Content */}
            <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
-                {selectedFile ? (
-                    <div className="relative rounded-2xl overflow-hidden shadow-elevation-3 bg-white animate-scale-in">
-                        <img src={SAMPLE_IMAGE_URL} alt="Plan" className="max-h-[80vh] w-auto object-contain" />
-                        {/* Mock Pointers for Use Mode */}
-                        <div className="absolute top-[20%] left-[30%] w-[15%] h-[10%] pointer-box cursor-pointer" />
+                <div className="text-center animate-fade-in">
+                    <div className="p-8 rounded-2xl bg-white/50 backdrop-blur-sm border border-slate-200/50 shadow-elevation-1">
+                      <Folder size={48} className="mx-auto mb-4 text-slate-300" />
+                      <p className="text-slate-500">No plans uploaded yet</p>
                     </div>
-                ) : (
-                    <div className="text-center animate-fade-in">
-                        <div className="p-8 rounded-2xl bg-white/50 backdrop-blur-sm border border-slate-200/50 shadow-elevation-1">
-                          <Folder size={48} className="mx-auto mb-4 text-slate-300" />
-                          <p className="text-slate-500">Select a plan from the left menu</p>
-                        </div>
-                    </div>
-                )}
+                </div>
            </div>
 
-           {/* Narrative Bar (Only when Agent is open) */}
-           {activePanel === 'agent' && selectedFile && (
-               <div className="h-auto min-h-[70px] bg-gradient-to-r from-blue-50 to-cyan-50 border-t border-cyan-100 p-4 flex items-start gap-4 animate-slide-up">
-                    <div className="p-2.5 bg-gradient-to-br from-cyan-500 to-blue-500 text-white rounded-xl shadow-glow-cyan-sm shrink-0">
-                        <Lightbulb size={18} />
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-sm text-slate-700 leading-relaxed">
-                            <span className="font-bold text-cyan-700 block mb-1">AI Insight</span>
-                            This view highlights the specific ductwork conflict mentioned in RFI-023. Note the clearance issue near Column C4.
-                        </p>
-                    </div>
-                    <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white/50 rounded-lg transition-all">
-                        <X size={16} />
-                    </button>
-               </div>
-           )}
       </div>
 
     </div>

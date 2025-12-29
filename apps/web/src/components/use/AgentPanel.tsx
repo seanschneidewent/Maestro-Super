@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Clock, Plus, Bot, User, FileText } from 'lucide-react';
-import { MOCK_HISTORY } from '../../constants';
 import { ChatMessage } from '../../types';
 import { GeminiService } from '../../services/geminiService';
 
@@ -45,11 +44,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ onLinkClick }) => {
         id: (Date.now() + 1).toString(),
         role: 'agent',
         text: responseText,
-        timestamp: new Date(),
-        referencedSheets: Math.random() > 0.5 ? [
-            { fileId: 'f1', name: 'A-101', pointerCount: 3 },
-            { fileId: 'f3', name: 'E-201', pointerCount: 1 }
-        ] : []
+        timestamp: new Date()
     };
     setMessages(prev => [...prev, agentMsg]);
   };
@@ -85,13 +80,8 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ onLinkClick }) => {
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
               <Clock size={12} /> Recent Sessions
             </h3>
-            <div className="space-y-2">
-                {MOCK_HISTORY.map(h => (
-                    <div key={h.id} className="p-3.5 bg-slate-50 hover:bg-cyan-50 border border-slate-200/50 hover:border-cyan-200 rounded-xl cursor-pointer transition-all duration-200 group">
-                        <p className="text-sm font-medium text-slate-700 group-hover:text-cyan-700 truncate">{h.title}</p>
-                        <p className="text-xs text-slate-400 mt-1">{h.date.toLocaleDateString()}</p>
-                    </div>
-                ))}
+            <div className="text-center text-slate-400 py-8">
+              <p className="text-sm">No recent sessions</p>
             </div>
         </div>
       </div>

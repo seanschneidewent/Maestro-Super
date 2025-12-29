@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { MOCK_FILE_TREE } from '../../constants';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { AnnotationsPanel } from './AnnotationsPanel';
@@ -42,18 +41,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
         </div>
 
         <FolderTree
-          files={MOCK_FILE_TREE}
+          files={[]}
           onFileSelect={setSelectedFile}
           selectedFileId={selectedFile?.id || null}
         />
 
         {/* Upload Prompts */}
-        <div className="p-4 border-t border-white/5 space-y-2.5">
+        <div className="p-4 border-t border-white/5">
             <button className="w-full py-3.5 rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 text-cyan-200 text-sm font-medium hover:border-cyan-400/50 hover:from-cyan-600/30 hover:to-blue-600/30 transition-all shadow-lg shadow-cyan-900/10 group">
                 <span className="group-hover:drop-shadow-[0_0_8px_rgba(6,182,212,0.5)] transition-all">+ Upload Project Master</span>
-            </button>
-            <button className="w-full py-3.5 rounded-lg bg-gradient-to-r from-orange-600/20 to-amber-600/20 border border-orange-500/30 text-orange-200 text-sm font-medium hover:border-orange-400/50 hover:from-orange-600/30 hover:to-amber-600/30 transition-all group">
-                <span className="group-hover:drop-shadow-[0_0_8px_rgba(249,115,22,0.5)] transition-all">+ Add 3D Model</span>
             </button>
         </div>
       </div>
