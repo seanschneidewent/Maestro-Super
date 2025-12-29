@@ -2,6 +2,8 @@
 
 This document contains the distilled knowledge from the prototype implementation. Use it as the authoritative reference for how this system works.
 
+**Target deployment:** Single-region (US), Supabase + Railway + Vercel. See CLAUDE.md for infrastructure decisions.
+
 ---
 
 ## Part I: The Normalized Coordinate System
@@ -31,7 +33,7 @@ const h = pointer.bounds.hNorm * canvas.height;
 
 **Why This Matters:** The normalized system is the lingua franca between:
 - PdfViewer draw events
-- Backend storage
+- Backend storage (Postgres)
 - 150 DPI screenshot capture
 - Canvas rendering at any zoom
 - Navigation zoom-to-bounds
@@ -45,8 +47,8 @@ A context pointer is a user-drawn box on a PDF page with AI-enriched metadata.
 ```typescript
 interface ContextPointer {
   id: string;                      // UUID
-  fileId: string;                  // FK → ProjectFile
-  pageContextId?: string;          // FK → PageContext
+  fileId: string;                  // FK → project_files
+  pageContextId?: string;          // FK → page_contexts
   pageNumber: number;
 
   // Normalized bounds (0-1)
@@ -66,7 +68,7 @@ interface ContextPointer {
   // Content
   title: string;
   description: string;
-  snapshotDataUrl: string;  // Base64 PNG (150 DPI crop)
+  snapshotUrl: string;  // Supabase Storage path for 150 DPI crop
 
   // AI Analysis (populated by Gemini)
   aiTechnicalDescription?: string;
@@ -426,25 +428,20 @@ Pointers exist in two states:
 
 ---
 
-## Part X: Database Schema (Simplified)
+## Part X: Database Schema
 
-```sql
--- Core entities
-projects (id, name, status, created_at)
-project_files (id, project_id, name, path, file_type, parent_id, is_folder)
+See CLAUDE.md for the complete 8-table schema with Row Level Security policies.
 
--- Context extraction
-context_pointers (id, file_id, page_context_id, page_number, bounds_*, style_*, title, description, snapshot_data_url, ai_*, text_content, status, committed_at)
-page_contexts (id, file_id, page_number, sheet_number, discipline_code, pass1_output, pass2_output, inbound_references, processing_status, retry_count)
-discipline_contexts (id, project_id, code, name, context_description, key_contents, connections, processing_status)
-sheet_contexts (id, file_id, added_to_context, generation_status)
+**Core tables:**
+- `projects` - User projects with status (setup/processing/ready)
+- `project_files` - PDFs and folders within projects
+- `context_pointers` - User-drawn boxes with AI analysis
+- `page_contexts` - Pass 1 & 2 output per page
+- `discipline_contexts` - Pass 3 rollup per discipline
+- `queries` - Query history with responses
+- `usage_events` - Billing/usage tracking
 
--- Auth & queries (Supabase)
-users (id, email, role)
-user_projects (user_id, project_id)
-queries (id, user_id, project_id, text, created_at)
-query_results (id, query_id, pointer_id, relevance_score)
-```
+All tables use Row Level Security. Users only see their own data.
 
 ---
 
