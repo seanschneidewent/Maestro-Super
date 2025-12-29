@@ -333,7 +333,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
       {/* Canvas Area - scrollable surface */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto bg-gradient-radial-dark"
+        className="flex-1 overflow-auto canvas-grid"
         style={{ position: 'relative' }}
       >
         {currentImage && (() => {
