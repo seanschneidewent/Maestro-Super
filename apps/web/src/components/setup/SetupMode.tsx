@@ -80,6 +80,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
             type: isLast ? getFileType(part) : FileType.FOLDER,
             children: isLast ? undefined : [],
             parentId: parentPath ? fileMap.get(parentPath)?.id : undefined,
+            file: isLast ? file : undefined, // Store the actual File object
           };
 
           fileMap.set(currentPath, newFile);
@@ -148,10 +149,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col h-full min-w-0 blueprint-grid-dark">
          {/* PDF Viewer */}
-         <div className="flex-1 relative">
+         <div className="flex-1 relative overflow-hidden">
             {selectedFile ? (
                 <PdfViewer
-                    fileId={selectedFile.id}
+                    file={selectedFile.file}
                     pointers={pointers}
                     setPointers={setPointers}
                     activeTool={activeTool}

@@ -19,6 +19,7 @@ export interface ProjectFile {
   children?: ProjectFile[];
   parentId?: string;
   category?: string; // For Use Mode grouping (e.g., "A-101")
+  file?: File; // The actual file object for rendering
 }
 
 export interface ContextPointer {
