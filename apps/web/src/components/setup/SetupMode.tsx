@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
-import { AnnotationsPanel } from './AnnotationsPanel';
 import { ModeToggle } from '../ModeToggle';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
 import { Upload, Plus, BrainCircuit } from 'lucide-react';
@@ -17,10 +16,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
   const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'pen' | 'text'>('select');
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
-
-  const handleDeletePointer = (id: string) => {
-    setPointers(prev => prev.filter(p => p.id !== id));
-  };
 
   const getFileType = (filename: string): FileType => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -168,8 +163,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
             )}
          </div>
 
-         {/* Annotations Panel */}
-         <AnnotationsPanel pointers={pointers} onDelete={handleDeletePointer} />
       </div>
 
       {/* Context Panel */}
