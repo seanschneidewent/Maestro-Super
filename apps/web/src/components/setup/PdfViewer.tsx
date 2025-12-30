@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Pen, Square, ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react';
 import { ContextPointer } from '../../types';
 import { GeminiService } from '../../services/geminiService';
 
@@ -20,8 +20,8 @@ interface PdfViewerProps {
   file?: File;
   pointers: ContextPointer[];
   setPointers: React.Dispatch<React.SetStateAction<ContextPointer[]>>;
-  activeTool: 'select' | 'rect' | 'pen' | 'text';
-  setActiveTool: (tool: 'select' | 'rect' | 'pen' | 'text') => void;
+  activeTool: 'select' | 'rect' | 'text';
+  setActiveTool: (tool: 'select' | 'rect' | 'text') => void;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointers, activeTool, setActiveTool }) => {
@@ -354,12 +354,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
             className={`p-2.5 rounded-lg transition-all ${activeTool === 'rect' ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
           >
             <Square size={18} />
-          </button>
-          <button
-            onClick={() => setActiveTool('pen')}
-            className={`p-2.5 rounded-lg transition-all ${activeTool === 'pen' ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-          >
-            <Pen size={18} />
           </button>
         </div>
       </div>

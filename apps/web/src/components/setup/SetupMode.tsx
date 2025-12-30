@@ -13,7 +13,7 @@ interface SetupModeProps {
 export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [pointers, setPointers] = useState<ContextPointer[]>([]);
-  const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'pen' | 'text'>('select');
+  const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'text'>('select');
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
