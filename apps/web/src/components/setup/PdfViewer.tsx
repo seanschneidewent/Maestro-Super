@@ -242,12 +242,24 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
   const currentImage = pageImages[pageNumber - 1];
   const currentPagePointers = pointers.filter(p => p.pageNumber === pageNumber);
 
-  // Reset scroll position when page changes (CSS flexbox handles centering)
+  // Center scroll position when page changes or images load
   useEffect(() => {
     if (!containerRef.current || !currentImage) return;
-    containerRef.current.scrollTop = 0;
-    containerRef.current.scrollLeft = 0;
-  }, [pageNumber, currentImage]);
+
+    // Use setTimeout to ensure layout is complete after render
+    const timer = setTimeout(() => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Scroll to center the content
+      const scrollLeft = Math.max(0, (container.scrollWidth - container.clientWidth) / 2);
+      const scrollTop = Math.max(0, (container.scrollHeight - container.clientHeight) / 2);
+      container.scrollLeft = scrollLeft;
+      container.scrollTop = scrollTop;
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [pageNumber, currentImage, pageImages.length]);
 
   // Calculate display dimensions to fit container at zoom=1
   const displayDimensions = currentImage ? (() => {
@@ -388,8 +400,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
           return (
             <div
               style={{
-                width: Math.max(contentWidth + 64, containerSize.width + 64),
-                height: Math.max(contentHeight + 64, containerSize.height + 64),
+                minWidth: '100%',
+                minHeight: '100%',
+                width: contentWidth + 64,
+                height: contentHeight + 64,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
