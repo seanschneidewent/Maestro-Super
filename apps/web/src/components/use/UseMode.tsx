@@ -26,9 +26,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode }) => {
       >
         <div className="px-5 py-4 border-b border-slate-200/50 bg-white/50 space-y-3">
             <ModeToggle mode={mode} setMode={setMode} variant="light" />
-            <h1 className="font-bold text-xl text-slate-800">
-              Project<span className="text-cyan-600">Plans</span>
-            </h1>
+            <div>
+              <h1 className="font-bold text-lg text-slate-800">
+                Maestro<span className="text-cyan-600">Super</span>
+              </h1>
+              <p className="text-xs text-slate-500">Go Time.</p>
+            </div>
         </div>
         <div className="overflow-y-auto h-[calc(100%-4rem)] p-3 no-scrollbar">
             {categories.map(cat => (

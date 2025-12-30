@@ -148,9 +148,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
         <div className="flex flex-col h-full">
           <div className="p-4 border-b border-white/5 space-y-3">
               <ModeToggle mode={mode} setMode={setMode} />
-              <h1 className="font-bold text-lg tracking-tight text-white">
-                Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Setup</span>
-              </h1>
+              <div>
+                <h1 className="font-bold text-lg tracking-tight text-white">
+                  Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Super</span>
+                </h1>
+                <p className="text-xs text-slate-400">Setup Mode</p>
+              </div>
           </div>
 
           <div className="p-3 flex gap-2 border-b border-white/5">
