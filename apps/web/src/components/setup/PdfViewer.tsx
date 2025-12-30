@@ -125,10 +125,48 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
     convertPdfToImages();
   }, [file]);
 
+  // Store center point for zoom operations
+  const zoomCenterRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Capture current viewport center as fraction of content
+  const captureCenter = () => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    zoomCenterRef.current = {
+      x: (container.scrollLeft + container.clientWidth / 2) / container.scrollWidth,
+      y: (container.scrollTop + container.clientHeight / 2) / container.scrollHeight,
+    };
+  };
+
   // Zoom handlers
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 4));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
-  const handleZoomReset = () => setZoom(1);
+  const handleZoomIn = () => {
+    captureCenter();
+    setZoom(prev => Math.min(prev + 0.25, 4));
+  };
+  const handleZoomOut = () => {
+    captureCenter();
+    setZoom(prev => Math.max(prev - 0.25, 0.5));
+  };
+  const handleZoomReset = () => {
+    zoomCenterRef.current = null; // Reset to default centering
+    setZoom(1);
+  };
+
+  // Restore center position after zoom changes
+  useEffect(() => {
+    if (!containerRef.current || !zoomCenterRef.current) return;
+
+    // Use requestAnimationFrame to ensure layout is complete
+    requestAnimationFrame(() => {
+      const container = containerRef.current;
+      if (!container || !zoomCenterRef.current) return;
+
+      const { x, y } = zoomCenterRef.current;
+      container.scrollLeft = x * container.scrollWidth - container.clientWidth / 2;
+      container.scrollTop = y * container.scrollHeight - container.clientHeight / 2;
+      zoomCenterRef.current = null;
+    });
+  }, [zoom]);
 
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
@@ -203,6 +241,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
   // Current page data
   const currentImage = pageImages[pageNumber - 1];
   const currentPagePointers = pointers.filter(p => p.pageNumber === pageNumber);
+
+  // Reset scroll position when page changes (CSS flexbox handles centering)
+  useEffect(() => {
+    if (!containerRef.current || !currentImage) return;
+    containerRef.current.scrollTop = 0;
+    containerRef.current.scrollLeft = 0;
+  }, [pageNumber, currentImage]);
 
   // Calculate display dimensions to fit container at zoom=1
   const displayDimensions = currentImage ? (() => {
@@ -339,17 +384,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
         {currentImage && (() => {
           const contentWidth = displayDimensions.width * zoom;
           const contentHeight = displayDimensions.height * zoom;
-          // Add padding around content, center if smaller than container
-          const padX = Math.max(32, (containerSize.width - contentWidth) / 2 + 32);
-          const padY = Math.max(32, (containerSize.height - contentHeight) / 2 + 32);
 
           return (
             <div
               style={{
-                width: contentWidth + padX * 2,
-                height: contentHeight + padY * 2,
-                padding: `${padY}px ${padX}px`,
-                boxSizing: 'border-box',
+                width: Math.max(contentWidth + 64, containerSize.width + 64),
+                height: Math.max(contentHeight + 64, containerSize.height + 64),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
               <div
