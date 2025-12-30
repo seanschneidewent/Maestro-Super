@@ -229,7 +229,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, se
     setSelectedPointerId(newPointer.id);
     setIsDrawing(false);
     setTempRect(null);
-    setActiveTool('select');
 
     try {
       const analysis = await GeminiService.analyzePointer("dummy_base64", "Construction plan detail");

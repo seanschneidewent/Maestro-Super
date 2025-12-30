@@ -4,7 +4,7 @@ import { PdfViewer } from './PdfViewer';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
-import { Upload, Plus, BrainCircuit, FolderOpen, Layers } from 'lucide-react';
+import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X } from 'lucide-react';
 
 interface SetupModeProps {
   mode: AppMode;
@@ -22,6 +22,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
 
   const updatePointer = (id: string, updates: Partial<ContextPointer>) => {
     setPointers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const deletePointer = (id: string) => {
+    setPointers(prev => prev.filter(p => p.id !== id));
+    if (selectedPointerId === id) {
+      setSelectedPointerId(null);
+    }
   };
 
   // Scroll selected pointer block to center of panel
@@ -236,18 +243,27 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
                         key={pointer.id}
                         data-pointer-id={pointer.id}
                         onClick={() => setSelectedPointerId(pointer.id)}
-                        className={`p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border transition-all cursor-pointer group ${
+                        className={`relative p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border transition-all cursor-pointer group ${
                           selectedPointerId === pointer.id
                             ? 'border-cyan-400 ring-1 ring-cyan-400/50'
                             : 'border-cyan-500/20 hover:border-cyan-400/40'
                         }`}
                       >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePointer(pointer.id);
+                          }}
+                          className="absolute top-2 right-2 p-1 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={14} />
+                        </button>
                         <input
                           type="text"
                           value={pointer.title}
                           onChange={(e) => updatePointer(pointer.id, { title: e.target.value })}
                           placeholder="Title"
-                          className="w-full bg-transparent text-sm font-medium text-cyan-300 placeholder-cyan-500/50 outline-none mb-2"
+                          className="w-full bg-transparent text-sm font-medium text-cyan-300 placeholder-cyan-500/50 outline-none mb-2 pr-6"
                         />
                         <textarea
                           value={pointer.description}
