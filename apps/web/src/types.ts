@@ -24,6 +24,7 @@ export interface ProjectFile {
 
 export interface ContextPointer {
   id: string;
+  fileId: string;
   pageNumber: number;
   bounds: {
     xNorm: number;

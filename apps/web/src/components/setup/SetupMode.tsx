@@ -148,6 +148,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
             {selectedFile ? (
                 <PdfViewer
                     file={selectedFile.file}
+                    fileId={selectedFile.id}
                     pointers={pointers}
                     setPointers={setPointers}
                     activeTool={activeTool}

@@ -18,13 +18,14 @@ interface PageImage {
 
 interface PdfViewerProps {
   file?: File;
+  fileId?: string;
   pointers: ContextPointer[];
   setPointers: React.Dispatch<React.SetStateAction<ContextPointer[]>>;
   activeTool: 'select' | 'rect' | 'text';
   setActiveTool: (tool: 'select' | 'rect' | 'text') => void;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointers, activeTool, setActiveTool }) => {
+export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, activeTool, setActiveTool }) => {
   // Page images (PNG data URLs)
   const [pageImages, setPageImages] = useState<PageImage[]>([]);
   const [isConverting, setIsConverting] = useState(false);
@@ -209,6 +210,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
 
     const newPointer: ContextPointer = {
       id: crypto.randomUUID(),
+      fileId: fileId || '',
       pageNumber: pageNumber,
       bounds: {
         xNorm: tempRect.x,
@@ -240,7 +242,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, pointers, setPointer
 
   // Current page data
   const currentImage = pageImages[pageNumber - 1];
-  const currentPagePointers = pointers.filter(p => p.pageNumber === pageNumber);
+  const currentPagePointers = pointers.filter(p => p.fileId === fileId && p.pageNumber === pageNumber);
 
   // Center scroll position when page changes or images load
   useEffect(() => {
