@@ -21,11 +21,13 @@ interface PdfViewerProps {
   fileId?: string;
   pointers: ContextPointer[];
   setPointers: React.Dispatch<React.SetStateAction<ContextPointer[]>>;
+  selectedPointerId: string | null;
+  setSelectedPointerId: (id: string | null) => void;
   activeTool: 'select' | 'rect' | 'text';
   setActiveTool: (tool: 'select' | 'rect' | 'text') => void;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, activeTool, setActiveTool }) => {
+export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, selectedPointerId, setSelectedPointerId, activeTool, setActiveTool }) => {
   // Page images (PNG data URLs)
   const [pageImages, setPageImages] = useState<PageImage[]>([]);
   const [isConverting, setIsConverting] = useState(false);
@@ -224,6 +226,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, se
     };
 
     setPointers(prev => [...prev, newPointer]);
+    setSelectedPointerId(newPointer.id);
     setIsDrawing(false);
     setTempRect(null);
     setActiveTool('select');
@@ -429,7 +432,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, se
               {currentPagePointers.map(p => (
                 <div
                   key={p.id}
-                  className={`absolute pointer-box cursor-pointer group animate-scale-in ${p.status === 'generating' ? 'generating' : ''}`}
+                  onClick={() => setSelectedPointerId(p.id)}
+                  className={`absolute pointer-box cursor-pointer group animate-scale-in ${p.status === 'generating' ? 'generating' : ''} ${selectedPointerId === p.id ? 'selected' : ''}`}
                   style={{
                     left: `${p.bounds.xNorm * 100}%`,
                     top: `${p.bounds.yNorm * 100}%`,

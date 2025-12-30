@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { ModeToggle } from '../ModeToggle';
@@ -14,9 +14,37 @@ interface SetupModeProps {
 export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [pointers, setPointers] = useState<ContextPointer[]>([]);
+  const [selectedPointerId, setSelectedPointerId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'text'>('select');
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const contextPanelRef = useRef<HTMLDivElement>(null);
+
+  const updatePointer = (id: string, updates: Partial<ContextPointer>) => {
+    setPointers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  // Scroll selected pointer block to center of panel
+  useEffect(() => {
+    if (!selectedPointerId || !contextPanelRef.current) return;
+
+    const container = contextPanelRef.current;
+    const selectedElement = container.querySelector(`[data-pointer-id="${selectedPointerId}"]`) as HTMLElement;
+
+    if (selectedElement) {
+      const containerHeight = container.clientHeight;
+      const elementTop = selectedElement.offsetTop;
+      const elementHeight = selectedElement.offsetHeight;
+
+      // Calculate scroll position to center the element
+      const scrollTo = elementTop - (containerHeight / 2) + (elementHeight / 2);
+
+      container.scrollTo({
+        top: Math.max(0, scrollTo),
+        behavior: 'smooth'
+      });
+    }
+  }, [selectedPointerId]);
 
   const getFileType = (filename: string): FileType => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -162,6 +190,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
                     fileId={selectedFile.id}
                     pointers={pointers}
                     setPointers={setPointers}
+                    selectedPointerId={selectedPointerId}
+                    setSelectedPointerId={setSelectedPointerId}
                     activeTool={activeTool}
                     setActiveTool={setActiveTool}
                 />
@@ -194,27 +224,42 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode }) => {
                 Context Extraction
               </h2>
            </div>
-           <div className="flex-1 p-4 flex flex-col items-center justify-center text-center text-slate-500 overflow-y-auto dark-scroll">
+           <div ref={contextPanelRef} className="flex-1 p-4 flex flex-col items-center justify-start text-center text-slate-500 overflow-y-auto dark-scroll">
               {pointers.length === 0 ? (
                 <div className="animate-fade-in">
-                  <p className="text-sm text-slate-500">Contextual data from pointers will appear here grouped by discipline.</p>
+                  <p className="text-sm text-slate-500">Draw a box on the plan to extract context.</p>
                 </div>
               ) : (
                   <div className="w-full text-left space-y-3 animate-slide-up">
-                      <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border border-cyan-500/20 hover:border-cyan-400/40 transition-all cursor-pointer group">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400"></div>
-                            <span className="text-xs text-cyan-400 font-bold uppercase tracking-wider">Electrical</span>
-                          </div>
-                          <div className="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Conduit routing analysis</div>
+                    {pointers.filter(p => p.fileId === selectedFile?.id).map(pointer => (
+                      <div
+                        key={pointer.id}
+                        data-pointer-id={pointer.id}
+                        onClick={() => setSelectedPointerId(pointer.id)}
+                        className={`p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border transition-all cursor-pointer group ${
+                          selectedPointerId === pointer.id
+                            ? 'border-cyan-400 ring-1 ring-cyan-400/50'
+                            : 'border-cyan-500/20 hover:border-cyan-400/40'
+                        }`}
+                      >
+                        <input
+                          type="text"
+                          value={pointer.title}
+                          onChange={(e) => updatePointer(pointer.id, { title: e.target.value })}
+                          placeholder="Title"
+                          className="w-full bg-transparent text-sm font-medium text-cyan-300 placeholder-cyan-500/50 outline-none mb-2"
+                        />
+                        <textarea
+                          value={pointer.description}
+                          onChange={(e) => updatePointer(pointer.id, { description: e.target.value })}
+                          placeholder="Description..."
+                          rows={2}
+                          className="w-full bg-transparent text-sm text-slate-300 placeholder-slate-500 outline-none resize-none"
+                        />
                       </div>
-                      <div className="p-4 rounded-xl bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 hover:border-orange-400/40 transition-all cursor-pointer group">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div>
-                            <span className="text-xs text-orange-400 font-bold uppercase tracking-wider">Structural</span>
-                          </div>
-                          <div className="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Column reinforcement details</div>
-                      </div>
+                    ))}
+                    {/* Spacer to allow last items to be centered */}
+                    <div className="h-[50vh] flex-shrink-0" />
                   </div>
               )}
            </div>
