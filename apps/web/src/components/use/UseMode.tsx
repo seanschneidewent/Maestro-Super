@@ -7,9 +7,10 @@ import { ModeToggle } from '../ModeToggle';
 interface UseModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
+  projectId: string;
 }
 
-export const UseMode: React.FC<UseModeProps> = ({ mode, setMode }) => {
+export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) => {
   const [activePanel, setActivePanel] = useState<'specs' | 'agent' | null>('specs');
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);

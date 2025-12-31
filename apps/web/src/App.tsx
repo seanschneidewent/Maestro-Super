@@ -1,12 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SetupMode } from './components/setup/SetupMode';
 import { UseMode } from './components/use/UseMode';
-import { AppMode } from './types';
-import { Settings } from 'lucide-react';
+import { AppMode, Project } from './types';
+import { Settings, Loader2 } from 'lucide-react';
+import { api } from './lib/api';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.LOGIN);
   const [isLoading, setIsLoading] = useState(false);
+  const [project, setProject] = useState<Project | null>(null);
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
+  // Load or create default project on mount
+  useEffect(() => {
+    async function loadProject() {
+      try {
+        setProjectLoading(true);
+        setProjectError(null);
+
+        const projects = await api.projects.list();
+
+        if (projects.length > 0) {
+          // Use the first project
+          setProject(projects[0]);
+        } else {
+          // Create default project
+          const newProject = await api.projects.create('My Project');
+          setProject(newProject);
+        }
+      } catch (err) {
+        console.error('Failed to load project:', err);
+        setProjectError(err instanceof Error ? err.message : 'Failed to load project');
+      } finally {
+        setProjectLoading(false);
+      }
+    }
+
+    loadProject();
+  }, []);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,9 +102,38 @@ const App: React.FC = () => {
     );
   }
 
+  // Show loading state while project loads
+  if (projectLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          <p className="text-slate-400 text-sm">Loading project...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (projectError || !project) {
+    return (
+      <div className="min-h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+        <div className="glass-panel p-8 rounded-2xl max-w-md text-center">
+          <p className="text-red-400 mb-4">{projectError || 'Failed to load project'}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="btn-primary px-6 py-2 rounded-lg text-white"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return mode === AppMode.SETUP
-    ? <SetupMode mode={mode} setMode={setMode} />
-    : <UseMode mode={mode} setMode={setMode} />;
+    ? <SetupMode mode={mode} setMode={setMode} projectId={project.id} />
+    : <UseMode mode={mode} setMode={setMode} projectId={project.id} />;
 };
 
 export default App;

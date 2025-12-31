@@ -25,9 +25,13 @@ interface PdfViewerProps {
   setSelectedPointerId: (id: string | null) => void;
   activeTool: 'select' | 'rect' | 'text';
   setActiveTool: (tool: 'select' | 'rect' | 'text') => void;
+  onPointerCreate?: (data: {
+    pageNumber: number;
+    bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
+  }) => Promise<ContextPointer | null>;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, selectedPointerId, setSelectedPointerId, activeTool, setActiveTool }) => {
+export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, selectedPointerId, setSelectedPointerId, activeTool, setActiveTool, onPointerCreate }) => {
   // Page images (PNG data URLs)
   const [pageImages, setPageImages] = useState<PageImage[]>([]);
   const [isConverting, setIsConverting] = useState(false);
@@ -210,25 +214,39 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, se
       return;
     }
 
+    const bounds = {
+      xNorm: tempRect.x,
+      yNorm: tempRect.y,
+      wNorm: tempRect.w,
+      hNorm: tempRect.h
+    };
+
+    setIsDrawing(false);
+    setTempRect(null);
+
+    // Use callback if provided (for API integration)
+    if (onPointerCreate) {
+      const createdPointer = await onPointerCreate({ pageNumber, bounds });
+      if (createdPointer) {
+        setPointers(prev => [...prev, createdPointer]);
+        setSelectedPointerId(createdPointer.id);
+      }
+      return;
+    }
+
+    // Fallback to local-only pointer creation
     const newPointer: ContextPointer = {
       id: crypto.randomUUID(),
       fileId: fileId || '',
       pageNumber: pageNumber,
-      bounds: {
-        xNorm: tempRect.x,
-        yNorm: tempRect.y,
-        wNorm: tempRect.w,
-        hNorm: tempRect.h
-      },
-      title: "New Annotation",
-      description: "Analyzing region...",
+      bounds,
+      title: '',
+      description: '',
       status: 'generating'
     };
 
     setPointers(prev => [...prev, newPointer]);
     setSelectedPointerId(newPointer.id);
-    setIsDrawing(false);
-    setTempRect(null);
 
     try {
       const analysis = await GeminiService.analyzePointer("dummy_base64", "Construction plan detail");

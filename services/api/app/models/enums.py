@@ -41,6 +41,9 @@ class FileType(str, Enum):
 
     PDF = "pdf"
     IMAGE = "image"
+    CSV = "csv"
+    MODEL = "model"
+    FOLDER = "folder"
 
 
 class EventType(str, Enum):

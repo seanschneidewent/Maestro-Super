@@ -5,11 +5,21 @@ export enum AppMode {
 }
 
 export enum FileType {
-  PDF = 'PDF',
-  CSV = 'CSV',
-  IMAGE = 'IMAGE',
-  MODEL = 'MODEL',
-  FOLDER = 'FOLDER'
+  PDF = 'pdf',
+  CSV = 'csv',
+  IMAGE = 'image',
+  MODEL = 'model',
+  FOLDER = 'folder'
+}
+
+export type ProjectStatus = 'setup' | 'processing' | 'ready';
+
+export interface Project {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ProjectFile {
@@ -18,8 +28,10 @@ export interface ProjectFile {
   type: FileType;
   children?: ProjectFile[];
   parentId?: string;
+  storagePath?: string; // Supabase Storage path
+  pageCount?: number;
   category?: string; // For Use Mode grouping (e.g., "A-101")
-  file?: File; // The actual file object for rendering
+  file?: File; // The actual file object for rendering (local only)
 }
 
 export interface ContextPointer {
