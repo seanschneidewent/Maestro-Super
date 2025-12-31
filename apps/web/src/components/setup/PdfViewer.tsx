@@ -29,6 +29,8 @@ interface PdfViewerProps {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
   }) => Promise<ContextPointer | null>;
+  isLoadingFile?: boolean;
+  fileLoadError?: string | null;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, selectedPointerId, setSelectedPointerId, activeTool, setActiveTool, onPointerCreate }) => {
