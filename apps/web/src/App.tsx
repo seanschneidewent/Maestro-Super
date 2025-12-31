@@ -4,16 +4,47 @@ import { UseMode } from './components/use/UseMode';
 import { AppMode, Project } from './types';
 import { Settings, Loader2 } from 'lucide-react';
 import { api } from './lib/api';
+import { supabase } from './lib/supabase';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.LOGIN);
   const [isLoading, setIsLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [project, setProject] = useState<Project | null>(null);
-  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // Load or create default project on mount
+  // Check for existing session on mount
   useEffect(() => {
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setMode(AppMode.USE);
+      }
+      setCheckingAuth(false);
+    }
+    checkSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setMode(AppMode.USE);
+      } else if (event === 'SIGNED_OUT') {
+        setMode(AppMode.LOGIN);
+        setProject(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load or create default project when authenticated
+  useEffect(() => {
+    if (mode === AppMode.LOGIN || checkingAuth) return;
+
     async function loadProject() {
       try {
         setProjectLoading(true);
@@ -22,10 +53,8 @@ const App: React.FC = () => {
         const projects = await api.projects.list();
 
         if (projects.length > 0) {
-          // Use the first project
           setProject(projects[0]);
         } else {
-          // Create default project
           const newProject = await api.projects.create('My Project');
           setProject(newProject);
         }
@@ -38,16 +67,52 @@ const App: React.FC = () => {
     }
 
     loadProject();
-  }, []);
+  }, [mode, checkingAuth]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
-        setIsLoading(false);
-        setMode(AppMode.USE);
-    }, 1500);
+    setAuthError(null);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      setIsLoading(false);
+    } else {
+      setIsLoading(false);
+      setMode(AppMode.USE);
+    }
   };
+
+  const handleSignUp = async () => {
+    setIsLoading(true);
+    setAuthError(null);
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      setAuthError('Check your email for a confirmation link!');
+    }
+    setIsLoading(false);
+  };
+
+  // Show loading while checking auth
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+      </div>
+    );
+  }
 
   if (mode === AppMode.LOGIN) {
     return (
@@ -65,6 +130,8 @@ const App: React.FC = () => {
                         <input
                           type="email"
                           placeholder="super@site.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
                           className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
                           required
                         />
@@ -74,19 +141,36 @@ const App: React.FC = () => {
                         <input
                           type="password"
                           placeholder="••••••••"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
                           className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
                           required
                         />
                     </div>
-                    <button
-                        type="submit"
-                        disabled={isLoading}
-                        className="w-full btn-primary text-white font-bold py-3.5 rounded-xl flex justify-center items-center mt-6"
-                    >
-                        {isLoading ? (
-                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : "Sign In"}
-                    </button>
+                    {authError && (
+                      <p className={`text-sm ${authError.includes('Check your email') ? 'text-green-400' : 'text-red-400'}`}>
+                        {authError}
+                      </p>
+                    )}
+                    <div className="flex gap-3 mt-6">
+                        <button
+                            type="submit"
+                            disabled={isLoading}
+                            className="flex-1 btn-primary text-white font-bold py-3.5 rounded-xl flex justify-center items-center"
+                        >
+                            {isLoading ? (
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : "Sign In"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleSignUp}
+                            disabled={isLoading}
+                            className="flex-1 bg-slate-700/50 hover:bg-slate-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-all border border-slate-600/50"
+                        >
+                            Sign Up
+                        </button>
+                    </div>
                 </form>
                 <div className="mt-8 pt-6 border-t border-white/5 text-center">
                     <button

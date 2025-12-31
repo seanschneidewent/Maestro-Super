@@ -12,8 +12,15 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Database
-    database_url: str = "sqlite:///./local.db"
+    # Database - can use either DATABASE_URL or separate params
+    database_url: str | None = None
+
+    # Separate DB params (for passwords with special characters)
+    db_host: str | None = None
+    db_port: int = 5432
+    db_user: str = "postgres"
+    db_password: str | None = None
+    db_name: str = "postgres"
 
     # Auth - dev mode bypass
     dev_user_id: str | None = None  # Set this to bypass JWT auth in local dev
