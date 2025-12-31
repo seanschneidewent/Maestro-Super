@@ -4,7 +4,7 @@ import { PdfViewer } from './PdfViewer';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
-import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2 } from 'lucide-react';
+import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
 import { api, ProjectFileTree } from '../../lib/api';
 import { downloadFile, blobToFile } from '../../lib/storage';
 
@@ -23,6 +23,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [isLoadingPointers, setIsLoadingPointers] = useState(false);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedForDeletion, setSelectedForDeletion] = useState<Set<string>>(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const contextPanelRef = useRef<HTMLDivElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
@@ -258,6 +262,117 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
     }));
   };
 
+  // Get all descendant IDs for a file/folder (for cascading selection)
+  const getAllDescendantIds = useCallback((fileId: string, files: ProjectFile[]): string[] => {
+    const ids: string[] = [];
+
+    const findAndCollect = (nodes: ProjectFile[]): boolean => {
+      for (const node of nodes) {
+        if (node.id === fileId) {
+          // Found the target, collect all descendants
+          const collectDescendants = (n: ProjectFile) => {
+            if (n.children) {
+              for (const child of n.children) {
+                ids.push(child.id);
+                collectDescendants(child);
+              }
+            }
+          };
+          collectDescendants(node);
+          return true;
+        }
+        if (node.children && findAndCollect(node.children)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    findAndCollect(files);
+    return ids;
+  }, []);
+
+  // Toggle file selection (with cascading for folders)
+  const toggleFileSelection = useCallback((fileId: string) => {
+    setSelectedForDeletion(prev => {
+      const newSet = new Set(prev);
+      const descendantIds = getAllDescendantIds(fileId, uploadedFiles);
+
+      if (newSet.has(fileId)) {
+        // Deselect file and all descendants
+        newSet.delete(fileId);
+        descendantIds.forEach(id => newSet.delete(id));
+      } else {
+        // Select file and all descendants
+        newSet.add(fileId);
+        descendantIds.forEach(id => newSet.add(id));
+      }
+
+      return newSet;
+    });
+  }, [getAllDescendantIds, uploadedFiles]);
+
+  // Handle delete confirmation
+  const handleDeleteConfirm = useCallback(async () => {
+    if (selectedForDeletion.size === 0) return;
+
+    setIsDeleting(true);
+    try {
+      // Find root selections (not descendants of other selections)
+      const rootSelections = Array.from(selectedForDeletion as Set<string>).filter((id: string) => {
+        // Check if any ancestor is also selected
+        const isDescendant = (nodes: ProjectFile[], targetId: string, ancestorSelected: boolean): boolean => {
+          for (const node of nodes) {
+            const nodeSelected = selectedForDeletion.has(node.id);
+            if (node.id === targetId) {
+              return ancestorSelected;
+            }
+            if (node.children) {
+              if (isDescendant(node.children, targetId, ancestorSelected || nodeSelected)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+        return !isDescendant(uploadedFiles, id, false);
+      });
+
+      // Delete each root selection (backend handles cascading)
+      for (const fileId of rootSelections) {
+        await api.files.delete(fileId);
+        // Clean up local file map
+        localFileMapRef.current.delete(fileId);
+      }
+
+      // Clear selected file if it was deleted
+      if (selectedFile && selectedForDeletion.has(selectedFile.id)) {
+        setSelectedFile(null);
+        setPointers([]);
+      }
+
+      // Reload file tree
+      const tree = await api.files.tree(projectId);
+      setUploadedFiles(tree.map(convertTreeToProjectFile));
+
+      // Reset delete mode
+      setSelectedForDeletion(new Set());
+      setIsDeleteMode(false);
+      setShowDeleteModal(false);
+    } catch (err) {
+      console.error('Failed to delete files:', err);
+      alert('Failed to delete some files. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [selectedForDeletion, uploadedFiles, selectedFile, projectId]);
+
+  // Cancel delete mode
+  const cancelDeleteMode = useCallback(() => {
+    setIsDeleteMode(false);
+    setSelectedForDeletion(new Set());
+  }, []);
+
   const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -357,14 +472,43 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
               </div>
           </div>
 
-          <div className="p-3 flex gap-2 border-b border-white/5">
-               <button className="flex-1 btn-primary text-white text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium">
-                  <Plus size={14} /> New Folder
-               </button>
-               <button className="flex-1 bg-slate-700/50 hover:bg-slate-600/50 text-white text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium transition-all border border-slate-600/30">
-                  <Upload size={14} /> Add Files
-               </button>
-          </div>
+          {isDeleteMode ? (
+            <div className="p-3 flex gap-2 border-b border-white/5">
+              <button
+                onClick={cancelDeleteMode}
+                className="flex-1 bg-slate-700/50 hover:bg-slate-600/50 text-white text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium transition-all border border-slate-600/30"
+              >
+                <X size={14} /> Cancel
+              </button>
+              <button
+                onClick={() => selectedForDeletion.size > 0 && setShowDeleteModal(true)}
+                disabled={selectedForDeletion.size === 0}
+                className={`flex-1 text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium transition-all ${
+                  selectedForDeletion.size > 0
+                    ? 'bg-red-600 hover:bg-red-500 text-white border border-red-500'
+                    : 'bg-red-600/30 text-red-300/50 border border-red-500/30 cursor-not-allowed'
+                }`}
+              >
+                <Trash2 size={14} />
+                Delete{selectedForDeletion.size > 0 && ` (${selectedForDeletion.size})`}
+              </button>
+            </div>
+          ) : (
+            <div className="p-3 flex gap-2 border-b border-white/5">
+              <button className="flex-1 btn-primary text-white text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium">
+                <Plus size={14} /> New Folder
+              </button>
+              <button className="flex-1 bg-slate-700/50 hover:bg-slate-600/50 text-white text-xs py-2.5 rounded-lg flex justify-center items-center gap-1.5 font-medium transition-all border border-slate-600/30">
+                <Upload size={14} /> Add Files
+              </button>
+              <button
+                onClick={() => setIsDeleteMode(true)}
+                className="bg-slate-700/50 hover:bg-red-600/30 hover:border-red-500/50 text-slate-400 hover:text-red-400 text-xs py-2.5 px-3 rounded-lg flex justify-center items-center font-medium transition-all border border-slate-600/30"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
 
           {isLoadingFiles ? (
             <div className="flex-1 flex items-center justify-center">
@@ -375,6 +519,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
               files={uploadedFiles}
               onFileSelect={setSelectedFile}
               selectedFileId={selectedFile?.id || null}
+              isDeleteMode={isDeleteMode}
+              selectedForDeletion={selectedForDeletion}
+              onToggleSelection={toggleFileSelection}
             />
           )}
 
@@ -501,6 +648,50 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
            </div>
         </div>
       </CollapsiblePanel>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-full bg-red-500/20">
+                <Trash2 size={20} className="text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">Delete Files</h3>
+            </div>
+            <p className="text-slate-300 mb-6">
+              Are you sure you want to delete {selectedForDeletion.size} item{selectedForDeletion.size !== 1 && 's'}?
+              This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
