@@ -4,7 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import disciplines, health, pages, pointers, projects, queries
+from app.routers import (
+    disciplines,
+    health,
+    pages,
+    pointers,
+    processing,
+    projects,
+    queries,
+)
 
 settings = get_settings()
 
@@ -40,3 +48,4 @@ app.include_router(disciplines.router)
 app.include_router(pages.router)
 app.include_router(pointers.router)
 app.include_router(queries.router)
+app.include_router(processing.router)
