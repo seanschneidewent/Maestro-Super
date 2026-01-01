@@ -29,11 +29,24 @@ target_metadata = Base.metadata
 def get_url() -> str:
     """Get database URL from environment or config."""
     import os
+    from urllib.parse import quote_plus
 
-    # Try environment variable first
+    # Try DATABASE_URL environment variable first
     url = os.getenv("DATABASE_URL")
     if url:
         return url
+
+    # Try building from separate DB_* variables (Railway style)
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME", "postgres")
+    db_user = os.getenv("DB_USER", "postgres")
+    db_password = os.getenv("DB_PASSWORD")
+    db_port = os.getenv("DB_PORT", "5432")
+
+    if db_host and db_password:
+        # URL-encode the password to handle special characters
+        encoded_password = quote_plus(db_password)
+        return f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
 
     # Fall back to alembic.ini
     return config.get_main_option("sqlalchemy.url", "sqlite:///./local.db")
