@@ -5,8 +5,9 @@ import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, ProjectFileTree } from '../../lib/api';
+import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
+import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -60,15 +61,26 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
-  // Convert API file tree to local ProjectFile format
-  const convertTreeToProjectFile = (tree: ProjectFileTree): ProjectFile => ({
-    id: tree.id,
-    name: tree.name,
-    type: tree.type as FileType,
-    parentId: tree.parentId,
-    storagePath: undefined, // Will be loaded when file is selected
-    children: tree.children?.map(convertTreeToProjectFile),
-  });
+  // Convert discipline hierarchy to ProjectFile format for tree display
+  const convertDisciplinesToProjectFiles = (
+    disciplines: DisciplineWithPagesResponse[]
+  ): ProjectFile[] => {
+    return disciplines.map(disc => ({
+      id: disc.id,
+      name: disc.displayName,
+      type: FileType.FOLDER,
+      parentId: undefined,
+      storagePath: undefined,
+      children: disc.pages.map(page => ({
+        id: page.id,
+        name: page.pageName,
+        type: FileType.PDF,
+        parentId: disc.id,
+        storagePath: page.filePath,
+        children: undefined,
+      })),
+    }));
+  };
 
   // Helper to find a file by ID in the tree
   const findFileById = (files: ProjectFile[], id: string): ProjectFile | null => {
@@ -88,14 +100,14 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setSetupState(prev => ({ ...prev, selectedFileId: file.id }));
   };
 
-  // Load files from backend on mount, and restore selection if we have a saved selectedFileId
+  // Load disciplines and pages from backend on mount
   useEffect(() => {
     async function loadFiles() {
       try {
         setIsLoadingFiles(true);
-        const tree = await api.files.tree(projectId);
-        const convertedFiles = tree.map(convertTreeToProjectFile);
-        setUploadedFiles(convertedFiles);
+        const response = await api.projects.getFull(projectId);
+        const convertedFiles = convertDisciplinesToProjectFiles(response.disciplines);
+        setUploadedFiles(sortFiles(convertedFiles));
 
         // Restore file selection if we have a saved selectedFileId
         if (setupState.selectedFileId && !selectedFile) {
@@ -106,6 +118,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         }
       } catch (err) {
         console.error('Failed to load files:', err);
+        // Project might not have any disciplines yet - that's OK
+        setUploadedFiles([]);
       } finally {
         setIsLoadingFiles(false);
       }
@@ -113,7 +127,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     loadFiles();
   }, [projectId]);
 
-  // Load pointers when file is selected
+  // Load pointers when page is selected
   useEffect(() => {
     if (!selectedFile || selectedFile.type === FileType.FOLDER) {
       setPointers([]);
@@ -126,14 +140,16 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         const pointerList = await api.pointers.list(selectedFile.id);
         setPointers(pointerList.map(p => ({
           id: p.id,
-          fileId: p.fileId,
-          pageNumber: p.pageNumber,
-          bounds: p.bounds,
-          title: p.title || '',
-          description: p.description || '',
-          status: p.status,
-          snapshotUrl: p.snapshotUrl,
-          aiAnalysis: p.aiAnalysis,
+          pageId: p.pageId,
+          title: p.title,
+          description: p.description,
+          textSpans: p.textSpans,
+          bboxX: p.bboxX,
+          bboxY: p.bboxY,
+          bboxWidth: p.bboxWidth,
+          bboxHeight: p.bboxHeight,
+          pngPath: p.pngPath,
+          hasEmbedding: p.hasEmbedding,
         })));
       } catch (err) {
         console.error('Failed to load pointers:', err);
@@ -145,7 +161,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     loadPointers();
   }, [selectedFile?.id]);
 
-  // Fetch file from storage when selected (if not already loaded)
+  // Fetch file from storage when page is selected
   useEffect(() => {
     if (!selectedFile || selectedFile.file || selectedFile.type === FileType.FOLDER) {
       setFileLoadError(null);
@@ -171,18 +187,24 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         }
 
         // Otherwise, try to fetch from storage (for previously uploaded files)
-        const fileInfo = await api.files.get(selectedFile.id);
-        if (fileInfo.storagePath) {
-          const blob = await downloadFile(fileInfo.storagePath);
+        // Use the storagePath from the ProjectFile if available, or fetch page info
+        let storagePath = selectedFile.storagePath;
+        if (!storagePath) {
+          const pageInfo = await api.pages.get(selectedFile.id);
+          storagePath = pageInfo.filePath;
+        }
+
+        if (storagePath) {
+          const blob = await downloadFile(storagePath);
           const file = blobToFile(blob, selectedFile.name);
 
           // Update the selectedFile with the File object
-          setSelectedFile(prev => prev ? { ...prev, file, storagePath: fileInfo.storagePath } : null);
+          setSelectedFile(prev => prev ? { ...prev, file, storagePath } : null);
 
           // Also update in the tree
-          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file, storagePath: fileInfo.storagePath }));
+          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file, storagePath }));
         } else {
-          // File exists in DB but not uploaded to storage
+          // Page exists in DB but not uploaded to storage
           setFileLoadError('File not found in cloud storage. This may happen if the browser was refreshed during upload. Please re-upload the file.');
         }
       } catch (err) {
@@ -249,27 +271,37 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Create pointer via API
   const handlePointerCreate = useCallback(async (data: {
-    pageNumber: number;
-    bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
+    title: string;
+    description: string;
+    bboxX: number;
+    bboxY: number;
+    bboxWidth: number;
+    bboxHeight: number;
   }): Promise<ContextPointer | null> => {
     if (!selectedFile) return null;
 
     try {
       const created = await api.pointers.create(selectedFile.id, {
-        pageNumber: data.pageNumber,
-        bounds: data.bounds,
+        title: data.title,
+        description: data.description,
+        bboxX: data.bboxX,
+        bboxY: data.bboxY,
+        bboxWidth: data.bboxWidth,
+        bboxHeight: data.bboxHeight,
       });
 
       return {
         id: created.id,
-        fileId: created.fileId,
-        pageNumber: created.pageNumber,
-        bounds: created.bounds,
-        title: created.title || '',
-        description: created.description || '',
-        status: created.status,
-        snapshotUrl: created.snapshotUrl,
-        aiAnalysis: created.aiAnalysis,
+        pageId: created.pageId,
+        title: created.title,
+        description: created.description,
+        textSpans: created.textSpans,
+        bboxX: created.bboxX,
+        bboxY: created.bboxY,
+        bboxWidth: created.bboxWidth,
+        bboxHeight: created.bboxHeight,
+        pngPath: created.pngPath,
+        hasEmbedding: created.hasEmbedding,
       };
     } catch (err) {
       console.error('Failed to create pointer:', err);
@@ -416,11 +448,21 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         return !isDescendant(uploadedFiles, id, false);
       });
 
-      // Delete each root selection (backend handles cascading)
-      for (const fileId of rootSelections) {
-        await api.files.delete(fileId);
+      // Delete each root selection
+      // Disciplines are "folders", pages are "files"
+      for (const itemId of rootSelections) {
+        const item = findFileById(uploadedFiles, itemId);
+        if (!item) continue;
+
+        if (item.type === FileType.FOLDER) {
+          // This is a discipline - delete it (cascades to pages)
+          await api.disciplines.delete(itemId);
+        } else {
+          // This is a page
+          await api.pages.delete(itemId);
+        }
         // Clean up local file map
-        localFileMapRef.current.delete(fileId);
+        localFileMapRef.current.delete(itemId);
       }
 
       // Clear selected file if it was deleted
@@ -429,17 +471,17 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         setPointers([]);
       }
 
-      // Reload file tree
-      const tree = await api.files.tree(projectId);
-      setUploadedFiles(tree.map(convertTreeToProjectFile));
+      // Reload disciplines and pages
+      const response = await api.projects.getFull(projectId);
+      setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
 
       // Reset delete mode
       setSelectedForDeletion(new Set());
       setIsDeleteMode(false);
       setShowDeleteModal(false);
     } catch (err) {
-      console.error('Failed to delete files:', err);
-      alert('Failed to delete some files. Please try again.');
+      console.error('Failed to delete:', err);
+      alert('Failed to delete some items. Please try again.');
     } finally {
       setIsDeleting(false);
     }
@@ -458,100 +500,79 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setIsUploading(true);
 
     try {
-      // Filter out unsupported files first
-      const supportedFiles = Array.from(files).filter(file => {
-        const filename = file.name;
-        return !shouldSkipFile(filename);
-      });
+      // Build upload plan using discipline classifier
+      const plan = buildUploadPlan(files);
 
-      if (supportedFiles.length === 0) {
-        alert('No supported files found. Please upload PDF, CSV, or image files.');
+      if (plan.totalFileCount === 0) {
+        alert('No PDF files found in the selected folder.');
         return;
       }
 
-      // Sort files by path first to ensure consistent processing order
-      const sortedFiles = supportedFiles.sort((a, b) =>
-        a.webkitRelativePath.localeCompare(b.webkitRelativePath, undefined, { numeric: true, sensitivity: 'base' })
-      );
-
-      // Track path -> DB ID mapping for parent references
-      const pathToDbId = new Map<string, string>();
-      // Track which folders actually have supported files in them
-      const foldersWithFiles = new Set<string>();
-
-      // First pass: identify which folders contain supported files
-      for (const file of sortedFiles) {
-        const pathParts = file.webkitRelativePath.split('/');
-        // Mark all ancestor folders as having files
-        for (let i = 0; i < pathParts.length - 1; i++) {
-          const folderPath = pathParts.slice(0, i + 1).join('/');
-          foldersWithFiles.add(folderPath);
-        }
+      // Show warning if files need review (for now, just proceed with best guess)
+      if (plan.filesNeedingReview.length > 0) {
+        console.log(`${plan.filesNeedingReview.length} files need discipline review`);
       }
 
-      // Process files in order (folders first due to sorting by path)
-      for (const file of sortedFiles) {
-        const pathParts = file.webkitRelativePath.split('/');
+      // Track uploaded file paths
+      const uploadedPaths = new Map<string, string>(); // relativePath -> storagePath
 
-        // Create folders as needed
-        for (let i = 0; i < pathParts.length; i++) {
-          const isLast = i === pathParts.length - 1;
-          const currentPath = pathParts.slice(0, i + 1).join('/');
-          const parentPath = i > 0 ? pathParts.slice(0, i).join('/') : null;
-
-          // Skip if we've already created this path
-          if (pathToDbId.has(currentPath)) continue;
-
-          const name = pathParts[i];
-          const parentId = parentPath ? pathToDbId.get(parentPath) : undefined;
-
-          if (isLast) {
-            // This is the actual file - upload to storage and create DB record
-            const fileType = getFileType(name);
-            if (!fileType) continue; // Skip unsupported files (shouldn't happen due to filter)
-
-            // Upload file to Supabase Storage
-            let storagePath: string | undefined;
-            try {
-              const uploadResult = await uploadFile(projectId, file, currentPath);
-              storagePath = uploadResult.storagePath;
-            } catch (uploadErr) {
-              console.error(`Failed to upload ${name} to storage:`, uploadErr);
-              // Continue without storage path - file will be stored in memory only
-            }
-
-            // Create DB record with storage path
-            const dbFile = await api.files.create(projectId, {
-              name,
-              fileType,
-              isFolder: false,
-              parentId,
-              storagePath,
-            });
-
-            pathToDbId.set(currentPath, dbFile.id);
-
-            // Also store the File object in memory for immediate viewing
-            localFileMapRef.current.set(dbFile.id, file);
-          } else {
-            // This is a folder - only create if it contains supported files
-            if (!foldersWithFiles.has(currentPath)) continue;
-
-            const dbFolder = await api.files.create(projectId, {
-              name,
-              fileType: FileType.FOLDER,
-              isFolder: true,
-              parentId,
-            });
-
-            pathToDbId.set(currentPath, dbFolder.id);
+      // Upload all files to Supabase Storage
+      for (const [_disciplineCode, classifiedFiles] of plan.disciplines) {
+        for (const cf of classifiedFiles) {
+          try {
+            const uploadResult = await uploadFile(projectId, cf.file, cf.relativePath);
+            uploadedPaths.set(cf.relativePath, uploadResult.storagePath);
+            // Store file in memory for immediate viewing
+            localFileMapRef.current.set(cf.relativePath, cf.file);
+          } catch (uploadErr) {
+            console.error(`Failed to upload ${cf.fileName} to storage:`, uploadErr);
           }
         }
       }
 
-      // Reload file tree from backend
-      const tree = await api.files.tree(projectId);
-      setUploadedFiles(tree.map(convertTreeToProjectFile));
+      // Build API request from plan
+      const apiRequest = planToApiRequest(plan, uploadedPaths);
+
+      // Track relativePath -> pageId for file map updates
+      const relativePathToPageId = new Map<string, string>();
+
+      // Create disciplines and pages for each discipline
+      for (const discData of apiRequest.disciplines) {
+        // Create discipline
+        const discipline = await api.disciplines.create(projectId, {
+          name: discData.code,
+          displayName: discData.displayName,
+        });
+
+        // Create pages for this discipline
+        for (const pageData of discData.pages) {
+          const page = await api.pages.create(discipline.id, {
+            pageName: pageData.pageName,
+            filePath: pageData.storagePath,
+          });
+
+          // Find the relative path that corresponds to this storage path
+          for (const [relativePath, storagePath] of uploadedPaths.entries()) {
+            if (storagePath === pageData.storagePath) {
+              relativePathToPageId.set(relativePath, page.id);
+              break;
+            }
+          }
+        }
+      }
+
+      // Update local file map: move files from relativePath keys to pageId keys
+      for (const [relativePath, pageId] of relativePathToPageId.entries()) {
+        const file = localFileMapRef.current.get(relativePath);
+        if (file) {
+          localFileMapRef.current.delete(relativePath);
+          localFileMapRef.current.set(pageId, file);
+        }
+      }
+
+      // Reload disciplines and pages from backend
+      const response = await api.projects.getFull(projectId);
+      setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
 
     } catch (err) {
       console.error('Failed to upload files:', err);
@@ -722,7 +743,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 </div>
               ) : (
                   <div className="w-full text-left space-y-3 animate-slide-up">
-                    {pointers.filter(p => p.fileId === selectedFile?.id).map(pointer => (
+                    {pointers.filter(p => p.pageId === selectedFile?.id).map(pointer => (
                       <div
                         key={pointer.id}
                         data-pointer-id={pointer.id}

@@ -1,11 +1,19 @@
 """Project CRUD endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database.session import get_db
+from app.models.discipline import Discipline
+from app.models.page import Page
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.schemas.upload import (
+    BulkUploadRequest,
+    BulkUploadResponse,
+    DisciplineWithPagesResponse,
+    PageInDisciplineResponse,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -75,3 +83,118 @@ def delete_project(
 
     db.delete(project)
     db.commit()
+
+
+@router.post("/upload", response_model=BulkUploadResponse, status_code=status.HTTP_201_CREATED)
+def bulk_upload(
+    data: BulkUploadRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Create a project with disciplines and pages in a single transaction.
+    Files must already be uploaded to Supabase Storage.
+    """
+    # Create project
+    project = Project(name=data.project_name)
+    db.add(project)
+    db.flush()  # Get project ID without committing
+
+    discipline_responses = []
+
+    for disc_data in data.disciplines:
+        # Skip empty disciplines
+        if not disc_data.pages:
+            continue
+
+        # Create discipline
+        discipline = Discipline(
+            project_id=project.id,
+            name=disc_data.code,
+            display_name=disc_data.display_name,
+        )
+        db.add(discipline)
+        db.flush()  # Get discipline ID
+
+        page_responses = []
+        for page_data in disc_data.pages:
+            page = Page(
+                discipline_id=discipline.id,
+                page_name=page_data.page_name,
+                file_path=page_data.storage_path,
+            )
+            db.add(page)
+            db.flush()
+
+            page_responses.append(
+                PageInDisciplineResponse(
+                    id=page.id,
+                    page_name=page.page_name,
+                    file_path=page.file_path,
+                    processed_pass_1=page.processed_pass_1,
+                    processed_pass_2=page.processed_pass_2,
+                )
+            )
+
+        discipline_responses.append(
+            DisciplineWithPagesResponse(
+                id=discipline.id,
+                project_id=discipline.project_id,
+                name=discipline.name,
+                display_name=discipline.display_name,
+                processed=discipline.processed,
+                pages=page_responses,
+            )
+        )
+
+    db.commit()
+
+    return {
+        "project": project,
+        "disciplines": discipline_responses,
+    }
+
+
+@router.get("/{project_id}/full", response_model=BulkUploadResponse)
+def get_project_full(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get a project with full hierarchy (disciplines and pages)."""
+    project = (
+        db.query(Project)
+        .options(joinedload(Project.disciplines).joinedload(Discipline.pages))
+        .filter(Project.id == project_id)
+        .first()
+    )
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    discipline_responses = []
+    for discipline in project.disciplines:
+        page_responses = [
+            PageInDisciplineResponse(
+                id=page.id,
+                page_name=page.page_name,
+                file_path=page.file_path,
+                processed_pass_1=page.processed_pass_1,
+                processed_pass_2=page.processed_pass_2,
+            )
+            for page in sorted(discipline.pages, key=lambda p: p.page_name)
+        ]
+
+        discipline_responses.append(
+            DisciplineWithPagesResponse(
+                id=discipline.id,
+                project_id=discipline.project_id,
+                name=discipline.name,
+                display_name=discipline.display_name,
+                processed=discipline.processed,
+                pages=page_responses,
+            )
+        )
+
+    return {
+        "project": project,
+        "disciplines": discipline_responses,
+    }

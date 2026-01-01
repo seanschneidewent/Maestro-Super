@@ -113,6 +113,96 @@ export interface ContextPointerResponse {
   createdAt: string;
 }
 
+// Upload types
+export interface PageUploadData {
+  pageName: string;
+  fileName: string;
+  storagePath: string;
+}
+
+export interface DisciplineUploadData {
+  code: string;
+  displayName: string;
+  pages: PageUploadData[];
+}
+
+export interface BulkUploadRequest {
+  projectName: string;
+  disciplines: DisciplineUploadData[];
+}
+
+export interface PageInDisciplineResponse {
+  id: string;
+  pageName: string;
+  filePath: string;
+  processedPass1: boolean;
+  processedPass2: boolean;
+}
+
+export interface DisciplineWithPagesResponse {
+  id: string;
+  projectId: string;
+  name: string;
+  displayName: string;
+  processed: boolean;
+  pages: PageInDisciplineResponse[];
+}
+
+export interface ProjectInUploadResponse {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface BulkUploadResponse {
+  project: ProjectInUploadResponse;
+  disciplines: DisciplineWithPagesResponse[];
+}
+
+// Discipline types (matching backend schema)
+export interface DisciplineResponse {
+  id: string;
+  projectId: string;
+  name: string;
+  displayName: string;
+  summary?: string;
+  processed: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Page types (matching backend schema)
+export interface PageResponse {
+  id: string;
+  disciplineId: string;
+  pageName: string;
+  filePath: string;
+  initialContext?: string;
+  fullContext?: string;
+  processedPass1: boolean;
+  processedPass2: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Pointer types (matching backend schema)
+export interface PointerResponse {
+  id: string;
+  pageId: string;
+  title: string;
+  description: string;
+  textSpans?: string[];
+  bboxX: number;
+  bboxY: number;
+  bboxWidth: number;
+  bboxHeight: number;
+  pngPath?: string;
+  hasEmbedding: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 // API functions
 
 // Projects
@@ -124,9 +214,46 @@ export const api = {
       body: { name },
     }),
     get: (id: string) => request<Project>(`/projects/${id}`),
+    getFull: (id: string) => request<BulkUploadResponse>(`/projects/${id}/full`),
     update: (id: string, data: { name?: string; status?: string }) =>
       request<Project>(`/projects/${id}`, { method: 'PATCH', body: data }),
     delete: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  },
+
+  upload: {
+    bulkCreate: (data: BulkUploadRequest) =>
+      request<BulkUploadResponse>('/projects/upload', {
+        method: 'POST',
+        body: data,
+      }),
+  },
+
+  disciplines: {
+    list: (projectId: string) =>
+      request<DisciplineResponse[]>(`/projects/${projectId}/disciplines`),
+    create: (projectId: string, data: { name: string; displayName: string }) =>
+      request<DisciplineResponse>(`/projects/${projectId}/disciplines`, {
+        method: 'POST',
+        body: data,
+      }),
+    get: (id: string) => request<DisciplineResponse>(`/disciplines/${id}`),
+    update: (id: string, data: { name?: string; displayName?: string; summary?: string; processed?: boolean }) =>
+      request<DisciplineResponse>(`/disciplines/${id}`, { method: 'PATCH', body: data }),
+    delete: (id: string) => request<void>(`/disciplines/${id}`, { method: 'DELETE' }),
+  },
+
+  pages: {
+    list: (disciplineId: string) =>
+      request<PageResponse[]>(`/disciplines/${disciplineId}/pages`),
+    create: (disciplineId: string, data: { pageName: string; filePath: string }) =>
+      request<PageResponse>(`/disciplines/${disciplineId}/pages`, {
+        method: 'POST',
+        body: data,
+      }),
+    get: (id: string) => request<PageResponse>(`/pages/${id}`),
+    update: (id: string, data: { pageName?: string; filePath?: string; initialContext?: string; fullContext?: string }) =>
+      request<PageResponse>(`/pages/${id}`, { method: 'PATCH', body: data }),
+    delete: (id: string) => request<void>(`/pages/${id}`, { method: 'DELETE' }),
   },
 
   files: {
@@ -152,25 +279,26 @@ export const api = {
   },
 
   pointers: {
-    list: (fileId: string, page?: number) => {
-      const params = page !== undefined ? `?page=${page}` : '';
-      return request<ContextPointerResponse[]>(`/files/${fileId}/pointers${params}`);
+    list: (pageId: string) => {
+      return request<PointerResponse[]>(`/pages/${pageId}/pointers`);
     },
-    create: (fileId: string, data: {
-      pageNumber: number;
-      bounds: Bounds;
-      title?: string;
-      description?: string;
-    }) => request<ContextPointerResponse>(`/files/${fileId}/pointers`, {
+    create: (pageId: string, data: {
+      title: string;
+      description: string;
+      bboxX: number;
+      bboxY: number;
+      bboxWidth: number;
+      bboxHeight: number;
+      textSpans?: string[];
+      pngPath?: string;
+    }) => request<PointerResponse>(`/pages/${pageId}/pointers`, {
       method: 'POST',
       body: data,
     }),
-    get: (pointerId: string) => request<ContextPointerResponse>(`/pointers/${pointerId}`),
+    get: (pointerId: string) => request<PointerResponse>(`/pointers/${pointerId}`),
     update: (pointerId: string, data: { title?: string; description?: string }) =>
-      request<ContextPointerResponse>(`/pointers/${pointerId}`, { method: 'PATCH', body: data }),
+      request<PointerResponse>(`/pointers/${pointerId}`, { method: 'PATCH', body: data }),
     delete: (pointerId: string) => request<void>(`/pointers/${pointerId}`, { method: 'DELETE' }),
-    commit: (pointerId: string) =>
-      request<ContextPointerResponse>(`/pointers/${pointerId}/commit`, { method: 'POST' }),
   },
 };
 

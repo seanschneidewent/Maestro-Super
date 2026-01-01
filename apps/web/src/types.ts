@@ -36,22 +36,16 @@ export interface ProjectFile {
 
 export interface ContextPointer {
   id: string;
-  fileId: string;
-  pageNumber: number;
-  bounds: {
-    xNorm: number;
-    yNorm: number;
-    wNorm: number;
-    hNorm: number;
-  };
+  pageId: string;
   title: string;
   description: string;
-  status: 'generating' | 'complete' | 'error';
-  snapshotUrl?: string; // Data URL
-  aiAnalysis?: {
-    technicalDescription?: string;
-    tradeCategory?: string;
-  };
+  textSpans?: string[];
+  bboxX: number;
+  bboxY: number;
+  bboxWidth: number;
+  bboxHeight: number;
+  pngPath?: string;
+  hasEmbedding?: boolean;
 }
 
 export interface ChatMessage {

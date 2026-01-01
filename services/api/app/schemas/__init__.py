@@ -23,6 +23,14 @@ from app.schemas.pointer_reference import (
 )
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.schemas.query import QueryCreate, QueryResponse, QueryUpdate
+from app.schemas.upload import (
+    BulkUploadRequest,
+    BulkUploadResponse,
+    DisciplineUploadData,
+    DisciplineWithPagesResponse,
+    PageInDisciplineResponse,
+    PageUploadData,
+)
 from app.schemas.usage_event import UsageEventCreate, UsageEventResponse
 
 __all__ = [
@@ -55,4 +63,11 @@ __all__ = [
     # UsageEvent
     "UsageEventCreate",
     "UsageEventResponse",
+    # Upload
+    "BulkUploadRequest",
+    "BulkUploadResponse",
+    "DisciplineUploadData",
+    "DisciplineWithPagesResponse",
+    "PageInDisciplineResponse",
+    "PageUploadData",
 ]
