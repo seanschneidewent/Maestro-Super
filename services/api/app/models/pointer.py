@@ -54,10 +54,14 @@ class Pointer(Base):
 
     # Vector embedding for semantic search (Voyage 1024 dimensions)
     # Note: This column type only works with PostgreSQL + pgvector extension
-    embedding: Mapped[Optional[list[float]]] = mapped_column(
-        Vector(1024) if HAS_PGVECTOR else None,
-        nullable=True,
-    )
+    if HAS_PGVECTOR:
+        embedding: Mapped[Optional[list[float]]] = mapped_column(
+            Vector(1024),
+            nullable=True,
+        )
+    else:
+        # Fallback when pgvector not available - column won't be created
+        embedding = None
 
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()
