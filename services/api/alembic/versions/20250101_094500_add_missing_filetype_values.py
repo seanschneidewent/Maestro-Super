@@ -25,10 +25,13 @@ def upgrade() -> None:
     We need to add CSV, MODEL, and FOLDER.
 
     With native_enum=False, SQLAlchemy stores enums as VARCHAR with a CHECK constraint.
-    We need to drop the old constraint and add a new one with all values.
+    We need to:
+    1. Drop the old constraint
+    2. Alter column length to fit 'FOLDER' (6 chars) - increase to 10 for safety
+    3. Add new constraint with all values
     """
     # For PostgreSQL with non-native enum (VARCHAR + CHECK constraint)
-    # Drop the old constraint and add new one with all values
+    # Drop the old constraint first
     op.execute("""
         ALTER TABLE project_files
         DROP CONSTRAINT IF EXISTS "ck_project_files_file_type_filetype";
@@ -38,6 +41,12 @@ def upgrade() -> None:
     op.execute("""
         ALTER TABLE project_files
         DROP CONSTRAINT IF EXISTS "project_files_file_type_check";
+    """)
+
+    # Increase column length from VARCHAR(5) to VARCHAR(10) to fit 'FOLDER' (6 chars)
+    op.execute("""
+        ALTER TABLE project_files
+        ALTER COLUMN file_type TYPE VARCHAR(10);
     """)
 
     # Add new constraint with all FileType values
