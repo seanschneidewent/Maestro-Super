@@ -44,7 +44,7 @@ async def analyze_page_pass_1(image_bytes: bytes) -> str:
         )
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3-flash-preview",
             contents=[
                 types.Content(
                     parts=[
