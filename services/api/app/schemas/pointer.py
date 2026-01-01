@@ -1,8 +1,9 @@
 """Pointer schemas."""
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BoundingBox(BaseModel):
@@ -65,6 +66,12 @@ class PointerResponse(BaseModel):
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_validator("id", "page_id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v: Any) -> str:
+        """Convert UUID to string if needed."""
+        return str(v) if v is not None else v
 
     @classmethod
     def from_orm_with_embedding_check(cls, obj) -> "PointerResponse":

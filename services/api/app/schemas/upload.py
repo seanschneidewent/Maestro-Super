@@ -1,9 +1,9 @@
 """Upload schemas for bulk project creation."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DisciplineCode = Literal[
     "architectural",
@@ -57,6 +57,12 @@ class PageInDisciplineResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v: Any) -> str:
+        """Convert UUID to string if needed."""
+        return str(v) if v is not None else v
+
 
 class DisciplineWithPagesResponse(BaseModel):
     """Discipline with nested pages."""
@@ -70,6 +76,12 @@ class DisciplineWithPagesResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
+    @field_validator("id", "project_id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v: Any) -> str:
+        """Convert UUID to string if needed."""
+        return str(v) if v is not None else v
+
 
 class ProjectInUploadResponse(BaseModel):
     """Project response for upload endpoint."""
@@ -80,6 +92,12 @@ class ProjectInUploadResponse(BaseModel):
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v: Any) -> str:
+        """Convert UUID to string if needed."""
+        return str(v) if v is not None else v
 
 
 class BulkUploadResponse(BaseModel):
