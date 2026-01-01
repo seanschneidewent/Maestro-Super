@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { ContextPointer } from '../../types';
-import { GeminiService } from '../../services/geminiService';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -248,35 +247,25 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       return;
     }
 
-    // Fallback to local-only pointer creation
+    // Fallback to local-only pointer creation (should not normally reach here)
     const newPointer: ContextPointer = {
       id: crypto.randomUUID(),
-      fileId: fileId || '',
-      pageNumber: pageNumber,
-      bounds,
-      title: '',
-      description: '',
-      status: 'generating'
+      pageId: fileId || '',
+      title: 'New Context',
+      description: 'Add description...',
+      bboxX: bounds.xNorm,
+      bboxY: bounds.yNorm,
+      bboxWidth: bounds.wNorm,
+      bboxHeight: bounds.hNorm,
     };
 
     setPointers(prev => [...prev, newPointer]);
     setSelectedPointerId(newPointer.id);
-
-    try {
-      const analysis = await GeminiService.analyzePointer("dummy_base64", "Construction plan detail");
-      setPointers(prev => prev.map(p =>
-        p.id === newPointer.id
-          ? { ...p, status: 'complete', description: analysis, title: "Detail Analysis" }
-          : p
-      ));
-    } catch (e) {
-      setPointers(prev => prev.map(p => p.id === newPointer.id ? { ...p, status: 'error' } : p));
-    }
   };
 
   // Current page data
   const currentImage = pageImages[pageNumber - 1];
-  const currentPagePointers = pointers.filter(p => p.fileId === fileId && p.pageNumber === pageNumber);
+  const currentPagePointers = pointers.filter(p => p.pageId === fileId);
 
   // Center scroll position when page changes or images load
   useEffect(() => {
@@ -489,19 +478,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 <div
                   key={p.id}
                   onClick={() => setSelectedPointerId(p.id)}
-                  className={`absolute pointer-box cursor-pointer group animate-scale-in ${p.status === 'generating' ? 'generating' : ''} ${selectedPointerId === p.id ? 'selected' : ''}`}
+                  className={`absolute pointer-box cursor-pointer group animate-scale-in ${selectedPointerId === p.id ? 'selected' : ''}`}
                   style={{
-                    left: `${p.bounds.xNorm * 100}%`,
-                    top: `${p.bounds.yNorm * 100}%`,
-                    width: `${p.bounds.wNorm * 100}%`,
-                    height: `${p.bounds.hNorm * 100}%`,
+                    left: `${p.bboxX * 100}%`,
+                    top: `${p.bboxY * 100}%`,
+                    width: `${p.bboxWidth * 100}%`,
+                    height: `${p.bboxHeight * 100}%`,
                   }}
                 >
                   <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 glass px-3 py-1.5 rounded-lg whitespace-nowrap z-10 pointer-events-none transition-opacity duration-200">
                     <span className="text-xs text-white font-medium">{p.title}</span>
-                    {p.status === 'generating' && (
-                      <span className="ml-2 inline-block w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></span>
-                    )}
                   </div>
                 </div>
               ))}

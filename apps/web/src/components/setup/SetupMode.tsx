@@ -271,23 +271,19 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Create pointer via API
   const handlePointerCreate = useCallback(async (data: {
-    title: string;
-    description: string;
-    bboxX: number;
-    bboxY: number;
-    bboxWidth: number;
-    bboxHeight: number;
+    pageNumber: number;
+    bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
   }): Promise<ContextPointer | null> => {
     if (!selectedFile) return null;
 
     try {
       const created = await api.pointers.create(selectedFile.id, {
-        title: data.title,
-        description: data.description,
-        bboxX: data.bboxX,
-        bboxY: data.bboxY,
-        bboxWidth: data.bboxWidth,
-        bboxHeight: data.bboxHeight,
+        title: 'New Context',
+        description: 'Add description...',
+        bboxX: data.bounds.xNorm,
+        bboxY: data.bounds.yNorm,
+        bboxWidth: data.bounds.wNorm,
+        bboxHeight: data.bounds.hNorm,
       });
 
       return {
