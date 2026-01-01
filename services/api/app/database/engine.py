@@ -41,3 +41,8 @@ def get_engine() -> Engine:
 
 # Default engine instance
 engine = get_engine()
+
+
+def is_postgres() -> bool:
+    """Check if the database is PostgreSQL (always True now)."""
+    return True
