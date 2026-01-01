@@ -235,7 +235,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
     }
   }, [selectedPointerId]);
 
-  const getFileType = (filename: string): FileType => {
+  const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();
     switch (ext) {
       case 'pdf': return FileType.PDF;
@@ -245,8 +245,20 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
       case 'jpeg':
       case 'gif':
       case 'webp': return FileType.IMAGE;
-      default: return FileType.PDF;
+      default: return null; // Unknown/unsupported file type
     }
+  };
+
+  // Check if a file should be skipped (system files, hidden files, etc.)
+  const shouldSkipFile = (filename: string): boolean => {
+    const name = filename.toLowerCase();
+    // Skip hidden files (starting with .)
+    if (name.startsWith('.')) return true;
+    // Skip common system files
+    const skipFiles = ['thumbs.db', 'desktop.ini', '.ds_store'];
+    if (skipFiles.includes(name)) return true;
+    // Skip files without supported extensions
+    return getFileType(filename) === null;
   };
 
   const sortFiles = (files: ProjectFile[]): ProjectFile[] => {
@@ -382,13 +394,36 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
     setIsUploading(true);
 
     try {
+      // Filter out unsupported files first
+      const supportedFiles = Array.from(files).filter(file => {
+        const filename = file.name;
+        return !shouldSkipFile(filename);
+      });
+
+      if (supportedFiles.length === 0) {
+        alert('No supported files found. Please upload PDF, CSV, or image files.');
+        return;
+      }
+
       // Sort files by path first to ensure consistent processing order
-      const sortedFiles = Array.from(files).sort((a, b) =>
+      const sortedFiles = supportedFiles.sort((a, b) =>
         a.webkitRelativePath.localeCompare(b.webkitRelativePath, undefined, { numeric: true, sensitivity: 'base' })
       );
 
       // Track path -> DB ID mapping for parent references
       const pathToDbId = new Map<string, string>();
+      // Track which folders actually have supported files in them
+      const foldersWithFiles = new Set<string>();
+
+      // First pass: identify which folders contain supported files
+      for (const file of sortedFiles) {
+        const pathParts = file.webkitRelativePath.split('/');
+        // Mark all ancestor folders as having files
+        for (let i = 0; i < pathParts.length - 1; i++) {
+          const folderPath = pathParts.slice(0, i + 1).join('/');
+          foldersWithFiles.add(folderPath);
+        }
+      }
 
       // Process files in order (folders first due to sorting by path)
       for (const file of sortedFiles) {
@@ -408,8 +443,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
 
           if (isLast) {
             // This is the actual file - create DB record
-            // Note: Storage upload skipped for now (bucket not created)
             const fileType = getFileType(name);
+            if (!fileType) continue; // Skip unsupported files (shouldn't happen due to filter)
 
             // Create DB record (without storage path for now)
             const dbFile = await api.files.create(projectId, {
@@ -424,7 +459,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
             // Store the File object in memory for viewing
             localFileMapRef.current.set(dbFile.id, file);
           } else {
-            // This is a folder - create DB record
+            // This is a folder - only create if it contains supported files
+            if (!foldersWithFiles.has(currentPath)) continue;
+
             const dbFolder = await api.files.create(projectId, {
               name,
               fileType: FileType.FOLDER,
