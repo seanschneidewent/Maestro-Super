@@ -118,8 +118,8 @@ export interface ContextPointerResponse {
 // Projects
 export const api = {
   projects: {
-    list: () => request<Project[]>('/projects/'),
-    create: (name: string) => request<Project>('/projects/', {
+    list: () => request<Project[]>('/projects'),
+    create: (name: string) => request<Project>('/projects', {
       method: 'POST',
       body: { name },
     }),
@@ -131,9 +131,9 @@ export const api = {
 
   files: {
     list: (projectId: string) =>
-      request<ProjectFileFlat[]>(`/projects/${projectId}/files/`),
+      request<ProjectFileFlat[]>(`/projects/${projectId}/files`),
     tree: (projectId: string) =>
-      request<ProjectFileTree[]>(`/projects/${projectId}/files/tree/`),
+      request<ProjectFileTree[]>(`/projects/${projectId}/files/tree`),
     create: (projectId: string, data: {
       name: string;
       fileType: string;
@@ -141,7 +141,7 @@ export const api = {
       pageCount?: number;
       isFolder?: boolean;
       parentId?: string;
-    }) => request<ProjectFileFlat>(`/projects/${projectId}/files/`, {
+    }) => request<ProjectFileFlat>(`/projects/${projectId}/files`, {
       method: 'POST',
       body: data,
     }),
@@ -154,14 +154,14 @@ export const api = {
   pointers: {
     list: (fileId: string, page?: number) => {
       const params = page !== undefined ? `?page=${page}` : '';
-      return request<ContextPointerResponse[]>(`/files/${fileId}/pointers/${params}`);
+      return request<ContextPointerResponse[]>(`/files/${fileId}/pointers${params}`);
     },
     create: (fileId: string, data: {
       pageNumber: number;
       bounds: Bounds;
       title?: string;
       description?: string;
-    }) => request<ContextPointerResponse>(`/files/${fileId}/pointers/`, {
+    }) => request<ContextPointerResponse>(`/files/${fileId}/pointers`, {
       method: 'POST',
       body: data,
     }),
