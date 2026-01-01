@@ -1,8 +1,67 @@
 """
 Gemini AI service for context extraction.
-
-TODO: Implement in AI integration phase.
 """
+
+import logging
+
+from google import genai
+from google.genai import types
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+def _get_gemini_client() -> genai.Client:
+    """Get Gemini client."""
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise ValueError("Gemini API key must be configured")
+    return genai.Client(api_key=settings.gemini_api_key)
+
+
+async def analyze_page_pass_1(image_bytes: bytes) -> str:
+    """
+    Pass 1: Analyze a construction drawing page and return initial context summary.
+
+    Uses Gemini 2.0 Flash for fast, cost-effective image analysis.
+
+    Args:
+        image_bytes: PNG image bytes of the page
+
+    Returns:
+        Initial context summary (2-3 sentences)
+    """
+    try:
+        client = _get_gemini_client()
+
+        prompt = (
+            "Describe this construction drawing page briefly. "
+            "Include: what type of page it is (floor plan, detail sheet, "
+            "elevation, section, schedule, notes, etc.), key elements visible "
+            "(keynotes, legends, details, general notes, dimensions, etc.), "
+            "and any notable features. Keep it to 2-3 sentences."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Content(
+                    parts=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                        types.Part.from_text(text=prompt),
+                    ]
+                )
+            ],
+        )
+
+        result = response.text
+        logger.info("Pass 1 analysis complete with Gemini Flash")
+        return result
+
+    except Exception as e:
+        logger.error(f"Gemini Pass 1 analysis failed: {e}")
+        raise
 
 
 async def analyze_pointer(image_base64: str, context: str) -> dict:
@@ -22,21 +81,7 @@ async def analyze_pointer(image_base64: str, context: str) -> dict:
         - recommendations: str
         - issues: list[dict]
     """
-    raise NotImplementedError("Gemini integration not yet implemented")
-
-
-async def analyze_page_pass1(image_base64: str, page_number: int) -> dict:
-    """
-    Pass 1: Analyze a page for sheet metadata and context.
-
-    Args:
-        image_base64: Base64 encoded page image
-        page_number: Page number in document
-
-    Returns:
-        Dictionary with pass 1 analysis results
-    """
-    raise NotImplementedError("Gemini integration not yet implemented")
+    raise NotImplementedError("Gemini pointer analysis not yet implemented")
 
 
 async def analyze_page_pass2(
@@ -55,7 +100,7 @@ async def analyze_page_pass2(
     Returns:
         Dictionary with pass 2 analysis results
     """
-    raise NotImplementedError("Gemini integration not yet implemented")
+    raise NotImplementedError("Gemini Pass 2 not yet implemented")
 
 
 async def analyze_discipline_pass3(
@@ -72,4 +117,4 @@ async def analyze_discipline_pass3(
     Returns:
         Dictionary with discipline-level analysis
     """
-    raise NotImplementedError("Gemini integration not yet implemented")
+    raise NotImplementedError("Gemini Pass 3 not yet implemented")

@@ -21,6 +21,7 @@ httpx>=0.26.0
 
 # AI Services
 anthropic>=0.40.0
+google-genai>=1.0.0
 
 # PDF Processing
 PyMuPDF>=1.24.0

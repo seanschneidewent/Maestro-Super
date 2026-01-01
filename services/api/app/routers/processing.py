@@ -1,7 +1,6 @@
 """Processing endpoints for page and discipline analysis."""
 
 import asyncio
-import base64
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database.session import SessionLocal, get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
-from app.services.claude import analyze_page_pass_1
+from app.services.gemini import analyze_page_pass_1
 from app.services.pdf_processor import pdf_page_to_image
 from app.services.storage import download_file
 
@@ -67,11 +66,10 @@ async def _process_page_pass_1(page_id: str, db: Session) -> Pass1Result:
         # 3. Convert PDF page to PNG image
         logger.info(f"Converting PDF to image for page {page_id}")
         image_bytes = pdf_page_to_image(pdf_bytes, page_index=0, dpi=150)
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # 4. Send to Claude for analysis
-        logger.info(f"Sending page {page_id} to Claude for Pass 1 analysis")
-        initial_context = await analyze_page_pass_1(image_base64)
+        # 4. Send to Gemini for analysis
+        logger.info(f"Sending page {page_id} to Gemini for Pass 1 analysis")
+        initial_context = await analyze_page_pass_1(image_bytes)
 
         # 5. Update database
         page.initial_context = initial_context
@@ -103,7 +101,7 @@ async def process_page_pass_1(
     """
     Process a single page through Pass 1.
 
-    Downloads the PDF, converts to image, sends to Claude for analysis,
+    Downloads the PDF, converts to image, sends to Gemini for analysis,
     and stores the initial context summary.
     """
     return await _process_page_pass_1(page_id, db)
