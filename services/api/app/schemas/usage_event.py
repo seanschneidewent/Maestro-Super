@@ -13,7 +13,7 @@ class UsageEventCreate(BaseModel):
     tokens_input: int | None = Field(default=None, alias="tokensInput")
     tokens_output: int | None = Field(default=None, alias="tokensOutput")
     cost_cents: int | None = Field(default=None, alias="costCents")
-    metadata: dict[str, Any] | None = None
+    event_metadata: dict[str, Any] | None = Field(default=None, alias="metadata")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -27,7 +27,7 @@ class UsageEventResponse(BaseModel):
     tokens_input: int | None = Field(default=None, alias="tokensInput")
     tokens_output: int | None = Field(default=None, alias="tokensOutput")
     cost_cents: int | None = Field(default=None, alias="costCents")
-    metadata: dict[str, Any] | None = None
+    event_metadata: dict[str, Any] | None = Field(default=None, alias="metadata")
     created_at: datetime = Field(alias="createdAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

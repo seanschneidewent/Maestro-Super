@@ -41,8 +41,9 @@ class UsageEvent(Base):
     # Cost tracking (in cents)
     cost_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Additional context
-    metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
+    # Additional context (named event_metadata to avoid SQLAlchemy reserved name)
+    event_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        "metadata",  # Column name in DB stays as 'metadata'
         JSONVariant,
         nullable=True,
     )

@@ -12,7 +12,8 @@
       "Bash(git push)",
       "Bash(curl:*)",
       "Bash(git add:*)",
-      "WebFetch(domain:courteous-victory-production.up.railway.app)"
+      "WebFetch(domain:courteous-victory-production.up.railway.app)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []
