@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { ContextPointer } from '../../types';
 import { GeminiService } from '../../services/geminiService';
 
@@ -33,7 +33,19 @@ interface PdfViewerProps {
   fileLoadError?: string | null;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, setPointers, selectedPointerId, setSelectedPointerId, activeTool, setActiveTool, onPointerCreate }) => {
+export const PdfViewer: React.FC<PdfViewerProps> = ({
+  file,
+  fileId,
+  pointers,
+  setPointers,
+  selectedPointerId,
+  setSelectedPointerId,
+  activeTool,
+  setActiveTool,
+  onPointerCreate,
+  isLoadingFile,
+  fileLoadError,
+}) => {
   // Page images (PNG data URLs)
   const [pageImages, setPageImages] = useState<PageImage[]>([]);
   const [isConverting, setIsConverting] = useState(false);
@@ -301,7 +313,32 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, fileId, pointers, se
     };
   })() : { width: 800, height: 600 };
 
-  // Empty state
+  // Loading state - file is being fetched from storage
+  if (isLoadingFile) {
+    return (
+      <div className="flex-1 flex items-center justify-center h-full">
+        <div className="text-center text-slate-400">
+          <Loader2 size={48} className="mx-auto mb-4 text-cyan-400 animate-spin" />
+          <p className="text-sm font-medium">Loading file from storage...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state - file failed to load
+  if (fileLoadError) {
+    return (
+      <div className="flex-1 flex items-center justify-center h-full">
+        <div className="text-center text-slate-400 max-w-md px-4">
+          <AlertCircle size={48} className="mx-auto mb-4 text-amber-400" />
+          <p className="text-sm font-medium text-amber-300 mb-2">Unable to load file</p>
+          <p className="text-xs text-slate-500">{fileLoadError}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state - no file selected or file not yet loaded
   if (!file) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">

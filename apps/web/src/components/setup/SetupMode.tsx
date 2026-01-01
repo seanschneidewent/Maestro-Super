@@ -8,17 +8,43 @@ import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } fr
 import { api, ProjectFileTree } from '../../lib/api';
 import { downloadFile, blobToFile } from '../../lib/storage';
 
+// Types for setup mode state persistence
+interface SetupState {
+  selectedFileId: string | null;
+  selectedPointerId: string | null;
+  activeTool: 'select' | 'rect' | 'text';
+}
+
 interface SetupModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
   projectId: string;
+  localFileMapRef: React.MutableRefObject<Map<string, File>>;
+  setupState: SetupState;
+  setSetupState: React.Dispatch<React.SetStateAction<SetupState>>;
 }
 
-export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }) => {
+export const SetupMode: React.FC<SetupModeProps> = ({
+  mode,
+  setMode,
+  projectId,
+  localFileMapRef,
+  setupState,
+  setSetupState,
+}) => {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [pointers, setPointers] = useState<ContextPointer[]>([]);
-  const [selectedPointerId, setSelectedPointerId] = useState<string | null>(null);
-  const [activeTool, setActiveTool] = useState<'select' | 'rect' | 'text'>('select');
+
+  // Use lifted state from props (but keep local versions for smooth updates)
+  const selectedPointerId = setupState.selectedPointerId;
+  const activeTool = setupState.activeTool;
+
+  const setSelectedPointerId = (id: string | null) => {
+    setSetupState(prev => ({ ...prev, selectedPointerId: id }));
+  };
+  const setActiveTool = (tool: 'select' | 'rect' | 'text') => {
+    setSetupState(prev => ({ ...prev, activeTool: tool }));
+  };
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
@@ -32,8 +58,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
   const folderInputRef = useRef<HTMLInputElement>(null);
   const contextPanelRef = useRef<HTMLDivElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
-  // In-memory storage for uploaded files (until Supabase Storage bucket is created)
-  const localFileMapRef = useRef<Map<string, File>>(new Map());
+  // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
   // Convert API file tree to local ProjectFile format
   const convertTreeToProjectFile = (tree: ProjectFileTree): ProjectFile => ({
@@ -45,13 +70,40 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
     children: tree.children?.map(convertTreeToProjectFile),
   });
 
-  // Load files from backend on mount
+  // Helper to find a file by ID in the tree
+  const findFileById = (files: ProjectFile[], id: string): ProjectFile | null => {
+    for (const file of files) {
+      if (file.id === id) return file;
+      if (file.children) {
+        const found = findFileById(file.children, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Sync selectedFileId to parent when selection changes
+  const handleFileSelect = (file: ProjectFile) => {
+    setSelectedFile(file);
+    setSetupState(prev => ({ ...prev, selectedFileId: file.id }));
+  };
+
+  // Load files from backend on mount, and restore selection if we have a saved selectedFileId
   useEffect(() => {
     async function loadFiles() {
       try {
         setIsLoadingFiles(true);
         const tree = await api.files.tree(projectId);
-        setUploadedFiles(tree.map(convertTreeToProjectFile));
+        const convertedFiles = tree.map(convertTreeToProjectFile);
+        setUploadedFiles(convertedFiles);
+
+        // Restore file selection if we have a saved selectedFileId
+        if (setupState.selectedFileId && !selectedFile) {
+          const foundFile = findFileById(convertedFiles, setupState.selectedFileId);
+          if (foundFile) {
+            setSelectedFile(foundFile);
+          }
+        }
       } catch (err) {
         console.error('Failed to load files:', err);
       } finally {
@@ -96,11 +148,16 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
   // Fetch file from storage when selected (if not already loaded)
   useEffect(() => {
     if (!selectedFile || selectedFile.file || selectedFile.type === FileType.FOLDER) {
+      setFileLoadError(null);
+      setIsLoadingFile(false);
       return;
     }
 
     async function fetchFile() {
       try {
+        setIsLoadingFile(true);
+        setFileLoadError(null);
+
         // First check if we have it in local memory (from current session upload)
         const localFile = localFileMapRef.current.get(selectedFile.id);
         if (localFile) {
@@ -109,6 +166,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
 
           // Also update in the tree
           setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file: localFile }));
+          setIsLoadingFile(false);
           return;
         }
 
@@ -123,9 +181,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
 
           // Also update in the tree
           setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file, storagePath: fileInfo.storagePath }));
+        } else {
+          // File exists in DB but not uploaded to storage
+          setFileLoadError('File not found in cloud storage. This may happen if the browser was refreshed during upload. Please re-upload the file.');
         }
       } catch (err) {
         console.error('Failed to fetch file:', err);
+        setFileLoadError('Failed to load file. Please try again.');
+      } finally {
+        setIsLoadingFile(false);
       }
     }
     fetchFile();
@@ -556,8 +620,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
           ) : (
             <FolderTree
               files={uploadedFiles}
-              onFileSelect={setSelectedFile}
+              onFileSelect={handleFileSelect}
               selectedFileId={selectedFile?.id || null}
+              expandToFileId={setupState.selectedFileId}
               isDeleteMode={isDeleteMode}
               selectedForDeletion={selectedForDeletion}
               onToggleSelection={toggleFileSelection}
@@ -607,6 +672,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({ mode, setMode, projectId }
                     activeTool={activeTool}
                     setActiveTool={setActiveTool}
                     onPointerCreate={handlePointerCreate}
+                    isLoadingFile={isLoadingFile}
+                    fileLoadError={fileLoadError}
                 />
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-fade-in">

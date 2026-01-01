@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SetupMode } from './components/setup/SetupMode';
 import { UseMode } from './components/use/UseMode';
 import { AppMode, Project } from './types';
 import { Settings, Loader2 } from 'lucide-react';
 import { api } from './lib/api';
 import { supabase } from './lib/supabase';
+
+// Types for setup mode state persistence
+interface SetupState {
+  selectedFileId: string | null;
+  selectedPointerId: string | null;
+  activeTool: 'select' | 'rect' | 'text';
+}
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.LOGIN);
@@ -16,6 +23,14 @@ const App: React.FC = () => {
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Persistent state for Setup mode (survives mode switches)
+  const localFileMapRef = useRef<Map<string, File>>(new Map());
+  const [setupState, setSetupState] = useState<SetupState>({
+    selectedFileId: null,
+    selectedPointerId: null,
+    activeTool: 'select',
+  });
 
   // Check for existing session on mount
   useEffect(() => {
@@ -216,7 +231,14 @@ const App: React.FC = () => {
   }
 
   return mode === AppMode.SETUP
-    ? <SetupMode mode={mode} setMode={setMode} projectId={project.id} />
+    ? <SetupMode
+        mode={mode}
+        setMode={setMode}
+        projectId={project.id}
+        localFileMapRef={localFileMapRef}
+        setupState={setupState}
+        setSetupState={setSetupState}
+      />
     : <UseMode mode={mode} setMode={setMode} projectId={project.id} />;
 };
 

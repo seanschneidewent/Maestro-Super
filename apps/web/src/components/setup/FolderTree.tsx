@@ -1,12 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ProjectFile, FileType } from '../../types';
 import { ChevronRight, ChevronDown, Folder, FileText, Image, Box, File, Check } from 'lucide-react';
+
+// Helper to find path to a file (returns array of parent IDs)
+const findPathToFile = (files: ProjectFile[], targetId: string, path: string[] = []): string[] | null => {
+  for (const file of files) {
+    if (file.id === targetId) {
+      return path;
+    }
+    if (file.children) {
+      const result = findPathToFile(file.children, targetId, [...path, file.id]);
+      if (result) return result;
+    }
+  }
+  return null;
+};
 
 interface FileNodeProps {
   node: ProjectFile;
   level: number;
   onSelect: (file: ProjectFile) => void;
   selectedId: string | null;
+  expandedIds?: Set<string>;
   isDeleteMode?: boolean;
   selectedForDeletion?: Set<string>;
   onToggleSelection?: (fileId: string) => void;
@@ -17,11 +32,21 @@ const FileNode: React.FC<FileNodeProps> = ({
   level,
   onSelect,
   selectedId,
+  expandedIds,
   isDeleteMode,
   selectedForDeletion,
   onToggleSelection,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  // Initialize open state based on whether this folder should be expanded
+  const shouldBeExpanded = expandedIds?.has(node.id) ?? false;
+  const [isOpen, setIsOpen] = useState(shouldBeExpanded);
+
+  // Update open state when expandedIds changes (e.g., on mount with saved selection)
+  useEffect(() => {
+    if (shouldBeExpanded && !isOpen) {
+      setIsOpen(true);
+    }
+  }, [shouldBeExpanded]);
   const isFolder = node.type === FileType.FOLDER;
   const isSelected = selectedId === node.id;
   const isMarkedForDeletion = selectedForDeletion?.has(node.id) ?? false;
@@ -107,6 +132,7 @@ const FileNode: React.FC<FileNodeProps> = ({
               level={level + 1}
               onSelect={onSelect}
               selectedId={selectedId}
+              expandedIds={expandedIds}
               isDeleteMode={isDeleteMode}
               selectedForDeletion={selectedForDeletion}
               onToggleSelection={onToggleSelection}
@@ -122,6 +148,7 @@ interface FolderTreeProps {
   files: ProjectFile[];
   onFileSelect: (file: ProjectFile) => void;
   selectedFileId: string | null;
+  expandToFileId?: string | null;
   isDeleteMode?: boolean;
   selectedForDeletion?: Set<string>;
   onToggleSelection?: (fileId: string) => void;
@@ -131,10 +158,18 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
   files,
   onFileSelect,
   selectedFileId,
+  expandToFileId,
   isDeleteMode,
   selectedForDeletion,
   onToggleSelection,
 }) => {
+  // Calculate which folders should be expanded to reveal the selected file
+  const expandedIds = useMemo(() => {
+    if (!expandToFileId) return new Set<string>();
+    const path = findPathToFile(files, expandToFileId);
+    return new Set(path || []);
+  }, [files, expandToFileId]);
+
   return (
     <div className="flex-1 overflow-y-auto dark-scroll">
       {files.map(node => (
@@ -144,6 +179,7 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
           level={0}
           onSelect={onFileSelect}
           selectedId={selectedFileId}
+          expandedIds={expandedIds}
           isDeleteMode={isDeleteMode}
           selectedForDeletion={selectedForDeletion}
           onToggleSelection={onToggleSelection}
