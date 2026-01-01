@@ -10,6 +10,7 @@ class QueryCreate(BaseModel):
     """Schema for creating a query."""
 
     query_text: str = Field(..., min_length=1, alias="queryText")
+    project_id: str | None = Field(default=None, alias="projectId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -31,7 +32,7 @@ class QueryResponse(BaseModel):
 
     id: str
     user_id: str = Field(alias="userId")
-    project_id: str = Field(alias="projectId")
+    project_id: str | None = Field(default=None, alias="projectId")
     query_text: str = Field(alias="queryText")
     response_text: str | None = Field(default=None, alias="responseText")
     referenced_pointers: list[dict[str, Any]] | None = Field(

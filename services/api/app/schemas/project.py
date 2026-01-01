@@ -4,8 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import ProjectStatus
-
 
 class ProjectCreate(BaseModel):
     """Schema for creating a project."""
@@ -17,7 +15,6 @@ class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    status: ProjectStatus | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -25,7 +22,6 @@ class ProjectResponse(BaseModel):
 
     id: str
     name: str
-    status: ProjectStatus
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 

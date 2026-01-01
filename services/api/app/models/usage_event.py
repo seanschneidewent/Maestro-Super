@@ -1,12 +1,11 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import Enum as SAEnum, Integer, String
+from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, JSONVariant, created_at_column
-from app.models.enums import EventType
 
 
 class UsageEvent(Base):
@@ -14,7 +13,6 @@ class UsageEvent(Base):
     Usage tracking for billing.
 
     Logs every AI API call with token counts and costs.
-    Access: Direct via user_id.
     """
 
     __tablename__ = "usage_events"
@@ -25,26 +23,26 @@ class UsageEvent(Base):
         default=lambda: str(uuid4()),
     )
     user_id: Mapped[str] = mapped_column(
-        String(36),
+        String(255),
         index=True,
         nullable=False,
     )
 
-    # Event details
-    event_type: Mapped[EventType] = mapped_column(
-        SAEnum(EventType, native_enum=False),
+    # Event type: 'gemini_extraction', 'claude_query', 'ocr_page', 'voyage_embedding'
+    event_type: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
     )
 
     # Token usage
-    tokens_input: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tokens_output: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_input: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tokens_output: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Cost tracking (in cents)
-    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Additional context
-    event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+    metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONVariant,
         nullable=True,
     )

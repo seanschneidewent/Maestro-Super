@@ -1,11 +1,12 @@
 """API routers."""
 
-from app.routers import files, health, pointers, projects, queries
+from app.routers import disciplines, health, pages, pointers, projects, queries
 
 __all__ = [
     "health",
     "projects",
-    "files",
+    "disciplines",
+    "pages",
     "pointers",
     "queries",
 ]

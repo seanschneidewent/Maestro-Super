@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import files, health, pointers, projects, queries
+from app.routers import disciplines, health, pages, pointers, projects, queries
 
 settings = get_settings()
 
@@ -36,6 +36,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router)
 app.include_router(projects.router)
-app.include_router(files.router)
+app.include_router(disciplines.router)
+app.include_router(pages.router)
 app.include_router(pointers.router)
 app.include_router(queries.router)

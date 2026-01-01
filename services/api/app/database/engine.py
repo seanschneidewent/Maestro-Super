@@ -1,5 +1,4 @@
 from functools import lru_cache
-from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -10,18 +9,10 @@ from app.config import get_settings
 
 @lru_cache
 def get_engine() -> Engine:
-    """Create and cache the database engine."""
+    """Create and cache the database engine (PostgreSQL only)."""
     settings = get_settings()
 
-    # SQLite-specific settings
-    if settings.database_url and settings.database_url.startswith("sqlite"):
-        return create_engine(
-            settings.database_url,
-            connect_args={"check_same_thread": False},
-            echo=False,
-        )
-
-    # PostgreSQL - use separate params to handle special chars in password
+    # Use separate params to handle special chars in password
     if settings.db_host:
         url = URL.create(
             drivername="postgresql",
@@ -32,17 +23,13 @@ def get_engine() -> Engine:
             database=settings.db_name,
         )
     elif settings.database_url:
-        # Fallback to DATABASE_URL (may fail with special chars)
+        # Fallback to DATABASE_URL
         url = settings.database_url
     else:
-        # Default to SQLite
-        return create_engine(
-            "sqlite:///./local.db",
-            connect_args={"check_same_thread": False},
-            echo=False,
+        raise ValueError(
+            "Database not configured. Set DB_HOST or DATABASE_URL environment variable."
         )
 
-    # PostgreSQL settings
     return create_engine(
         url,
         pool_pre_ping=True,
@@ -54,8 +41,3 @@ def get_engine() -> Engine:
 
 # Default engine instance
 engine = get_engine()
-
-
-def is_postgres() -> bool:
-    """Check if the database is PostgreSQL."""
-    return get_engine().dialect.name == "postgresql"
