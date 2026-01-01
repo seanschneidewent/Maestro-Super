@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import ARRAY, Float, ForeignKey, String, Text
@@ -10,10 +10,11 @@ from app.database.base import Base, created_at_column, updated_at_column
 # pgvector support - only works with PostgreSQL
 try:
     from pgvector.sqlalchemy import Vector
-    HAS_PGVECTOR = True
+
+    EMBEDDING_COLUMN_TYPE = Vector(1024)
 except ImportError:
-    HAS_PGVECTOR = False
-    Vector = None
+    # Fallback when pgvector not available
+    EMBEDDING_COLUMN_TYPE = None  # type: ignore
 
 if TYPE_CHECKING:
     from app.models.page import Page
@@ -54,14 +55,12 @@ class Pointer(Base):
 
     # Vector embedding for semantic search (Voyage 1024 dimensions)
     # Note: This column type only works with PostgreSQL + pgvector extension
-    if HAS_PGVECTOR:
+    # When pgvector is not available, this column is skipped entirely
+    if EMBEDDING_COLUMN_TYPE is not None:
         embedding: Mapped[Optional[list[float]]] = mapped_column(
-            Vector(1024),
+            EMBEDDING_COLUMN_TYPE,
             nullable=True,
         )
-    else:
-        # Fallback when pgvector not available - column won't be created
-        embedding = None
 
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()

@@ -69,6 +69,8 @@ class PointerResponse(BaseModel):
     @classmethod
     def from_orm_with_embedding_check(cls, obj) -> "PointerResponse":
         """Create response with embedding presence check."""
+        # Check if embedding attribute exists and has value
+        has_embedding = getattr(obj, "embedding", None) is not None
         return cls(
             id=obj.id,
             page_id=obj.page_id,
@@ -80,7 +82,7 @@ class PointerResponse(BaseModel):
             bbox_width=obj.bbox_width,
             bbox_height=obj.bbox_height,
             png_path=obj.png_path,
-            has_embedding=obj.embedding is not None,
+            has_embedding=has_embedding,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
         )
