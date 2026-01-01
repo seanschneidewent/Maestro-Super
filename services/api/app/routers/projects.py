@@ -12,7 +12,7 @@ from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(
     data: ProjectCreate,
     db: Session = Depends(get_db),
@@ -26,7 +26,7 @@ def create_project(
     return project
 
 
-@router.get("/", response_model=list[ProjectResponse])
+@router.get("", response_model=list[ProjectResponse])
 def list_projects(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),

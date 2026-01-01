@@ -49,7 +49,7 @@ def verify_file_access(file_id: str, user_id: str, db: Session) -> ProjectFile:
     "/projects/{project_id}/files",
     response_model=ProjectFileResponse,
     status_code=status.HTTP_201_CREATED,
-)
+)  # No trailing slash - matches frontend
 def create_file(
     project_id: str,
     data: ProjectFileCreate,

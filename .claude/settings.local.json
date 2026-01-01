@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(python -m venv:*)",
+      "Bash(venvScriptsactivate)",
+      "Bash(pip install:*)",
+      "Bash(services/api/venv/Scripts/pip install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(venv/Scripts/python -m uvicorn:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(curl:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:courteous-victory-production.up.railway.app)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

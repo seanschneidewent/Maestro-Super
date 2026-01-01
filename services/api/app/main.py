@@ -12,6 +12,7 @@ app = FastAPI(
     title="Maestro Super API",
     description="Construction plan analysis for superintendents",
     version="0.1.0",
+    redirect_slashes=False,  # Prevent 307 redirects that break HTTPS through proxies
 )
 
 # CORS for frontend
