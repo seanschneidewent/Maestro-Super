@@ -108,9 +108,15 @@ def list_files_tree(
     """List all files in a project as a tree structure."""
     verify_project_access(project_id, user.id, db)
 
-    files = db.query(ProjectFile).filter(ProjectFile.project_id == project_id).all()
+    # Query files ordered by: folders first (is_folder DESC), then name alphabetically
+    files = (
+        db.query(ProjectFile)
+        .filter(ProjectFile.project_id == project_id)
+        .order_by(ProjectFile.is_folder.desc(), ProjectFile.name)
+        .all()
+    )
 
-    # Build tree structure
+    # Build tree structure (order is preserved from query)
     children_map: dict[str | None, list[ProjectFile]] = defaultdict(list)
     for file in files:
         children_map[file.parent_id].append(file)
