@@ -6,11 +6,11 @@ from sqlalchemy import engine_from_config, pool
 # Import Base and all models to ensure they're registered
 from app.database.base import Base
 from app.models import (  # noqa: F401
-    ContextPointer,
-    DisciplineContext,
-    PageContext,
+    Discipline,
+    Page,
+    Pointer,
+    PointerReference,
     Project,
-    ProjectFile,
     Query,
     UsageEvent,
 )
