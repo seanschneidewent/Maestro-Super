@@ -6,7 +6,7 @@ import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
 import { api, ProjectFileTree } from '../../lib/api';
-import { downloadFile, blobToFile } from '../../lib/storage';
+import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -506,21 +506,32 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           const parentId = parentPath ? pathToDbId.get(parentPath) : undefined;
 
           if (isLast) {
-            // This is the actual file - create DB record
+            // This is the actual file - upload to storage and create DB record
             const fileType = getFileType(name);
             if (!fileType) continue; // Skip unsupported files (shouldn't happen due to filter)
 
-            // Create DB record (without storage path for now)
+            // Upload file to Supabase Storage
+            let storagePath: string | undefined;
+            try {
+              const uploadResult = await uploadFile(projectId, file, currentPath);
+              storagePath = uploadResult.storagePath;
+            } catch (uploadErr) {
+              console.error(`Failed to upload ${name} to storage:`, uploadErr);
+              // Continue without storage path - file will be stored in memory only
+            }
+
+            // Create DB record with storage path
             const dbFile = await api.files.create(projectId, {
               name,
               fileType,
               isFolder: false,
               parentId,
+              storagePath,
             });
 
             pathToDbId.set(currentPath, dbFile.id);
 
-            // Store the File object in memory for viewing
+            // Also store the File object in memory for immediate viewing
             localFileMapRef.current.set(dbFile.id, file);
           } else {
             // This is a folder - only create if it contains supported files
