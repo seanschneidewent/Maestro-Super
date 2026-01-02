@@ -106,24 +106,36 @@ export function ContextMindMap({
     load();
   }, [projectId, refreshTrigger]);
 
+  // Decode HTML entities in content (markmap stores ★ as &#x2605;)
+  function decodeHtmlEntities(str: string): string {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = str;
+    return textarea.value;
+  }
+
   // Parse discipline name from node content (e.g., "Architectural ★" -> "Architectural")
   function extractDisciplineName(nodeContent: string): string | null {
-    // Remove star icon if present
-    const cleaned = nodeContent.replace(/\s*\u2605\s*$/, '').trim();
+    // Decode HTML entities first, then remove star icon if present
+    const decoded = decodeHtmlEntities(nodeContent);
+    const cleaned = decoded.replace(/\s*[\u2605★]\s*$/, '').trim();
     return cleaned || null;
   }
 
   // Parse page name from node content (e.g., "A1.01 ●" -> "A1.01")
   function extractPageName(nodeContent: string): string | null {
+    // Decode HTML entities first
+    const decoded = decodeHtmlEntities(nodeContent);
     // Node content format: "PageName ○|◐|●" or "PageName ○|◐|● **" (for active)
-    const match = nodeContent.match(/^(.+?)\s*[\u25CB\u25D0\u25CF]/);
+    const match = decoded.match(/^(.+?)\s*[\u25CB\u25D0\u25CF○◐●]/);
     return match ? match[1].trim() : null;
   }
 
   // Parse pointer title from node content (e.g., "- Electrical Panel" -> "Electrical Panel")
   function extractPointerTitle(nodeContent: string): string | null {
+    // Decode HTML entities first
+    const decoded = decodeHtmlEntities(nodeContent);
     // List item format: "- Title" or just the title (Markmap strips the -)
-    const match = nodeContent.match(/^-?\s*(.+)$/);
+    const match = decoded.match(/^-?\s*(.+)$/);
     return match ? match[1].trim() : null;
   }
 
