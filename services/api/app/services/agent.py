@@ -178,7 +178,7 @@ async def run_agent_query(
         while True:
             # Stream response from Claude (async context manager)
             async with client.messages.stream(
-                model="claude-opus-4-5-20250514",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=4096,
                 system=AGENT_SYSTEM_PROMPT,
                 tools=TOOL_DEFINITIONS,
