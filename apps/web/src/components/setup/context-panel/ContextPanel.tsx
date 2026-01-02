@@ -62,8 +62,6 @@ export function ContextPanel({
     }
   };
 
-  console.log('[ContextPanel] Rendering with panelView:', panelView);
-
   // Render based on current view
   if (panelView.type === 'mindmap') {
     return (
@@ -72,7 +70,6 @@ export function ContextPanel({
         activePageId={activePageId}
         refreshTrigger={refreshTrigger}
         onDisciplineClick={(disciplineId) => {
-          console.log('[ContextPanel] onDisciplineClick called with:', disciplineId);
           setPanelView({ type: 'discipline', disciplineId });
         }}
         onPageClick={(pageId, disciplineId) => {

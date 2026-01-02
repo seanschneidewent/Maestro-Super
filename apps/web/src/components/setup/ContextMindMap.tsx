@@ -117,10 +117,8 @@ export function ContextMindMap({
   function extractDisciplineName(nodeContent: string): string | null {
     // Decode HTML entities first, then remove star icon if present
     const decoded = decodeHtmlEntities(nodeContent);
-    console.log('[DEBUG extractDisciplineName] decoded:', decoded, 'charCodes:', [...decoded].map(c => c.charCodeAt(0).toString(16)));
     // More robust: remove any trailing whitespace and star-like characters
     const cleaned = decoded.replace(/[\s\u2605\u2606☆★]+$/, '').trim();
-    console.log('[DEBUG extractDisciplineName] cleaned:', cleaned);
     return cleaned || null;
   }
 
@@ -163,25 +161,18 @@ export function ContextMindMap({
     const depth = nodeData.state?.depth ?? nodeData.depth;
     const content = nodeData.content || '';
 
-    console.log('[MindMap Click]', { depth, content, state: nodeData.state });
-
     // Markmap depth: 1=root, 2=discipline, 3=page, 4=pointer
     if (depth === 2) {
       // Discipline click
       const discName = extractDisciplineName(content);
-      console.log('[MindMap] Discipline click:', discName);
-      console.log('[MindMap] Available disciplines:', [...maps.disciplineNameToId.keys()]);
       if (!discName) return;
       const discId = maps.disciplineNameToId.get(discName);
-      console.log('[MindMap] Found discId:', discId, 'hasCallback:', !!handlersRef.current.onDisciplineClick);
       if (discId && handlersRef.current.onDisciplineClick) {
-        console.log('[MindMap] Calling onDisciplineClick with:', discId);
         handlersRef.current.onDisciplineClick(discId);
       }
     } else if (depth === 3) {
       // Page click
       const pageName = extractPageName(content);
-      console.log('[MindMap] Page click:', pageName);
       if (!pageName) return;
       const pageId = maps.pageNameToId.get(pageName);
       const discId = pageId ? maps.pageIdToDisciplineId.get(pageId) : undefined;
@@ -191,7 +182,6 @@ export function ContextMindMap({
     } else if (depth === 4) {
       // Pointer click - need to find parent page name using path
       const pointerTitle = extractPointerTitle(content);
-      console.log('[MindMap] Pointer click:', pointerTitle);
       if (!pointerTitle) return;
 
       // Use the path to find parent - path format is "1.2.3.4" where each number is a node index
