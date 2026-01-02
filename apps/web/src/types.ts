@@ -112,3 +112,75 @@ export interface ProjectHierarchy {
   name: string;
   disciplines: DisciplineInHierarchy[];
 }
+
+// Agent streaming event types (from backend SSE)
+export interface AgentTextEvent {
+  type: 'text';
+  content: string;
+}
+
+export interface AgentToolCallEvent {
+  type: 'tool_call';
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+export interface AgentToolResultEvent {
+  type: 'tool_result';
+  tool: string;
+  result: Record<string, unknown>;
+}
+
+export interface AgentTraceStep {
+  type: 'reasoning' | 'tool_call' | 'tool_result';
+  content?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+}
+
+export interface AgentDoneEvent {
+  type: 'done';
+  trace: AgentTraceStep[];
+  usage: { input_tokens: number; output_tokens: number };
+}
+
+export interface AgentErrorEvent {
+  type: 'error';
+  message: string;
+}
+
+export type AgentEvent =
+  | AgentTextEvent
+  | AgentToolCallEvent
+  | AgentToolResultEvent
+  | AgentDoneEvent
+  | AgentErrorEvent;
+
+// Agent message state (built from events)
+export interface ToolCallState {
+  tool: string;
+  input: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  status: 'pending' | 'complete';
+}
+
+export interface PageVisit {
+  pageId: string;
+  pageName: string;
+}
+
+export interface AgentMessage {
+  id: string;
+  role: 'user' | 'agent';
+  timestamp: Date;
+  // User message
+  text?: string;
+  // Agent message (built incrementally from events)
+  reasoning?: string[];
+  toolCalls?: ToolCallState[];
+  finalAnswer?: string;
+  trace?: AgentTraceStep[];
+  pagesVisited?: PageVisit[];
+  isComplete: boolean;
+}
