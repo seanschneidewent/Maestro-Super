@@ -288,11 +288,17 @@
   <body>
     <div id="root"></div>
     <script>
-      // iOS Safari keyboard dismiss fix - force viewport recalculation
+      // iOS Safari keyboard dismiss fix - only resize when keyboard CLOSES
       if (window.visualViewport) {
+        var lastHeight = window.visualViewport.height;
         window.visualViewport.addEventListener('resize', function() {
-          document.documentElement.style.height = window.visualViewport.height + 'px';
-          document.body.style.height = window.visualViewport.height + 'px';
+          var newHeight = window.visualViewport.height;
+          // Only update when viewport grows (keyboard closing), not shrinking (keyboard opening)
+          if (newHeight > lastHeight) {
+            document.documentElement.style.height = newHeight + 'px';
+            document.body.style.height = newHeight + 'px';
+          }
+          lastHeight = newHeight;
         });
       }
     </script>
