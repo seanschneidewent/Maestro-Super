@@ -11,7 +11,9 @@ from app.models.page import Page
 from app.models.pointer import Pointer
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.schemas.search import SearchResponse, SearchResult
 from app.services.voyage import embed_pointer as generate_embedding
+from app.services.search import search_pointers
 
 from app.schemas.upload import (
     BulkUploadRequest,
@@ -311,3 +313,48 @@ async def backfill_embeddings(
 
     db.commit()
     return {"backfilled": success, "failed": failed, "total": len(pointers)}
+
+
+@router.get("/{project_id}/search", response_model=SearchResponse)
+async def search_project(
+    project_id: str,
+    q: str,
+    discipline: str | None = None,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Search pointers in a project using hybrid keyword + vector search.
+
+    Args:
+        project_id: Project UUID
+        q: Search query (min 2 characters)
+        discipline: Optional discipline filter (e.g., "architectural")
+        limit: Max results (default 10, max 50)
+
+    Returns:
+        Search results with relevance scores
+    """
+    # Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not q or len(q) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query must be at least 2 characters",
+        )
+
+    results = await search_pointers(
+        db=db,
+        query=q,
+        project_id=project_id,
+        discipline=discipline,
+        limit=min(limit, 50),
+    )
+
+    return {
+        "results": [SearchResult(**r) for r in results],
+        "query": q,
+        "count": len(results),
+    }
