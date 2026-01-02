@@ -117,7 +117,10 @@ export function ContextMindMap({
   function extractDisciplineName(nodeContent: string): string | null {
     // Decode HTML entities first, then remove star icon if present
     const decoded = decodeHtmlEntities(nodeContent);
-    const cleaned = decoded.replace(/\s*[\u2605★]\s*$/, '').trim();
+    console.log('[DEBUG extractDisciplineName] decoded:', decoded, 'charCodes:', [...decoded].map(c => c.charCodeAt(0).toString(16)));
+    // More robust: remove any trailing whitespace and star-like characters
+    const cleaned = decoded.replace(/[\s\u2605\u2606☆★]+$/, '').trim();
+    console.log('[DEBUG extractDisciplineName] cleaned:', cleaned);
     return cleaned || null;
   }
 
@@ -167,9 +170,12 @@ export function ContextMindMap({
       // Discipline click
       const discName = extractDisciplineName(content);
       console.log('[MindMap] Discipline click:', discName);
+      console.log('[MindMap] Available disciplines:', [...maps.disciplineNameToId.keys()]);
       if (!discName) return;
       const discId = maps.disciplineNameToId.get(discName);
+      console.log('[MindMap] Found discId:', discId, 'hasCallback:', !!handlersRef.current.onDisciplineClick);
       if (discId && handlersRef.current.onDisciplineClick) {
+        console.log('[MindMap] Calling onDisciplineClick with:', discId);
         handlersRef.current.onDisciplineClick(discId);
       }
     } else if (depth === 3) {
