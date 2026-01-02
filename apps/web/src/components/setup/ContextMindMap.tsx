@@ -7,7 +7,9 @@ import type { ProjectHierarchy, PageInHierarchy } from '../../types';
 interface ContextMindMapProps {
   projectId: string;
   activePageId?: string;
-  onPageClick?: (pageId: string) => void;
+  onPageClick?: (pageId: string, disciplineId: string) => void;
+  onPointerClick?: (pointerId: string, pageId: string) => void;
+  onDisciplineClick?: (disciplineId: string) => void;
   refreshTrigger?: number;
 }
 
@@ -22,21 +24,31 @@ function getPageIcon(page: PageInHierarchy): string {
 // Build lookup maps for click handling
 interface HierarchyMaps {
   pageNameToId: Map<string, string>;
+  pageIdToDisciplineId: Map<string, string>;
   disciplineNameToId: Map<string, string>;
+  // Key: "${pageName}:${pointerTitle}" to avoid collision if same title on different pages
+  pointerKeyToData: Map<string, { pointerId: string; pageId: string }>;
 }
 
 function buildLookupMaps(data: ProjectHierarchy): HierarchyMaps {
   const pageNameToId = new Map<string, string>();
+  const pageIdToDisciplineId = new Map<string, string>();
   const disciplineNameToId = new Map<string, string>();
+  const pointerKeyToData = new Map<string, { pointerId: string; pageId: string }>();
 
   for (const disc of data.disciplines) {
     disciplineNameToId.set(disc.displayName, disc.id);
     for (const page of disc.pages) {
       pageNameToId.set(page.pageName, page.id);
+      pageIdToDisciplineId.set(page.id, disc.id);
+      for (const ptr of page.pointers) {
+        const key = `${page.pageName}:${ptr.title}`;
+        pointerKeyToData.set(key, { pointerId: ptr.id, pageId: page.id });
+      }
     }
   }
 
-  return { pageNameToId, disciplineNameToId };
+  return { pageNameToId, pageIdToDisciplineId, disciplineNameToId, pointerKeyToData };
 }
 
 function hierarchyToMarkdown(data: ProjectHierarchy, activePageId?: string): string {
@@ -64,6 +76,8 @@ export function ContextMindMap({
   projectId,
   activePageId,
   onPageClick,
+  onPointerClick,
+  onDisciplineClick,
   refreshTrigger,
 }: ContextMindMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -92,12 +106,29 @@ export function ContextMindMap({
     load();
   }, [projectId, refreshTrigger]);
 
+  // Parse discipline name from node content (e.g., "Architectural ★" -> "Architectural")
+  function extractDisciplineName(nodeContent: string): string | null {
+    // Remove star icon if present
+    const cleaned = nodeContent.replace(/\s*\u2605\s*$/, '').trim();
+    return cleaned || null;
+  }
+
   // Parse page name from node content (e.g., "A1.01 ●" -> "A1.01")
   function extractPageName(nodeContent: string): string | null {
     // Node content format: "PageName ○|◐|●" or "PageName ○|◐|● **" (for active)
     const match = nodeContent.match(/^(.+?)\s*[\u25CB\u25D0\u25CF]/);
     return match ? match[1].trim() : null;
   }
+
+  // Parse pointer title from node content (e.g., "- Electrical Panel" -> "Electrical Panel")
+  function extractPointerTitle(nodeContent: string): string | null {
+    // List item format: "- Title" or just the title (Markmap strips the -)
+    const match = nodeContent.match(/^-?\s*(.+)$/);
+    return match ? match[1].trim() : null;
+  }
+
+  // Track current page name for pointer lookup (set when traversing to depth 2)
+  const currentPageNameRef = useRef<string | null>(null);
 
   // Initialize and update Markmap
   useEffect(() => {
@@ -117,15 +148,46 @@ export function ContextMindMap({
           return '#4ade80'; // Pointer: green
         },
         onClick: (node) => {
-          // Only handle page-level clicks (depth 2)
-          if (node.depth !== 2) return;
+          if (!lookupMapsRef.current) return;
+          const maps = lookupMapsRef.current;
 
-          const pageName = extractPageName(node.content || '');
-          if (!pageName || !lookupMapsRef.current) return;
+          if (node.depth === 1) {
+            // Discipline click
+            const discName = extractDisciplineName(node.content || '');
+            if (!discName) return;
+            const discId = maps.disciplineNameToId.get(discName);
+            if (discId && onDisciplineClick) {
+              onDisciplineClick(discId);
+            }
+          } else if (node.depth === 2) {
+            // Page click
+            const pageName = extractPageName(node.content || '');
+            if (!pageName) return;
+            const pageId = maps.pageNameToId.get(pageName);
+            const discId = pageId ? maps.pageIdToDisciplineId.get(pageId) : undefined;
+            if (pageId && onPageClick) {
+              onPageClick(pageId, discId || '');
+            }
+          } else if (node.depth === 3) {
+            // Pointer click - need to find parent page name
+            const pointerTitle = extractPointerTitle(node.content || '');
+            if (!pointerTitle) return;
 
-          const pageId = lookupMapsRef.current.pageNameToId.get(pageName);
-          if (pageId && onPageClick) {
-            onPageClick(pageId);
+            // Traverse up to find parent page node
+            let parentNode = node.parent;
+            while (parentNode && parentNode.depth !== 2) {
+              parentNode = parentNode.parent;
+            }
+            if (!parentNode) return;
+
+            const pageName = extractPageName(parentNode.content || '');
+            if (!pageName) return;
+
+            const key = `${pageName}:${pointerTitle}`;
+            const ptrData = maps.pointerKeyToData.get(key);
+            if (ptrData && onPointerClick) {
+              onPointerClick(ptrData.pointerId, ptrData.pageId);
+            }
           }
         },
       });
@@ -133,7 +195,7 @@ export function ContextMindMap({
 
     markmapRef.current.setData(root);
     markmapRef.current.fit();
-  }, [hierarchy, activePageId, onPageClick]);
+  }, [hierarchy, activePageId, onPageClick, onPointerClick, onDisciplineClick]);
 
   if (loading) {
     return (

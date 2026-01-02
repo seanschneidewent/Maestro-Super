@@ -72,6 +72,17 @@ class PointerUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PointerReferenceInResponse(BaseModel):
+    """Reference from a pointer to another page."""
+
+    id: str
+    target_page_id: str = Field(alias="targetPageId")
+    target_page_name: str = Field(alias="targetPageName")
+    justification: str
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 class PointerResponse(BaseModel):
     """Schema for pointer response."""
 
@@ -91,6 +102,7 @@ class PointerResponse(BaseModel):
     bbox_height: float = Field(alias="bboxHeight")
     png_path: str | None = Field(default=None, alias="pngPath")
     has_embedding: bool = Field(default=False, alias="hasEmbedding")
+    references: list[PointerReferenceInResponse] = Field(default_factory=list)
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 
@@ -103,8 +115,13 @@ class PointerResponse(BaseModel):
         return str(v) if v is not None else v
 
     @classmethod
-    def from_orm_with_embedding_check(cls, obj) -> "PointerResponse":
-        """Create response with embedding presence check."""
+    def from_orm_with_embedding_check(cls, obj, include_references: bool = False) -> "PointerResponse":
+        """Create response with embedding presence check.
+
+        Args:
+            obj: Pointer ORM object
+            include_references: If True, include outbound_references (requires eager loading)
+        """
         # Check if embedding attribute exists and has value
         has_embedding = getattr(obj, "embedding", None) is not None
 
@@ -112,6 +129,19 @@ class PointerResponse(BaseModel):
         ocr_data = None
         if obj.ocr_data:
             ocr_data = [OcrSpan(**span) for span in obj.ocr_data]
+
+        # Convert references if requested and available
+        references = []
+        if include_references and hasattr(obj, "outbound_references"):
+            for ref in obj.outbound_references:
+                references.append(
+                    PointerReferenceInResponse(
+                        id=str(ref.id),
+                        target_page_id=str(ref.target_page_id),
+                        target_page_name=ref.target_page.page_name if ref.target_page else "Unknown",
+                        justification=ref.justification,
+                    )
+                )
 
         return cls(
             id=obj.id,
@@ -126,6 +156,7 @@ class PointerResponse(BaseModel):
             bbox_height=obj.bbox_height,
             png_path=obj.png_path,
             has_embedding=has_embedding,
+            references=references,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
         )

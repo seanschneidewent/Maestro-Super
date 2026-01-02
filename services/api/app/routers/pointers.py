@@ -4,7 +4,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database.session import get_db
 from app.models.discipline import Discipline
@@ -230,11 +230,18 @@ def get_pointer(
     pointer_id: str,
     db: Session = Depends(get_db),
 ) -> PointerResponse:
-    """Get a specific pointer."""
-    pointer = db.query(Pointer).filter(Pointer.id == pointer_id).first()
+    """Get a specific pointer with references."""
+    pointer = (
+        db.query(Pointer)
+        .options(
+            joinedload(Pointer.outbound_references).joinedload(PointerReference.target_page)
+        )
+        .filter(Pointer.id == pointer_id)
+        .first()
+    )
     if not pointer:
         raise HTTPException(status_code=404, detail="Pointer not found")
-    return PointerResponse.from_orm_with_embedding_check(pointer)
+    return PointerResponse.from_orm_with_embedding_check(pointer, include_references=True)
 
 
 @router.patch("/pointers/{pointer_id}", response_model=PointerResponse)

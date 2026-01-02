@@ -43,6 +43,13 @@ export interface OcrSpan {
   confidence: number;
 }
 
+export interface PointerReference {
+  id: string;
+  targetPageId: string;
+  targetPageName: string;
+  justification: string;
+}
+
 export interface ContextPointer {
   id: string;
   pageId: string;
@@ -56,6 +63,7 @@ export interface ContextPointer {
   bboxHeight: number;
   pngPath?: string;
   hasEmbedding?: boolean;
+  references?: PointerReference[];
 }
 
 export interface ChatMessage {

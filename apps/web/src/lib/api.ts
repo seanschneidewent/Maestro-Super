@@ -197,6 +197,13 @@ export interface OcrSpan {
   confidence: number;
 }
 
+export interface PointerReferenceResponse {
+  id: string;
+  targetPageId: string;
+  targetPageName: string;
+  justification: string;
+}
+
 export interface PointerResponse {
   id: string;
   pageId: string;
@@ -210,6 +217,7 @@ export interface PointerResponse {
   bboxHeight: number;
   pngPath?: string;
   hasEmbedding: boolean;
+  references?: PointerReferenceResponse[];
   createdAt: string;
   updatedAt?: string;
 }

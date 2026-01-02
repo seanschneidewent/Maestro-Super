@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
-import { ContextMindMap } from './ContextMindMap';
+import { ContextPanel, PanelView } from './context-panel';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
-import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
+import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, DisciplineWithPagesResponse } from '../../lib/api';
+import { api, DisciplineWithPagesResponse, PointerResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 
@@ -58,6 +58,11 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
+  const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
+  const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
+  const [highlightedPointer, setHighlightedPointer] = useState<{
+    bounds: { x: number; y: number; w: number; h: number };
+  } | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
@@ -100,6 +105,19 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setSelectedFile(file);
     setSetupState(prev => ({ ...prev, selectedFileId: file.id }));
   };
+
+  // Load hierarchy for context panel
+  useEffect(() => {
+    async function loadHierarchy() {
+      try {
+        const data = await api.projects.getHierarchy(projectId);
+        setHierarchy(data);
+      } catch (err) {
+        console.error('Failed to load hierarchy:', err);
+      }
+    }
+    loadHierarchy();
+  }, [projectId, hierarchyRefresh]);
 
   // Load disciplines and pages from backend on mount
   useEffect(() => {
@@ -253,6 +271,40 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       }
     }, 300);
   }, []);
+
+  // Handle highlighting a pointer (from context panel)
+  const handleHighlightPointer = useCallback(async (pointerId: string) => {
+    try {
+      const pointer = await api.pointers.get(pointerId);
+      setHighlightedPointer({
+        bounds: {
+          x: pointer.bboxX,
+          y: pointer.bboxY,
+          w: pointer.bboxWidth,
+          h: pointer.bboxHeight,
+        },
+      });
+      // Also select the pointer
+      setSelectedPointerId(pointerId);
+    } catch (err) {
+      console.error('Failed to load pointer for highlighting:', err);
+    }
+  }, []);
+
+  // Clear highlight when panel view changes to something other than pointer
+  useEffect(() => {
+    if (panelView.type !== 'pointer') {
+      setHighlightedPointer(null);
+    }
+  }, [panelView.type]);
+
+  // Navigate to a page from context panel
+  const handleNavigateToPage = useCallback((pageId: string) => {
+    const file = findFileById(uploadedFiles, pageId);
+    if (file) {
+      handleFileSelect(file);
+    }
+  }, [uploadedFiles]);
 
   // Delete pointer with API call
   const deletePointer = useCallback(async (id: string) => {
@@ -686,6 +738,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     onPointerCreate={handlePointerCreate}
                     isLoadingFile={isLoadingFile}
                     fileLoadError={fileLoadError}
+                    highlightedBounds={highlightedPointer?.bounds}
                 />
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-fade-in">
@@ -717,14 +770,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
               </h2>
            </div>
            <div className="flex-1 overflow-hidden">
-              <ContextMindMap
+              <ContextPanel
                 projectId={projectId}
+                hierarchy={hierarchy}
+                panelView={panelView}
+                setPanelView={setPanelView}
                 activePageId={selectedFile?.id}
                 refreshTrigger={hierarchyRefresh}
-                onPageClick={(pageId) => {
-                  const file = findFileById(uploadedFiles, pageId);
-                  if (file) handleFileSelect(file);
-                }}
+                onNavigateToPage={handleNavigateToPage}
+                onHighlightPointer={handleHighlightPointer}
               />
            </div>
         </div>

@@ -30,6 +30,7 @@ interface PdfViewerProps {
   }) => Promise<ContextPointer | null>;
   isLoadingFile?: boolean;
   fileLoadError?: string | null;
+  highlightedBounds?: { x: number; y: number; w: number; h: number } | null;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
@@ -44,6 +45,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   onPointerCreate,
   isLoadingFile,
   fileLoadError,
+  highlightedBounds,
 }) => {
   // Page images (PNG data URLs)
   const [pageImages, setPageImages] = useState<PageImage[]>([]);
@@ -491,6 +493,20 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   </div>
                 </div>
               ))}
+
+              {/* Highlighted pointer (from context panel) */}
+              {highlightedBounds && (
+                <div
+                  className="absolute border-2 border-orange-400 bg-orange-400/20 rounded-sm
+                             shadow-[0_0_20px_rgba(249,115,22,0.5)] animate-pulse pointer-events-none z-20"
+                  style={{
+                    left: `${highlightedBounds.x * 100}%`,
+                    top: `${highlightedBounds.y * 100}%`,
+                    width: `${highlightedBounds.w * 100}%`,
+                    height: `${highlightedBounds.h * 100}%`,
+                  }}
+                />
+              )}
 
               {/* Temp drawing rect */}
               {tempRect && (
