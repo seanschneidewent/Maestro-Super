@@ -144,12 +144,16 @@ export function ContextMindMap({
   const handleNodeClick = (nodeData: any) => {
     if (!lookupMapsRef.current) return;
     const maps = lookupMapsRef.current;
-    const depth = nodeData.depth;
+    // Markmap stores depth in state.depth, not directly on nodeData
+    const depth = nodeData.state?.depth ?? nodeData.depth;
     const content = nodeData.content || '';
+
+    console.log('[MindMap Click]', { depth, content, state: nodeData.state });
 
     if (depth === 1) {
       // Discipline click
       const discName = extractDisciplineName(content);
+      console.log('[MindMap] Discipline click:', discName);
       if (!discName) return;
       const discId = maps.disciplineNameToId.get(discName);
       if (discId && handlersRef.current.onDisciplineClick) {
@@ -158,6 +162,7 @@ export function ContextMindMap({
     } else if (depth === 2) {
       // Page click
       const pageName = extractPageName(content);
+      console.log('[MindMap] Page click:', pageName);
       if (!pageName) return;
       const pageId = maps.pageNameToId.get(pageName);
       const discId = pageId ? maps.pageIdToDisciplineId.get(pageId) : undefined;
@@ -165,24 +170,19 @@ export function ContextMindMap({
         handlersRef.current.onPageClick(pageId, discId || '');
       }
     } else if (depth === 3) {
-      // Pointer click - need to find parent page name
+      // Pointer click - need to find parent page name using path
       const pointerTitle = extractPointerTitle(content);
+      console.log('[MindMap] Pointer click:', pointerTitle);
       if (!pointerTitle) return;
 
-      // Traverse up to find parent page node
-      let parentNode = nodeData.parent;
-      while (parentNode && parentNode.depth !== 2) {
-        parentNode = parentNode.parent;
-      }
-      if (!parentNode) return;
-
-      const pageName = extractPageName(parentNode.content || '');
-      if (!pageName) return;
-
-      const key = `${pageName}:${pointerTitle}`;
-      const ptrData = maps.pointerKeyToData.get(key);
-      if (ptrData && handlersRef.current.onPointerClick) {
-        handlersRef.current.onPointerClick(ptrData.pointerId, ptrData.pageId);
+      // Use the path to find parent - path format is "1.2.3.4" where each number is a node index
+      // We need to look up the page name from our data instead of traversing DOM
+      // For now, try all pages to find the matching pointer
+      for (const [key, data] of maps.pointerKeyToData.entries()) {
+        if (key.endsWith(`:${pointerTitle}`)) {
+          handlersRef.current.onPointerClick?.(data.pointerId, data.pageId);
+          return;
+        }
       }
     }
   };
