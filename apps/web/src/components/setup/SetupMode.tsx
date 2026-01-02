@@ -269,7 +269,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   }, [selectedPointerId]);
 
-  // Create pointer via API
+  // Create pointer via API (with AI analysis)
   const handlePointerCreate = useCallback(async (data: {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
@@ -277,9 +277,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     if (!selectedFile) return null;
 
     try {
+      // Only send bounding box - AI will generate title/description
       const created = await api.pointers.create(selectedFile.id, {
-        title: 'New Context',
-        description: 'Add description...',
         bboxX: data.bounds.xNorm,
         bboxY: data.bounds.yNorm,
         bboxWidth: data.bounds.wNorm,
@@ -292,6 +291,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         title: created.title,
         description: created.description,
         textSpans: created.textSpans,
+        ocrData: created.ocrData,
         bboxX: created.bboxX,
         bboxY: created.bboxY,
         bboxWidth: created.bboxWidth,

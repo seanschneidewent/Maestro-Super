@@ -34,12 +34,22 @@ export interface ProjectFile {
   file?: File; // The actual file object for rendering (local only)
 }
 
+export interface OcrSpan {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  confidence: number;
+}
+
 export interface ContextPointer {
   id: string;
   pageId: string;
   title: string;
   description: string;
   textSpans?: string[];
+  ocrData?: OcrSpan[];  // Word-level OCR with positions for highlighting
   bboxX: number;
   bboxY: number;
   bboxWidth: number;

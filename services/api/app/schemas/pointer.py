@@ -17,6 +17,30 @@ class BoundingBox(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class BoundingBoxCreate(BaseModel):
+    """Bounding box for pointer creation (normalized 0-1)."""
+
+    x: float = Field(..., ge=0, le=1, alias="bboxX")
+    y: float = Field(..., ge=0, le=1, alias="bboxY")
+    width: float = Field(..., ge=0, le=1, alias="bboxWidth")
+    height: float = Field(..., ge=0, le=1, alias="bboxHeight")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OcrSpan(BaseModel):
+    """Single OCR word with position."""
+
+    text: str
+    x: float  # normalized 0-1
+    y: float
+    w: float
+    h: float
+    confidence: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class PointerCreate(BaseModel):
     """Schema for creating a pointer."""
 
@@ -56,6 +80,11 @@ class PointerResponse(BaseModel):
     title: str
     description: str
     text_spans: list[str] | None = Field(default=None, alias="textSpans")
+    ocr_data: list[OcrSpan] | None = Field(
+        default=None,
+        alias="ocrData",
+        description="Word-level OCR with positions for highlighting",
+    )
     bbox_x: float = Field(alias="bboxX")
     bbox_y: float = Field(alias="bboxY")
     bbox_width: float = Field(alias="bboxWidth")
@@ -78,12 +107,19 @@ class PointerResponse(BaseModel):
         """Create response with embedding presence check."""
         # Check if embedding attribute exists and has value
         has_embedding = getattr(obj, "embedding", None) is not None
+
+        # Convert raw ocr_data dicts to OcrSpan objects if present
+        ocr_data = None
+        if obj.ocr_data:
+            ocr_data = [OcrSpan(**span) for span in obj.ocr_data]
+
         return cls(
             id=obj.id,
             page_id=obj.page_id,
             title=obj.title,
             description=obj.description,
             text_spans=obj.text_spans,
+            ocr_data=ocr_data,
             bbox_x=obj.bbox_x,
             bbox_y=obj.bbox_y,
             bbox_width=obj.bbox_width,

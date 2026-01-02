@@ -187,12 +187,22 @@ export interface PageResponse {
 }
 
 // Pointer types (matching backend schema)
+export interface OcrSpan {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  confidence: number;
+}
+
 export interface PointerResponse {
   id: string;
   pageId: string;
   title: string;
   description: string;
   textSpans?: string[];
+  ocrData?: OcrSpan[];  // Word-level OCR with positions for highlighting
   bboxX: number;
   bboxY: number;
   bboxWidth: number;
@@ -282,7 +292,18 @@ export const api = {
     list: (pageId: string) => {
       return request<PointerResponse[]>(`/pages/${pageId}/pointers`);
     },
+    // Create pointer with AI analysis - just send bounding box
     create: (pageId: string, data: {
+      bboxX: number;
+      bboxY: number;
+      bboxWidth: number;
+      bboxHeight: number;
+    }) => request<PointerResponse>(`/pages/${pageId}/pointers`, {
+      method: 'POST',
+      body: data,
+    }),
+    // Create pointer manually without AI - provide all fields
+    createManual: (pageId: string, data: {
       title: string;
       description: string;
       bboxX: number;
@@ -291,7 +312,7 @@ export const api = {
       bboxHeight: number;
       textSpans?: string[];
       pngPath?: string;
-    }) => request<PointerResponse>(`/pages/${pageId}/pointers`, {
+    }) => request<PointerResponse>(`/pages/${pageId}/pointers/manual`, {
       method: 'POST',
       body: data,
     }),

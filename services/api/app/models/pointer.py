@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import ARRAY, Float, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, created_at_column, updated_at_column
@@ -44,6 +45,12 @@ class Pointer(Base):
     text_spans: Mapped[Optional[list[str]]] = mapped_column(
         ARRAY(String), nullable=True
     )  # Extracted text elements
+
+    # OCR data with word positions for highlighting
+    # Structure: [{text, x, y, w, h, confidence}] - normalized 0-1 coords
+    ocr_data: Mapped[Optional[list[dict]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Bounding box (normalized 0-1 or pixel coordinates)
     bbox_x: Mapped[float] = mapped_column(Float, nullable=False)
