@@ -19,6 +19,7 @@ from app.schemas.upload import (
     DisciplineWithPagesResponse,
     PageInDisciplineResponse,
 )
+from app.schemas.hierarchy import ProjectHierarchyResponse
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,65 @@ def get_project_full(
     return {
         "project": project,
         "disciplines": discipline_responses,
+    }
+
+
+@router.get("/{project_id}/hierarchy", response_model=ProjectHierarchyResponse)
+def get_project_hierarchy(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get project with full hierarchy including pointers and processing states.
+
+    Returns a structure optimized for mind map visualization with:
+    - Project name
+    - Disciplines with processed status
+    - Pages with pointer counts and processing states
+    - Pointer titles for each page
+    """
+    project = (
+        db.query(Project)
+        .options(
+            joinedload(Project.disciplines)
+            .joinedload(Discipline.pages)
+            .joinedload(Page.pointers)
+        )
+        .filter(Project.id == project_id)
+        .first()
+    )
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "disciplines": [
+            {
+                "id": str(d.id),
+                "name": d.name,
+                "displayName": d.display_name,
+                "processed": d.processed,
+                "pages": [
+                    {
+                        "id": str(p.id),
+                        "pageName": p.page_name,
+                        "processedPass1": p.processed_pass_1,
+                        "processedPass2": p.processed_pass_2,
+                        "pointerCount": len(p.pointers),
+                        "pointers": [
+                            {
+                                "id": str(ptr.id),
+                                "title": ptr.title,
+                            }
+                            for ptr in p.pointers
+                        ],
+                    }
+                    for p in sorted(d.pages, key=lambda x: x.page_name)
+                ],
+            }
+            for d in sorted(project.disciplines, key=lambda x: x.display_name)
+        ],
     }
 
 
