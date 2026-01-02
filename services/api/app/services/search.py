@@ -37,12 +37,13 @@ async def search_pointers(
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
     # Call the PostgreSQL hybrid_search function
+    # Use CAST() instead of :: to avoid SQLAlchemy parameter binding conflicts
     result = db.execute(
         text("""
             SELECT * FROM hybrid_search(
                 :query_text,
-                :query_embedding::vector,
-                :project_id::uuid,
+                CAST(:query_embedding AS vector),
+                CAST(:project_id AS uuid),
                 :discipline_filter,
                 :match_count
             )
