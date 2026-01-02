@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production
 
+    # Rate Limiting
+    max_requests_per_day: int = 100
+    max_tokens_per_day: int = 500000
+    max_pointers_per_project: int = 1000
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""

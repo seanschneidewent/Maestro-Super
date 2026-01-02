@@ -8,11 +8,91 @@ interface RequestOptions {
   body?: unknown;
 }
 
+// Error types from backend
+export type ApiErrorType = 'rate_limit' | 'validation' | 'not_found' | 'auth' | 'server_error';
+
+export interface ApiErrorResponse {
+  detail: string | Record<string, unknown>;
+  error_type?: ApiErrorType;
+  error_id?: string;
+  errors?: Array<{ field: string; message: string }>;
+  // Rate limit specific
+  limits?: {
+    requests?: { used: number; max: number };
+    tokens?: { used: number; max: number };
+    pointers?: { used: number; max: number };
+  };
+  retry_after?: number;
+}
+
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  public errorType: ApiErrorType;
+  public errorId?: string;
+  public response?: ApiErrorResponse;
+
+  constructor(
+    public status: number,
+    message: string,
+    response?: ApiErrorResponse
+  ) {
     super(message);
     this.name = 'ApiError';
+    this.response = response;
+    this.errorId = response?.error_id;
+
+    // Determine error type from response or status
+    if (response?.error_type) {
+      this.errorType = response.error_type;
+    } else if (status === 429) {
+      this.errorType = 'rate_limit';
+    } else if (status === 404) {
+      this.errorType = 'not_found';
+    } else if (status === 400 || status === 422) {
+      this.errorType = 'validation';
+    } else if (status === 401 || status === 403) {
+      this.errorType = 'auth';
+    } else {
+      this.errorType = 'server_error';
+    }
   }
+}
+
+// Helper functions for error type checking
+export function isRateLimitError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.errorType === 'rate_limit';
+}
+
+export function isValidationError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.errorType === 'validation';
+}
+
+export function isNotFoundError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.errorType === 'not_found';
+}
+
+export function isAuthError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.errorType === 'auth';
+}
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'An unexpected error occurred';
+}
+
+export function getRateLimitInfo(error: ApiError): {
+  retryAfter: number;
+  limits?: ApiErrorResponse['limits'];
+} | null {
+  if (!isRateLimitError(error)) return null;
+  return {
+    retryAfter: error.response?.retry_after || 3600,
+    limits: error.response?.limits,
+  };
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
@@ -36,18 +116,31 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    // Handle FastAPI validation errors which return detail as an array
+    const errorResponse: ApiErrorResponse = await response.json().catch(() => ({
+      detail: 'Unknown error',
+    }));
+
+    // Extract message from error response
     let message = 'Request failed';
-    if (Array.isArray(error.detail)) {
-      message = error.detail.map((e: { loc?: string[]; msg?: string }) =>
-        `${e.loc?.join('.')}: ${e.msg}`
-      ).join(', ');
-    } else if (typeof error.detail === 'string') {
-      message = error.detail;
+    if (Array.isArray(errorResponse.detail)) {
+      // FastAPI validation errors
+      message = (errorResponse.detail as Array<{ loc?: string[]; msg?: string }>)
+        .map((e) => `${e.loc?.join('.')}: ${e.msg}`)
+        .join(', ');
+    } else if (typeof errorResponse.detail === 'string') {
+      message = errorResponse.detail;
+    } else if (typeof errorResponse.detail === 'object' && errorResponse.detail !== null) {
+      // Rate limit errors have detail as an object
+      message = (errorResponse.detail as { detail?: string }).detail || 'Request failed';
     }
-    console.error('API Error:', response.status, error);
-    throw new ApiError(response.status, message);
+
+    // Format validation errors
+    if (errorResponse.errors?.length) {
+      message = errorResponse.errors.map((e) => `${e.field}: ${e.message}`).join(', ');
+    }
+
+    console.error('API Error:', response.status, errorResponse);
+    throw new ApiError(response.status, message, errorResponse);
   }
 
   // Handle 204 No Content

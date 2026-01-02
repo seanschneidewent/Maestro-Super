@@ -5,6 +5,7 @@ import logging
 import voyageai
 
 from app.config import get_settings
+from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,15 @@ def _get_voyage_client() -> voyageai.Client:
     return voyageai.Client(api_key=settings.voyage_api_key)
 
 
+async def _embed_text_impl(text: str) -> list[float]:
+    """Internal implementation of text embedding."""
+    client = _get_voyage_client()
+    response = client.embed([text], model="voyage-3")
+    return response.embeddings[0]
+
+
 async def embed_text(text: str) -> list[float]:
-    """Generate 1024-dim embedding using voyage-3.
+    """Generate 1024-dim embedding using voyage-3 with retry.
 
     Args:
         text: Text to embed
@@ -26,9 +34,13 @@ async def embed_text(text: str) -> list[float]:
     Returns:
         1024-dimension embedding vector
     """
-    client = _get_voyage_client()
-    response = client.embed([text], model="voyage-3")
-    return response.embeddings[0]
+    return await with_retry(
+        _embed_text_impl,
+        text,
+        max_attempts=3,
+        base_delay=1.0,
+        exceptions=(Exception,),
+    )
 
 
 async def embed_pointer(

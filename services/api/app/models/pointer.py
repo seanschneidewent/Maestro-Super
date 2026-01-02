@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import ARRAY, Float, ForeignKey, String, Text
+from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,6 +59,9 @@ class Pointer(Base):
     bbox_height: Mapped[float] = mapped_column(Float, nullable=False)
 
     png_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Cropped image path
+
+    # Flag for retry queue - set when embedding generation fails
+    needs_embedding: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Vector embedding for semantic search (Voyage 1024 dimensions)
     # Note: This column type only works with PostgreSQL + pgvector extension

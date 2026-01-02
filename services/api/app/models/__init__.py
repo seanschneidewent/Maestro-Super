@@ -11,6 +11,7 @@ from .pointer import Pointer
 from .pointer_reference import PointerReference
 from .query import Query
 from .usage_event import UsageEvent
+from .user_usage import UserUsage
 
 __all__ = [
     # Event type constants
@@ -26,4 +27,5 @@ __all__ = [
     "PointerReference",
     "Query",
     "UsageEvent",
+    "UserUsage",
 ]

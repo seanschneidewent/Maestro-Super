@@ -1,16 +1,22 @@
 """Query CRUD endpoints."""
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.auth.schemas import User
 from app.database.session import get_db
+from app.dependencies.rate_limit import check_rate_limit
 from app.models.project import Project
 from app.models.query import Query
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
+from app.services.usage import UsageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["queries"])
 
@@ -100,10 +106,13 @@ def update_query(
 async def stream_query(
     project_id: str,
     data: AgentQueryRequest,
+    user: User = Depends(check_rate_limit),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """
     Stream agent query response via Server-Sent Events.
+
+    Rate limited per user. Tracks token usage.
 
     Yields SSE events:
     - data: {"type": "text", "content": "..."} - Claude's reasoning
@@ -113,10 +122,29 @@ async def stream_query(
     - data: {"type": "error", "message": "..."} - Error event
     """
     verify_project_exists(project_id, db)
+    logger.info(f"Starting query stream for user {user.id} on project {project_id}")
+
+    # Increment request count
+    UsageService.increment_request(db, user.id)
 
     async def event_generator():
-        async for event in run_agent_query(db, project_id, data.query):
-            yield f"data: {json.dumps(event)}\n\n"
+        total_tokens = 0
+        try:
+            async for event in run_agent_query(db, project_id, data.query):
+                # Track tokens from done event
+                if event.get("type") == "done":
+                    usage = event.get("usage", {})
+                    total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
+
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            # Track token usage at end of stream
+            if total_tokens > 0:
+                try:
+                    UsageService.increment_tokens(db, user.id, total_tokens)
+                    logger.info(f"Tracked {total_tokens} tokens for user {user.id}")
+                except Exception as e:
+                    logger.warning(f"Failed to track tokens: {e}")
 
     return StreamingResponse(
         event_generator(),

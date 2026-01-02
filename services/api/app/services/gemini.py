@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 
 from app.config import get_settings
+from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,41 @@ def _get_gemini_client() -> genai.Client:
     return genai.Client(api_key=settings.gemini_api_key)
 
 
+async def _analyze_page_pass_1_impl(image_bytes: bytes) -> str:
+    """Internal implementation of Pass 1 analysis."""
+    client = _get_gemini_client()
+
+    prompt = (
+        "Describe this construction drawing page briefly. "
+        "Include: what type of page it is (floor plan, detail sheet, "
+        "elevation, section, schedule, notes, etc.), key elements visible "
+        "(keynotes, legends, details, general notes, dimensions, etc.), "
+        "and any notable features. Keep it to 2-3 sentences."
+    )
+
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=[
+            types.Content(
+                parts=[
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                    types.Part.from_text(text=prompt),
+                ]
+            )
+        ],
+    )
+
+    result = response.text
+    logger.info("Pass 1 analysis complete with Gemini Flash")
+    return result
+
+
 async def analyze_page_pass_1(image_bytes: bytes) -> str:
     """
     Pass 1: Analyze a construction drawing page and return initial context summary.
 
     Uses Gemini 2.0 Flash for fast, cost-effective image analysis.
+    Includes retry logic for transient failures.
 
     Args:
         image_bytes: PNG image bytes of the page
@@ -34,34 +65,15 @@ async def analyze_page_pass_1(image_bytes: bytes) -> str:
         Initial context summary (2-3 sentences)
     """
     try:
-        client = _get_gemini_client()
-
-        prompt = (
-            "Describe this construction drawing page briefly. "
-            "Include: what type of page it is (floor plan, detail sheet, "
-            "elevation, section, schedule, notes, etc.), key elements visible "
-            "(keynotes, legends, details, general notes, dimensions, etc.), "
-            "and any notable features. Keep it to 2-3 sentences."
+        return await with_retry(
+            _analyze_page_pass_1_impl,
+            image_bytes,
+            max_attempts=3,
+            base_delay=1.0,
+            exceptions=(Exception,),
         )
-
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[
-                types.Content(
-                    parts=[
-                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                        types.Part.from_text(text=prompt),
-                    ]
-                )
-            ],
-        )
-
-        result = response.text
-        logger.info("Pass 1 analysis complete with Gemini Flash")
-        return result
-
     except Exception as e:
-        logger.error(f"Gemini Pass 1 analysis failed: {e}")
+        logger.error(f"Gemini Pass 1 analysis failed after retries: {e}")
         raise
 
 
@@ -151,33 +163,23 @@ Return JSON:
         }
 
 
-async def analyze_page_pass2(
+async def _analyze_page_pass2_impl(
     page_context: str,
     pointers: list[dict],
 ) -> str:
-    """
-    Pass 2: Generate comprehensive page description from pointers.
+    """Internal implementation of Pass 2 analysis."""
+    client = _get_gemini_client()
 
-    Args:
-        page_context: Initial context from Pass 1
-        pointers: List of pointer data [{title, description, text_spans, references}]
+    # Format pointer data
+    pointer_summaries = []
+    for p in pointers:
+        refs = p.get("references", [])
+        ref_text = ", ".join([r["target_page"] for r in refs]) if refs else "None"
+        pointer_summaries.append(
+            f"- {p['title']}: {p['description']}\n  Text: {', '.join(p.get('text_spans', []))}\n  References: {ref_text}"
+        )
 
-    Returns:
-        Comprehensive page description for superintendents
-    """
-    try:
-        client = _get_gemini_client()
-
-        # Format pointer data
-        pointer_summaries = []
-        for p in pointers:
-            refs = p.get("references", [])
-            ref_text = ", ".join([r["target_page"] for r in refs]) if refs else "None"
-            pointer_summaries.append(
-                f"- {p['title']}: {p['description']}\n  Text: {', '.join(p.get('text_spans', []))}\n  References: {ref_text}"
-            )
-
-        prompt = f"""You are analyzing a construction drawing page for a superintendent.
+    prompt = f"""You are analyzing a construction drawing page for a superintendent.
 
 Initial Page Context:
 {page_context or "(No initial context)"}
@@ -192,49 +194,64 @@ Task: Generate a comprehensive description of this page based on all the details
 
 Keep the response focused and practical - 2-4 paragraphs."""
 
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+    )
+
+    logger.info("Pass 2 analysis complete with Gemini Flash")
+    return response.text
+
+
+async def analyze_page_pass2(
+    page_context: str,
+    pointers: list[dict],
+) -> str:
+    """
+    Pass 2: Generate comprehensive page description from pointers.
+
+    Includes retry logic for transient failures.
+
+    Args:
+        page_context: Initial context from Pass 1
+        pointers: List of pointer data [{title, description, text_spans, references}]
+
+    Returns:
+        Comprehensive page description for superintendents
+    """
+    try:
+        return await with_retry(
+            _analyze_page_pass2_impl,
+            page_context,
+            pointers,
+            max_attempts=3,
+            base_delay=1.0,
+            exceptions=(Exception,),
         )
-
-        logger.info("Pass 2 analysis complete with Gemini Flash")
-        return response.text
-
     except Exception as e:
-        logger.error(f"Gemini Pass 2 analysis failed: {e}")
+        logger.error(f"Gemini Pass 2 analysis failed after retries: {e}")
         raise
 
 
-async def analyze_discipline_pass3(
+async def _analyze_discipline_pass3_impl(
     discipline_name: str,
     page_summaries: list[dict],
     outbound_references: list[dict],
 ) -> str:
-    """
-    Pass 3: Roll up discipline context from all pages.
+    """Internal implementation of Pass 3 analysis."""
+    client = _get_gemini_client()
 
-    Args:
-        discipline_name: Display name of the discipline
-        page_summaries: List of [{page_name, full_context}]
-        outbound_references: List of [{source_page, target_page, target_discipline}]
+    # Format page summaries
+    pages_text = []
+    for p in page_summaries:
+        pages_text.append(f"**{p['page_name']}**:\n{p['full_context']}")
 
-    Returns:
-        Discipline-level summary
-    """
-    try:
-        client = _get_gemini_client()
+    # Format cross-discipline references
+    refs_text = []
+    for r in outbound_references:
+        refs_text.append(f"- {r['source_page']} references {r['target_page']} ({r['target_discipline']})")
 
-        # Format page summaries
-        pages_text = []
-        for p in page_summaries:
-            pages_text.append(f"**{p['page_name']}**:\n{p['full_context']}")
-
-        # Format cross-discipline references
-        refs_text = []
-        for r in outbound_references:
-            refs_text.append(f"- {r['source_page']} references {r['target_page']} ({r['target_discipline']})")
-
-        prompt = f"""Summarize the scope of the {discipline_name} discipline for a construction superintendent.
+    prompt = f"""Summarize the scope of the {discipline_name} discipline for a construction superintendent.
 
 Pages in this discipline:
 {chr(10).join(pages_text) if pages_text else "(No pages processed yet)"}
@@ -249,14 +266,43 @@ Task: Create a discipline-level summary that includes:
 
 Keep it concise - 2-3 paragraphs."""
 
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+    )
+
+    logger.info(f"Pass 3 (discipline rollup) complete for {discipline_name}")
+    return response.text
+
+
+async def analyze_discipline_pass3(
+    discipline_name: str,
+    page_summaries: list[dict],
+    outbound_references: list[dict],
+) -> str:
+    """
+    Pass 3: Roll up discipline context from all pages.
+
+    Includes retry logic for transient failures.
+
+    Args:
+        discipline_name: Display name of the discipline
+        page_summaries: List of [{page_name, full_context}]
+        outbound_references: List of [{source_page, target_page, target_discipline}]
+
+    Returns:
+        Discipline-level summary
+    """
+    try:
+        return await with_retry(
+            _analyze_discipline_pass3_impl,
+            discipline_name,
+            page_summaries,
+            outbound_references,
+            max_attempts=3,
+            base_delay=1.0,
+            exceptions=(Exception,),
         )
-
-        logger.info(f"Pass 3 (discipline rollup) complete for {discipline_name}")
-        return response.text
-
     except Exception as e:
-        logger.error(f"Gemini Pass 3 analysis failed: {e}")
+        logger.error(f"Gemini Pass 3 analysis failed after retries: {e}")
         raise
