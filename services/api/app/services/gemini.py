@@ -152,36 +152,111 @@ Return JSON:
 
 
 async def analyze_page_pass2(
-    image_base64: str,
-    pass1_output: dict,
-    cross_references: list[dict],
-) -> dict:
+    page_context: str,
+    pointers: list[dict],
+) -> str:
     """
-    Pass 2: Enrich page context with cross-references.
+    Pass 2: Generate comprehensive page description from pointers.
 
     Args:
-        image_base64: Base64 encoded page image
-        pass1_output: Output from pass 1 analysis
-        cross_references: References to/from other pages
+        page_context: Initial context from Pass 1
+        pointers: List of pointer data [{title, description, text_spans, references}]
 
     Returns:
-        Dictionary with pass 2 analysis results
+        Comprehensive page description for superintendents
     """
-    raise NotImplementedError("Gemini Pass 2 not yet implemented")
+    try:
+        client = _get_gemini_client()
+
+        # Format pointer data
+        pointer_summaries = []
+        for p in pointers:
+            refs = p.get("references", [])
+            ref_text = ", ".join([r["target_page"] for r in refs]) if refs else "None"
+            pointer_summaries.append(
+                f"- {p['title']}: {p['description']}\n  Text: {', '.join(p.get('text_spans', []))}\n  References: {ref_text}"
+            )
+
+        prompt = f"""You are analyzing a construction drawing page for a superintendent.
+
+Initial Page Context:
+{page_context or "(No initial context)"}
+
+Details Highlighted on This Page:
+{chr(10).join(pointer_summaries) if pointer_summaries else "(No details highlighted)"}
+
+Task: Generate a comprehensive description of this page based on all the details that have been highlighted. Include:
+1. How the details relate to each other
+2. Key information a superintendent would need
+3. Any cross-references to other pages
+
+Keep the response focused and practical - 2-4 paragraphs."""
+
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+        )
+
+        logger.info("Pass 2 analysis complete with Gemini Flash")
+        return response.text
+
+    except Exception as e:
+        logger.error(f"Gemini Pass 2 analysis failed: {e}")
+        raise
 
 
 async def analyze_discipline_pass3(
-    discipline_code: str,
-    page_contexts: list[dict],
-) -> dict:
+    discipline_name: str,
+    page_summaries: list[dict],
+    outbound_references: list[dict],
+) -> str:
     """
     Pass 3: Roll up discipline context from all pages.
 
     Args:
-        discipline_code: Discipline code (A, S, M, E, P, etc.)
-        page_contexts: List of page context summaries
+        discipline_name: Display name of the discipline
+        page_summaries: List of [{page_name, full_context}]
+        outbound_references: List of [{source_page, target_page, target_discipline}]
 
     Returns:
-        Dictionary with discipline-level analysis
+        Discipline-level summary
     """
-    raise NotImplementedError("Gemini Pass 3 not yet implemented")
+    try:
+        client = _get_gemini_client()
+
+        # Format page summaries
+        pages_text = []
+        for p in page_summaries:
+            pages_text.append(f"**{p['page_name']}**:\n{p['full_context']}")
+
+        # Format cross-discipline references
+        refs_text = []
+        for r in outbound_references:
+            refs_text.append(f"- {r['source_page']} references {r['target_page']} ({r['target_discipline']})")
+
+        prompt = f"""Summarize the scope of the {discipline_name} discipline for a construction superintendent.
+
+Pages in this discipline:
+{chr(10).join(pages_text) if pages_text else "(No pages processed yet)"}
+
+References to other disciplines:
+{chr(10).join(refs_text) if refs_text else "(No cross-discipline references)"}
+
+Task: Create a discipline-level summary that includes:
+1. The main scope and elements covered across all pages
+2. Key details a superintendent should know
+3. Significant connections to other disciplines
+
+Keep it concise - 2-3 paragraphs."""
+
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+        )
+
+        logger.info(f"Pass 3 (discipline rollup) complete for {discipline_name}")
+        return response.text
+
+    except Exception as e:
+        logger.error(f"Gemini Pass 3 analysis failed: {e}")
+        raise
