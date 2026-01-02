@@ -75,3 +75,32 @@ export interface Session {
   title: string;
   date: Date;
 }
+
+// Hierarchy types for mind map visualization
+export interface PointerSummary {
+  id: string;
+  title: string;
+}
+
+export interface PageInHierarchy {
+  id: string;
+  pageName: string;
+  processedPass1: boolean;
+  processedPass2: boolean;
+  pointerCount: number;
+  pointers: PointerSummary[];
+}
+
+export interface DisciplineInHierarchy {
+  id: string;
+  name: string;
+  displayName: string;
+  processed: boolean;
+  pages: PageInHierarchy[];
+}
+
+export interface ProjectHierarchy {
+  id: string;
+  name: string;
+  disciplines: DisciplineInHierarchy[];
+}

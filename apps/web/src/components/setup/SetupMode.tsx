@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
+import { ContextMindMap } from './ContextMindMap';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType } from '../../types';
@@ -56,8 +57,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [selectedForDeletion, setSelectedForDeletion] = useState<Set<string>>(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const contextPanelRef = useRef<HTMLDivElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
@@ -264,6 +265,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     // Call API
     try {
       await api.pointers.delete(id);
+      // Trigger hierarchy refresh
+      setHierarchyRefresh(prev => prev + 1);
     } catch (err) {
       console.error('Failed to delete pointer:', err);
     }
@@ -285,6 +288,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         bboxHeight: data.bounds.hNorm,
       });
 
+      // Trigger hierarchy refresh
+      setHierarchyRefresh(prev => prev + 1);
+
       return {
         id: created.id,
         pageId: created.pageId,
@@ -304,28 +310,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       return null;
     }
   }, [selectedFile?.id]);
-
-  // Scroll selected pointer block to center of panel
-  useEffect(() => {
-    if (!selectedPointerId || !contextPanelRef.current) return;
-
-    const container = contextPanelRef.current;
-    const selectedElement = container.querySelector(`[data-pointer-id="${selectedPointerId}"]`) as HTMLElement;
-
-    if (selectedElement) {
-      const containerHeight = container.clientHeight;
-      const elementTop = selectedElement.offsetTop;
-      const elementHeight = selectedElement.offsetHeight;
-
-      // Calculate scroll position to center the element
-      const scrollTo = elementTop - (containerHeight / 2) + (elementHeight / 2);
-
-      container.scrollTo({
-        top: Math.max(0, scrollTo),
-        behavior: 'smooth'
-      });
-    }
-  }, [selectedPointerId]);
 
   const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -718,9 +702,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       {/* Context Panel */}
       <CollapsiblePanel
         side="right"
-        defaultWidth={320}
-        minWidth={280}
-        maxWidth={450}
+        defaultWidth={400}
+        minWidth={320}
+        maxWidth={600}
         collapsedIcon={<Layers size={20} />}
         collapsedLabel="Context"
         className="border-l border-slate-800/50 glass-panel"
@@ -729,56 +713,19 @@ export const SetupMode: React.FC<SetupModeProps> = ({
            <div className="p-4 border-b border-white/5">
               <h2 className="font-semibold text-slate-100 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>
-                Context Extraction
+                Project Context
               </h2>
            </div>
-           <div ref={contextPanelRef} className="flex-1 p-4 flex flex-col items-center justify-start text-center text-slate-500 overflow-y-auto dark-scroll">
-              {pointers.length === 0 ? (
-                <div className="animate-fade-in">
-                  <p className="text-sm text-slate-500">Draw a box on the plan to extract context.</p>
-                </div>
-              ) : (
-                  <div className="w-full text-left space-y-3 animate-slide-up">
-                    {pointers.filter(p => p.pageId === selectedFile?.id).map(pointer => (
-                      <div
-                        key={pointer.id}
-                        data-pointer-id={pointer.id}
-                        onClick={() => setSelectedPointerId(pointer.id)}
-                        className={`relative p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border transition-all cursor-pointer group ${
-                          selectedPointerId === pointer.id
-                            ? 'border-cyan-400 ring-1 ring-cyan-400/50'
-                            : 'border-cyan-500/20 hover:border-cyan-400/40'
-                        }`}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deletePointer(pointer.id);
-                          }}
-                          className="absolute top-2 right-2 p-1 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          <X size={14} />
-                        </button>
-                        <input
-                          type="text"
-                          value={pointer.title}
-                          onChange={(e) => updatePointer(pointer.id, { title: e.target.value })}
-                          placeholder="Title"
-                          className="w-full bg-transparent text-sm font-medium text-cyan-300 placeholder-cyan-500/50 outline-none mb-2 pr-6"
-                        />
-                        <textarea
-                          value={pointer.description}
-                          onChange={(e) => updatePointer(pointer.id, { description: e.target.value })}
-                          placeholder="Description..."
-                          rows={2}
-                          className="w-full bg-transparent text-sm text-slate-300 placeholder-slate-500 outline-none resize-none"
-                        />
-                      </div>
-                    ))}
-                    {/* Spacer to allow last items to be centered */}
-                    <div className="h-[50vh] flex-shrink-0" />
-                  </div>
-              )}
+           <div className="flex-1 overflow-hidden">
+              <ContextMindMap
+                projectId={projectId}
+                activePageId={selectedFile?.id}
+                refreshTrigger={hierarchyRefresh}
+                onPageClick={(pageId) => {
+                  const file = findFileById(uploadedFiles, pageId);
+                  if (file) handleFileSelect(file);
+                }}
+              />
            </div>
         </div>
       </CollapsiblePanel>

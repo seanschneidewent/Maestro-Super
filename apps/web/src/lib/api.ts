@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import type { ProjectHierarchy } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -225,6 +226,7 @@ export const api = {
     }),
     get: (id: string) => request<Project>(`/projects/${id}`),
     getFull: (id: string) => request<BulkUploadResponse>(`/projects/${id}/full`),
+    getHierarchy: (id: string) => request<ProjectHierarchy>(`/projects/${id}/hierarchy`),
     update: (id: string, data: { name?: string; status?: string }) =>
       request<Project>(`/projects/${id}`, { method: 'PATCH', body: data }),
     delete: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
