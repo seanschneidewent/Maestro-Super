@@ -287,6 +287,15 @@
 </head>
   <body>
     <div id="root"></div>
+    <script>
+      // iOS Safari keyboard dismiss fix - force viewport recalculation
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', function() {
+          document.documentElement.style.height = window.visualViewport.height + 'px';
+          document.body.style.height = window.visualViewport.height + 'px';
+        });
+      }
+    </script>
     <script type="module" src="/src/index.tsx"></script>
 </body>
 </html>
