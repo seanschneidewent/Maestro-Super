@@ -150,7 +150,8 @@ export function ContextMindMap({
 
     console.log('[MindMap Click]', { depth, content, state: nodeData.state });
 
-    if (depth === 1) {
+    // Markmap depth: 1=root, 2=discipline, 3=page, 4=pointer
+    if (depth === 2) {
       // Discipline click
       const discName = extractDisciplineName(content);
       console.log('[MindMap] Discipline click:', discName);
@@ -159,7 +160,7 @@ export function ContextMindMap({
       if (discId && handlersRef.current.onDisciplineClick) {
         handlersRef.current.onDisciplineClick(discId);
       }
-    } else if (depth === 2) {
+    } else if (depth === 3) {
       // Page click
       const pageName = extractPageName(content);
       console.log('[MindMap] Page click:', pageName);
@@ -169,7 +170,7 @@ export function ContextMindMap({
       if (pageId && handlersRef.current.onPageClick) {
         handlersRef.current.onPageClick(pageId, discId || '');
       }
-    } else if (depth === 3) {
+    } else if (depth === 4) {
       // Pointer click - need to find parent page name using path
       const pointerTitle = extractPointerTitle(content);
       console.log('[MindMap] Pointer click:', pointerTitle);
