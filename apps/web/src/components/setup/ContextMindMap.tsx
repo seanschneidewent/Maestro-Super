@@ -130,6 +130,63 @@ export function ContextMindMap({
   // Track current page name for pointer lookup (set when traversing to depth 2)
   const currentPageNameRef = useRef<string | null>(null);
 
+  // Handle node click - use callback refs to avoid stale closures
+  const handlersRef = useRef({
+    onPageClick,
+    onPointerClick,
+    onDisciplineClick,
+  });
+
+  useEffect(() => {
+    handlersRef.current = { onPageClick, onPointerClick, onDisciplineClick };
+  }, [onPageClick, onPointerClick, onDisciplineClick]);
+
+  const handleNodeClick = (nodeData: any) => {
+    if (!lookupMapsRef.current) return;
+    const maps = lookupMapsRef.current;
+    const depth = nodeData.depth;
+    const content = nodeData.content || '';
+
+    if (depth === 1) {
+      // Discipline click
+      const discName = extractDisciplineName(content);
+      if (!discName) return;
+      const discId = maps.disciplineNameToId.get(discName);
+      if (discId && handlersRef.current.onDisciplineClick) {
+        handlersRef.current.onDisciplineClick(discId);
+      }
+    } else if (depth === 2) {
+      // Page click
+      const pageName = extractPageName(content);
+      if (!pageName) return;
+      const pageId = maps.pageNameToId.get(pageName);
+      const discId = pageId ? maps.pageIdToDisciplineId.get(pageId) : undefined;
+      if (pageId && handlersRef.current.onPageClick) {
+        handlersRef.current.onPageClick(pageId, discId || '');
+      }
+    } else if (depth === 3) {
+      // Pointer click - need to find parent page name
+      const pointerTitle = extractPointerTitle(content);
+      if (!pointerTitle) return;
+
+      // Traverse up to find parent page node
+      let parentNode = nodeData.parent;
+      while (parentNode && parentNode.depth !== 2) {
+        parentNode = parentNode.parent;
+      }
+      if (!parentNode) return;
+
+      const pageName = extractPageName(parentNode.content || '');
+      if (!pageName) return;
+
+      const key = `${pageName}:${pointerTitle}`;
+      const ptrData = maps.pointerKeyToData.get(key);
+      if (ptrData && handlersRef.current.onPointerClick) {
+        handlersRef.current.onPointerClick(ptrData.pointerId, ptrData.pageId);
+      }
+    }
+  };
+
   // Initialize and update Markmap
   useEffect(() => {
     if (!svgRef.current || !hierarchy) return;
@@ -147,55 +204,43 @@ export function ContextMindMap({
           if (node.depth === 2) return '#94a3b8'; // Page: slate
           return '#4ade80'; // Pointer: green
         },
-        onClick: (node) => {
-          if (!lookupMapsRef.current) return;
-          const maps = lookupMapsRef.current;
-
-          if (node.depth === 1) {
-            // Discipline click
-            const discName = extractDisciplineName(node.content || '');
-            if (!discName) return;
-            const discId = maps.disciplineNameToId.get(discName);
-            if (discId && onDisciplineClick) {
-              onDisciplineClick(discId);
-            }
-          } else if (node.depth === 2) {
-            // Page click
-            const pageName = extractPageName(node.content || '');
-            if (!pageName) return;
-            const pageId = maps.pageNameToId.get(pageName);
-            const discId = pageId ? maps.pageIdToDisciplineId.get(pageId) : undefined;
-            if (pageId && onPageClick) {
-              onPageClick(pageId, discId || '');
-            }
-          } else if (node.depth === 3) {
-            // Pointer click - need to find parent page name
-            const pointerTitle = extractPointerTitle(node.content || '');
-            if (!pointerTitle) return;
-
-            // Traverse up to find parent page node
-            let parentNode = node.parent;
-            while (parentNode && parentNode.depth !== 2) {
-              parentNode = parentNode.parent;
-            }
-            if (!parentNode) return;
-
-            const pageName = extractPageName(parentNode.content || '');
-            if (!pageName) return;
-
-            const key = `${pageName}:${pointerTitle}`;
-            const ptrData = maps.pointerKeyToData.get(key);
-            if (ptrData && onPointerClick) {
-              onPointerClick(ptrData.pointerId, ptrData.pageId);
-            }
-          }
-        },
       });
     }
 
     markmapRef.current.setData(root);
     markmapRef.current.fit();
-  }, [hierarchy, activePageId, onPageClick, onPointerClick, onDisciplineClick]);
+
+    // Add click handlers to nodes after rendering
+    // Markmap uses d3 to render, so we need to wait for the render to complete
+    setTimeout(() => {
+      if (!svgRef.current) return;
+
+      // Query all node groups
+      const nodeGroups = svgRef.current.querySelectorAll('g.markmap-node');
+      nodeGroups.forEach((g) => {
+        // Get the bound data from the d3 selection
+        const d3Node = (g as any).__data__;
+        if (!d3Node || d3Node.depth === 0) return; // Skip root node
+
+        // Make the node look clickable
+        (g as HTMLElement).style.cursor = 'pointer';
+
+        // Use data attribute to mark as initialized to avoid duplicate handlers
+        if (g.getAttribute('data-click-init')) return;
+        g.setAttribute('data-click-init', 'true');
+
+        // Add single click handler to the group element
+        g.addEventListener('click', (e: Event) => {
+          e.stopPropagation();
+          // Re-read __data__ at click time in case it changed
+          const nodeData = (g as any).__data__;
+          if (nodeData) {
+            handleNodeClick(nodeData);
+          }
+        });
+      });
+    }, 350); // Wait for markmap animation to complete
+  }, [hierarchy, activePageId]);
 
   if (loading) {
     return (

@@ -15,7 +15,14 @@
       "WebFetch(domain:courteous-victory-production.up.railway.app)",
       "Bash(cd:*)",
       "Bash(find:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(venvScriptspip install anthropic PyMuPDF supabase)",
+      "Bash(./venv/Scripts/pip install:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(dir:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm run build:*)",
+      "Bash(pnpm list:*)"
     ],
     "deny": [],
     "ask": []
