@@ -1,12 +1,16 @@
 """Query CRUD endpoints."""
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.models.project import Project
 from app.models.query import Query
-from app.schemas.query import QueryCreate, QueryResponse, QueryUpdate
+from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
+from app.services.agent import run_agent_query
 
 router = APIRouter(tags=["queries"])
 
@@ -90,3 +94,32 @@ def update_query(
     db.commit()
     db.refresh(query)
     return query
+
+
+@router.post("/projects/{project_id}/queries/stream")
+async def stream_query(
+    project_id: str,
+    data: AgentQueryRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """
+    Stream agent query response via Server-Sent Events.
+
+    Yields SSE events:
+    - data: {"type": "text", "content": "..."} - Claude's reasoning
+    - data: {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
+    - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
+    - data: {"type": "done", "trace": [...], "usage": {...}} - Final event
+    - data: {"type": "error", "message": "..."} - Error event
+    """
+    verify_project_exists(project_id, db)
+
+    async def event_generator():
+        async for event in run_agent_query(db, project_id, data.query):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
