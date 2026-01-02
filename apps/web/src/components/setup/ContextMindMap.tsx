@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
-import { api } from '../../lib/api';
+import { useHierarchy, useInvalidateHierarchy } from '../../hooks/useHierarchy';
+import { MindMapSkeleton } from '../ui/Skeleton';
 import type { ProjectHierarchy, PageInHierarchy } from '../../types';
 
 interface ContextMindMapProps {
@@ -82,29 +83,25 @@ export function ContextMindMap({
 }: ContextMindMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const markmapRef = useRef<Markmap | null>(null);
-  const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const lookupMapsRef = useRef<HierarchyMaps | null>(null);
 
-  // Fetch hierarchy (re-fetches when refreshTrigger changes)
+  // Use React Query for data fetching with caching
+  const { data: hierarchy, isLoading, error, refetch } = useHierarchy(projectId);
+  const invalidateHierarchy = useInvalidateHierarchy();
+
+  // Update lookup maps when hierarchy changes
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await api.projects.getHierarchy(projectId);
-        setHierarchy(data);
-        lookupMapsRef.current = buildLookupMaps(data);
-      } catch (err) {
-        console.error('Failed to load hierarchy:', err);
-        setError('Failed to load project hierarchy');
-      } finally {
-        setLoading(false);
-      }
+    if (hierarchy) {
+      lookupMapsRef.current = buildLookupMaps(hierarchy);
     }
-    load();
-  }, [projectId, refreshTrigger]);
+  }, [hierarchy]);
+
+  // Invalidate cache when refreshTrigger changes (e.g., after pointer creation)
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      invalidateHierarchy(projectId);
+    }
+  }, [refreshTrigger, projectId, invalidateHierarchy]);
 
   // Decode HTML entities in content (markmap stores ★ as &#x2605;)
   function decodeHtmlEntities(str: string): string {
@@ -251,18 +248,20 @@ export function ContextMindMap({
     }, 350); // Wait for markmap animation to complete
   }, [hierarchy, activePageId]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500">
-        <div className="animate-pulse">Loading hierarchy...</div>
-      </div>
-    );
+  if (isLoading) {
+    return <MindMapSkeleton />;
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-red-400">
-        {error}
+      <div className="flex flex-col items-center justify-center h-full text-red-400 gap-3">
+        <p>Failed to load project hierarchy</p>
+        <button
+          onClick={() => refetch()}
+          className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg text-white transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }

@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { SetupMode } from './components/setup/SetupMode';
 import { UseMode } from './components/use/UseMode';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
+import { queryClient } from './lib/queryClient';
 import { AppMode, Project } from './types';
 import { Settings, Loader2 } from 'lucide-react';
 import { api } from './lib/api';
@@ -233,22 +236,25 @@ const App: React.FC = () => {
   }
 
   return (
-    <ErrorBoundary>
-      <ToastProvider>
-        {mode === AppMode.SETUP ? (
-          <SetupMode
-            mode={mode}
-            setMode={setMode}
-            projectId={project.id}
-            localFileMapRef={localFileMapRef}
-            setupState={setupState}
-            setSetupState={setSetupState}
-          />
-        ) : (
-          <UseMode mode={mode} setMode={setMode} projectId={project.id} />
-        )}
-      </ToastProvider>
-    </ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <ToastProvider>
+          {mode === AppMode.SETUP ? (
+            <SetupMode
+              mode={mode}
+              setMode={setMode}
+              projectId={project.id}
+              localFileMapRef={localFileMapRef}
+              setupState={setupState}
+              setSetupState={setSetupState}
+            />
+          ) : (
+            <UseMode mode={mode} setMode={setMode} projectId={project.id} />
+          )}
+        </ToastProvider>
+      </ErrorBoundary>
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
   );
 };
 

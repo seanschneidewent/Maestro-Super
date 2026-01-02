@@ -2,7 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.database.session import get_db
@@ -214,7 +216,7 @@ def get_project_full(
 def get_project_hierarchy(
     project_id: str,
     db: Session = Depends(get_db),
-) -> dict:
+) -> JSONResponse:
     """Get project with full hierarchy including pointers and processing states.
 
     Returns a structure optimized for mind map visualization with:
@@ -222,6 +224,8 @@ def get_project_hierarchy(
     - Disciplines with processed status
     - Pages with pointer counts and processing states
     - Pointer titles for each page
+
+    Response is cached for 30 seconds (private cache, per-user).
     """
     project = (
         db.query(Project)
@@ -237,7 +241,7 @@ def get_project_hierarchy(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    return {
+    result = {
         "id": str(project.id),
         "name": project.name,
         "disciplines": [
@@ -267,6 +271,11 @@ def get_project_hierarchy(
             for d in sorted(project.disciplines, key=lambda x: x.display_name)
         ],
     }
+
+    return JSONResponse(
+        content=jsonable_encoder(result),
+        headers={"Cache-Control": "private, max-age=30"},  # 30s browser cache
+    )
 
 
 @router.post("/{project_id}/backfill-embeddings")
