@@ -41,7 +41,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
 
   return (
-    <div className="flex h-screen w-full bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 overflow-hidden font-sans relative blueprint-grid">
+    <div className="flex h-full w-full bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 overflow-hidden font-sans relative blueprint-grid">
 
       {/* LEFT PANEL: Plans Tree */}
       <div

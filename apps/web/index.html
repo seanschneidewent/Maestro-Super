@@ -98,6 +98,17 @@
       }
     </script>
     <style>
+      /* Viewport lock - prevents body scroll on iPad */
+      html, body, #root {
+        height: 100%;
+        height: 100dvh; /* Dynamic viewport height for iOS */
+        width: 100%;
+        overflow: hidden;
+        position: fixed;
+        top: 0;
+        left: 0;
+      }
+
       /* Custom scrollbar for dark mode */
       .dark-scroll::-webkit-scrollbar {
         width: 6px;

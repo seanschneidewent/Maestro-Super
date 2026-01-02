@@ -617,7 +617,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   };
 
   return (
-    <div className="relative flex h-screen w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
+    <div className="relative flex h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
       {/* Sidebar: File Tree */}
       <CollapsiblePanel
         side="left"
