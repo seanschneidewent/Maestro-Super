@@ -1,19 +1,26 @@
 """Project CRUD endpoints."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.database.session import get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
+from app.models.pointer import Pointer
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.services.voyage import embed_pointer as generate_embedding
+
 from app.schemas.upload import (
     BulkUploadRequest,
     BulkUploadResponse,
     DisciplineWithPagesResponse,
     PageInDisciplineResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -198,3 +205,49 @@ def get_project_full(
         "project": project,
         "disciplines": discipline_responses,
     }
+
+
+@router.post("/{project_id}/backfill-embeddings")
+async def backfill_embeddings(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Backfill embeddings for all pointers with null embedding.
+
+    Processes all pointers in the project that don't have embeddings yet.
+    Useful for existing pointers created before embedding was integrated.
+    """
+    # Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all pointers in project without embeddings
+    pointers = (
+        db.query(Pointer)
+        .join(Page)
+        .join(Discipline)
+        .filter(
+            Discipline.project_id == project_id,
+            Pointer.embedding == None,  # noqa: E711
+        )
+        .all()
+    )
+
+    success = 0
+    failed = 0
+    for pointer in pointers:
+        try:
+            embedding = await generate_embedding(
+                pointer.title,
+                pointer.description,
+                pointer.text_spans,
+            )
+            pointer.embedding = embedding
+            success += 1
+        except Exception as e:
+            logger.warning(f"Failed to embed pointer {pointer.id}: {e}")
+            failed += 1
+
+    db.commit()
+    return {"backfilled": success, "failed": failed, "total": len(pointers)}

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # AI Services (for later phases)
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
+    voyage_api_key: str | None = None
 
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production

@@ -20,6 +20,7 @@ from app.schemas.pointer import (
 from app.services.gemini import analyze_pointer
 from app.services.ocr import crop_pdf_region, extract_text_with_positions
 from app.services.storage import download_file, upload_snapshot
+from app.services.voyage import embed_pointer as generate_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,20 @@ async def create_pointer(
     db.commit()
     db.refresh(pointer)
     logger.info(f"Pointer {pointer_id} created successfully")
+
+    # 10. Generate embedding (non-blocking on failure)
+    try:
+        embedding = await generate_embedding(
+            pointer.title,
+            pointer.description,
+            pointer.text_spans,
+        )
+        pointer.embedding = embedding
+        db.commit()
+        logger.info(f"Generated embedding for pointer {pointer_id}")
+    except Exception as e:
+        logger.warning(f"Failed to generate embedding for {pointer_id}: {e}")
+        # Continue without embedding - can be backfilled later
 
     return PointerResponse.from_orm_with_embedding_check(pointer)
 
