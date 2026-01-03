@@ -27,7 +27,8 @@
       "Bash(./venv/Scripts/python.exe:*)",
       "Bash(cat:*)",
       "Bash(npx tsc:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(\" button on right side \\(shows when not on last page\\)\n- Buttons positioned at vertical center of viewer\n- More reliable on iPad than touch gestures\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

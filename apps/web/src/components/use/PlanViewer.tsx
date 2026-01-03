@@ -405,27 +405,33 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
           <span className="text-sm font-medium text-slate-700">{currentAgentPage.pageName}</span>
         </div>
 
-        {/* Navigation - bottom center */}
+        {/* Navigation - side buttons */}
         {selectedPages.length > 1 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl px-3 py-2 shadow-sm">
-            <button
-              onClick={goToPrevAgentPage}
-              disabled={agentPageIndex <= 0}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <span className="text-sm text-slate-600 min-w-[80px] text-center">
-              {agentPageIndex + 1} / {selectedPages.length}
-            </span>
-            <button
-              onClick={goToNextAgentPage}
-              disabled={agentPageIndex >= selectedPages.length - 1}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
+          <>
+            {/* Previous page - left side */}
+            {agentPageIndex > 0 && (
+              <button
+                onClick={goToPrevAgentPage}
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-md border border-slate-200/50 rounded-xl px-3 py-2 shadow-lg hover:bg-slate-50 transition-all"
+              >
+                <ChevronLeft size={18} className="text-slate-600" />
+                <span className="text-sm font-medium text-slate-600">Prev</span>
+              </button>
+            )}
+
+            {/* Next page - right side */}
+            {agentPageIndex < selectedPages.length - 1 && (
+              <button
+                onClick={goToNextAgentPage}
+                className="absolute right-2 top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-md border border-slate-200/50 rounded-xl px-3 py-2 shadow-lg hover:bg-slate-50 transition-all"
+              >
+                <span className="text-sm font-medium text-slate-600">
+                  pg. {agentPageIndex + 1}/{selectedPages.length}
+                </span>
+                <ChevronRight size={18} className="text-slate-600" />
+              </button>
+            )}
+          </>
         )}
 
         {/* Zoom toolbar */}
