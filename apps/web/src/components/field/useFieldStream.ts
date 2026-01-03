@@ -5,6 +5,25 @@ import { transformAgentResponse, extractLatestThinking } from './transformRespon
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+// Pointer data from select_pointers tool result
+export interface AgentSelectedPointer {
+  pointerId: string
+  title: string
+  bboxX: number
+  bboxY: number
+  bboxWidth: number
+  bboxHeight: number
+}
+
+// Page with its selected pointers
+export interface AgentSelectedPage {
+  pageId: string
+  pageName: string
+  filePath: string
+  disciplineId: string
+  pointers: AgentSelectedPointer[]
+}
+
 interface UseFieldStreamOptions {
   projectId: string
   renderedPages: Map<string, string>
@@ -18,11 +37,12 @@ interface UseFieldStreamReturn {
   thinkingText: string
   finalAnswer: string
   trace: AgentTraceStep[]
+  selectedPages: AgentSelectedPage[]
   response: FieldResponse | null
   error: string | null
   reset: () => void
   abort: () => void
-  restore: (trace: AgentTraceStep[], finalAnswer: string) => void
+  restore: (trace: AgentTraceStep[], finalAnswer: string, pages?: AgentSelectedPage[]) => void
 }
 
 interface AgentMessageAccumulator {
@@ -41,9 +61,11 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   const [thinkingText, setThinkingText] = useState('')
   const [finalAnswer, setFinalAnswer] = useState('')
   const [trace, setTrace] = useState<AgentTraceStep[]>([])
+  const [selectedPages, setSelectedPages] = useState<AgentSelectedPage[]>([])
   const [response, setResponse] = useState<FieldResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const selectedPagesRef = useRef<AgentSelectedPage[]>([])
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {
@@ -64,6 +86,8 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       setThinkingText('')
       setFinalAnswer('')
       setTrace([])
+      setSelectedPages([])
+      selectedPagesRef.current = []
       setResponse(null)
       setError(null)
 
@@ -234,10 +258,71 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           agentMessage.trace.push(newStep)
           setTrace([...agentMessage.trace])
 
-          // Could preview results
-          const result = data.result as { pointers?: unknown[] }
-          if (result?.pointers && Array.isArray(result.pointers)) {
-            setThinkingText(`Found ${result.pointers.length} locations...`)
+          // Extract selected pages from select_pointers tool
+          if (data.tool === 'select_pointers') {
+            const result = data.result as {
+              pointers?: Array<{
+                pointer_id: string
+                title: string
+                page_id: string
+                page_name: string
+                file_path: string
+                discipline_id: string
+                bbox_x: number
+                bbox_y: number
+                bbox_width: number
+                bbox_height: number
+              }>
+            }
+
+            if (result?.pointers && Array.isArray(result.pointers)) {
+              // Group pointers by page
+              const pageMap = new Map<string, AgentSelectedPage>()
+
+              for (const p of result.pointers) {
+                if (!p.page_id || !p.file_path) continue
+
+                let page = pageMap.get(p.page_id)
+                if (!page) {
+                  page = {
+                    pageId: p.page_id,
+                    pageName: p.page_name || 'Unknown',
+                    filePath: p.file_path,
+                    disciplineId: p.discipline_id || '',
+                    pointers: [],
+                  }
+                  pageMap.set(p.page_id, page)
+                }
+
+                page.pointers.push({
+                  pointerId: p.pointer_id,
+                  title: p.title,
+                  bboxX: p.bbox_x,
+                  bboxY: p.bbox_y,
+                  bboxWidth: p.bbox_width,
+                  bboxHeight: p.bbox_height,
+                })
+              }
+
+              // Merge with existing selected pages (avoid duplicates)
+              const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
+              const newPages = Array.from(pageMap.values()).filter(
+                (p) => !existingPageIds.has(p.pageId)
+              )
+
+              if (newPages.length > 0) {
+                selectedPagesRef.current = [...selectedPagesRef.current, ...newPages]
+                setSelectedPages([...selectedPagesRef.current])
+              }
+
+              setThinkingText(`Found ${result.pointers.length} locations...`)
+            }
+          } else {
+            // Could preview results for other tools
+            const result = data.result as { pointers?: unknown[] }
+            if (result?.pointers && Array.isArray(result.pointers)) {
+              setThinkingText(`Found ${result.pointers.length} locations...`)
+            }
           }
         }
         break
@@ -313,19 +398,23 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setThinkingText('')
     setFinalAnswer('')
     setTrace([])
+    setSelectedPages([])
+    selectedPagesRef.current = []
     setResponse(null)
     setError(null)
   }, [abort])
 
-  const restore = useCallback((restoredTrace: AgentTraceStep[], restoredFinalAnswer: string) => {
+  const restore = useCallback((restoredTrace: AgentTraceStep[], restoredFinalAnswer: string, pages?: AgentSelectedPage[]) => {
     abort()
     setIsStreaming(false)
     setThinkingText('')
     setFinalAnswer(restoredFinalAnswer)
     setTrace(restoredTrace)
+    setSelectedPages(pages || [])
+    selectedPagesRef.current = pages || []
     setResponse(null)
     setError(null)
   }, [abort])
 
-  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, response, error, reset, abort, restore }
+  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, selectedPages, response, error, reset, abort, restore }
 }

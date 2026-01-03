@@ -270,7 +270,7 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
         pointer_ids: List of pointer UUIDs to highlight
 
     Returns:
-        Dict with selected_pointer_ids and pointer details
+        Dict with selected_pointer_ids and pointer details including bbox and page info
     """
     pointers = (
         db.query(Pointer)
@@ -286,6 +286,13 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
                 "pointer_id": str(p.id),
                 "title": p.title,
                 "page_id": str(p.page_id),
+                "page_name": p.page.page_name if p.page else None,
+                "file_path": p.page.file_path if p.page else None,
+                "discipline_id": str(p.page.discipline_id) if p.page else None,
+                "bbox_x": p.bbox_x,
+                "bbox_y": p.bbox_y,
+                "bbox_width": p.bbox_width,
+                "bbox_height": p.bbox_height,
             }
             for p in pointers
         ],

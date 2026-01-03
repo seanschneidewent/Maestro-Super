@@ -12,6 +12,7 @@ import {
   SessionControls,
   useFieldStream,
   QueryHistoryPanel,
+  AgentSelectedPage,
 } from '../field';
 import { QueryResponse } from '../../lib/api';
 import { AgentTraceStep } from '../../types';
@@ -49,6 +50,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     thinkingText,
     finalAnswer,
     trace,
+    selectedPages,
     error,
     reset: resetStream,
     restore,
@@ -61,8 +63,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
   // Handle restoring a previous session from history
   const handleRestoreSession = (query: QueryResponse, restoredTrace: AgentTraceStep[], restoredFinalAnswer: string) => {
+    // TODO: Extract selectedPages from restored trace if needed
     restore(restoredTrace, restoredFinalAnswer);
     setShowHistory(false);
+  };
+
+  // Handle visible page change from scrolling in multi-page mode
+  const handleVisiblePageChange = (pageId: string, disciplineId: string) => {
+    setSelectedPageId(pageId);
+    if (disciplineId) {
+      setSelectedDisciplineId(disciplineId);
+    }
   };
 
   // Load hierarchy on mount
@@ -142,6 +153,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           pageId={selectedPageId}
           onPointerClick={handlePointerClick}
           selectedPointerIds={selectedPointerIds}
+          selectedPages={selectedPages}
+          onVisiblePageChange={handleVisiblePageChange}
         />
 
         {/* Thought process dropdown - top left */}

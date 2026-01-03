@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { api, PointerResponse } from '../../lib/api';
 import { downloadFile, blobToFile } from '../../lib/storage';
+import { AgentSelectedPage } from '../field';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -20,13 +21,186 @@ interface PlanViewerProps {
   pageId: string | null;
   onPointerClick?: (pointer: PointerResponse) => void;
   selectedPointerIds?: string[];
+  // Multi-page mode props
+  selectedPages?: AgentSelectedPage[];
+  onVisiblePageChange?: (pageId: string, disciplineId: string) => void;
 }
+
+// Cache for rendered page images
+const pageImageCache = new Map<string, PageImage>();
+
+// Single page component for multi-page mode
+const AgentPageCard: React.FC<{
+  page: AgentSelectedPage;
+  onVisible: (pageId: string, disciplineId: string) => void;
+}> = ({ page, onVisible }) => {
+  const [image, setImage] = useState<PageImage | null>(pageImageCache.get(page.pageId) || null);
+  const [isLoading, setIsLoading] = useState(!image);
+  const [error, setError] = useState<string | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Load and render the page
+  useEffect(() => {
+    if (image) return; // Already cached
+
+    const loadPage = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Download PDF from storage
+        const blob = await downloadFile(page.filePath);
+        const arrayBuffer = await blob.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+        const pdfPage = await pdf.getPage(1); // First page
+        const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d')!;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await pdfPage.render({
+          canvasContext: context,
+          viewport: viewport,
+        }).promise;
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const pageImage: PageImage = {
+          dataUrl,
+          width: viewport.width / RENDER_SCALE,
+          height: viewport.height / RENDER_SCALE,
+        };
+
+        pageImageCache.set(page.pageId, pageImage);
+        setImage(pageImage);
+      } catch (err) {
+        console.error('Failed to load page:', page.pageId, err);
+        setError('Failed to load page');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadPage();
+  }, [page.pageId, page.filePath, image]);
+
+  // Intersection observer to detect when this page is visible
+  useEffect(() => {
+    if (!cardRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && entry.intersectionRatio > 0.3) {
+          onVisible(page.pageId, page.disciplineId);
+        }
+      },
+      { threshold: [0.3, 0.5, 0.7] }
+    );
+
+    observer.observe(cardRef.current);
+    return () => observer.disconnect();
+  }, [page.pageId, page.disciplineId, onVisible]);
+
+  return (
+    <div
+      ref={cardRef}
+      data-page-id={page.pageId}
+      className="mb-6 bg-white rounded-xl shadow-lg overflow-hidden"
+    >
+      {/* Page header */}
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <h3 className="text-sm font-medium text-slate-700">{page.pageName}</h3>
+        <p className="text-xs text-slate-500">{page.pointers.length} pointer{page.pointers.length !== 1 ? 's' : ''}</p>
+      </div>
+
+      {/* Page content */}
+      <div className="relative">
+        {isLoading && (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 size={32} className="text-cyan-500 animate-spin" />
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center justify-center py-24 text-center">
+            <div>
+              <AlertCircle size={32} className="mx-auto mb-2 text-amber-400" />
+              <p className="text-sm text-slate-500">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {image && (
+          <div className="relative">
+            <img
+              src={image.dataUrl}
+              alt={page.pageName}
+              className="w-full h-auto"
+              draggable={false}
+            />
+
+            {/* Pointer overlays */}
+            {page.pointers.map((pointer) => (
+              <div
+                key={pointer.pointerId}
+                className="absolute border-2 border-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/30 transition-colors cursor-pointer group"
+                style={{
+                  left: `${pointer.bboxX * 100}%`,
+                  top: `${pointer.bboxY * 100}%`,
+                  width: `${pointer.bboxWidth * 100}%`,
+                  height: `${pointer.bboxHeight * 100}%`,
+                }}
+              >
+                {/* Tooltip */}
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 backdrop-blur-sm px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  {pointer.title}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const PlanViewer: React.FC<PlanViewerProps> = ({
   pageId,
   onPointerClick,
   selectedPointerIds = [],
+  selectedPages = [],
+  onVisiblePageChange,
 }) => {
+  // =====================================
+  // MULTI-PAGE MODE (when agent has selected pages)
+  // =====================================
+
+  const handlePageVisible = useCallback((visiblePageId: string, disciplineId: string) => {
+    onVisiblePageChange?.(visiblePageId, disciplineId);
+  }, [onVisiblePageChange]);
+
+  if (selectedPages.length > 0) {
+    return (
+      <div className="flex-1 h-full overflow-y-auto bg-slate-100 p-4">
+        <div className="max-w-4xl mx-auto">
+          {selectedPages.map((page) => (
+            <AgentPageCard
+              key={page.pageId}
+              page={page}
+              onVisible={handlePageVisible}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================
+  // SINGLE-PAGE MODE (manual page selection)
+  // =====================================
+
   // Page data
   const [pageName, setPageName] = useState<string>('');
   const [pointers, setPointers] = useState<PointerResponse[]>([]);
