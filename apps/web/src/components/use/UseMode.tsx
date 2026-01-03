@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppMode, FieldResponse, FieldPage, FieldPointer, FieldViewMode, DisciplineInHierarchy, ContextPointer } from '../../types';
 import { PlansPanel } from './PlansPanel';
+import { PlanViewer } from './PlanViewer';
 import { ModeToggle } from '../ModeToggle';
-import { api } from '../../lib/api';
+import { api, PointerResponse } from '../../lib/api';
+import { Send } from 'lucide-react';
 import {
-  PageViewer,
-  PageViewerHandle,
-  PointerPopover,
   PageList,
   FileTreeCollapsed,
   ThinkingBubble,
   HoldToTalk,
   SessionControls,
   BackButton,
+  PointerPopover,
   useFieldStream,
 } from '../field';
 
@@ -23,9 +23,6 @@ interface UseModeProps {
 }
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) => {
-  // Page viewer ref
-  const pageViewerRef = useRef<PageViewerHandle>(null);
-
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
@@ -33,18 +30,18 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   // Field mode state
   const [activePointer, setActivePointer] = useState<FieldPointer | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [queryInput, setQueryInput] = useState('');
 
   // Hierarchy data for FileTreeCollapsed
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
 
-  // Rendered page PNGs cache
-  const [renderedPages, setRenderedPages] = useState<Map<string, string>>(new Map());
+  // Selected pointers from agent response (for PlanViewer highlighting)
+  const [selectedPointerIds, setSelectedPointerIds] = useState<string[]>([]);
 
-  // Page metadata cache
-  const [pageMetadata, setPageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
-
-  // Context pointers cache
-  const [contextPointers, setContextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
+  // Caches for field stream (will be populated when we have rendered pages)
+  const [renderedPages] = useState<Map<string, string>>(new Map());
+  const [pageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
+  const [contextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
 
   // Field stream hook
   const {
@@ -81,17 +78,22 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   }, [projectId]);
 
   // Handle page selection from PlansPanel
-  const handlePageSelect = (pageId: string, disciplineId: string, pageName: string) => {
+  const handlePageSelect = (pageId: string, disciplineId: string, _pageName: string) => {
     setSelectedPageId(pageId);
     setSelectedDisciplineId(disciplineId);
     setActivePointer(null);
+  };
+
+  // Handle pointer click from PlanViewer
+  const handlePointerClick = (pointer: PointerResponse) => {
+    console.log('Pointer clicked:', pointer.title, pointer.id);
   };
 
   // Handle back button (exit response view)
   const handleBackButton = () => {
     resetStream();
     setActivePointer(null);
-    // selectedPageId unchanged - stay on current page
+    setSelectedPointerIds([]);
   };
 
   // Handle discipline selection from collapsed tree
@@ -106,12 +108,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     }
   };
 
-  // Handle pointer tap on viewer
-  const handlePointerTap = (pointer: FieldPointer) => {
-    setActivePointer(pointer);
-    pageViewerRef.current?.zoomToPointer(pointer);
-  };
-
   // Handle page selection from response list
   const handlePageSelectFromList = (page: FieldPage) => {
     setSelectedPageId(page.id);
@@ -121,27 +117,23 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   // Handle voice recording complete
   const handleRecordingComplete = async (audioBlob: Blob) => {
     // TODO: Send to transcription API, then submit query
-    // For now, just log it
     console.log('Recording complete:', audioBlob.size, 'bytes');
+    // For now, show a message that transcription is coming soon
   };
 
-  // Update rendered pages cache when page changes
-  const handlePageRendered = (pageId: string, pngDataUrl: string) => {
-    setRenderedPages(prev => {
-      const next = new Map(prev);
-      next.set(pageId, pngDataUrl);
-      return next;
-    });
+  // Handle text query submit
+  const handleQuerySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!queryInput.trim() || isStreaming) return;
+    submitQuery(queryInput.trim());
+    setQueryInput('');
   };
-
-  // Get current page PNG
-  const currentPagePng = selectedPageId ? renderedPages.get(selectedPageId) || null : null;
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-slate-900">
+    <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
       {/* Left panel - changes based on view mode */}
       {viewMode === 'standard' ? (
-        <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50">
+        <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
             <ModeToggle mode={mode} setMode={setMode} variant="light" />
@@ -165,7 +157,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </div>
         </div>
       ) : (
-        <div className="flex h-full">
+        <div className="flex h-full z-20">
           <FileTreeCollapsed
             disciplines={disciplines}
             selectedDisciplineId={selectedDisciplineId}
@@ -179,17 +171,40 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         </div>
       )}
 
-      {/* Main viewer */}
-      <div className="flex-1 relative flex flex-col">
-        <PageViewer
-          ref={pageViewerRef}
-          pngDataUrl={currentPagePng}
-          pointers={viewMode === 'response' ? (currentFieldPage?.pointers || []) : []}
-          activePointerId={activePointer?.id || null}
-          onPointerTap={handlePointerTap}
+      {/* Main viewer area */}
+      <div className="flex-1 relative flex flex-col overflow-hidden">
+        {/* PlanViewer - handles PDF rendering */}
+        <PlanViewer
+          pageId={selectedPageId}
+          onPointerClick={handlePointerClick}
+          selectedPointerIds={selectedPointerIds}
         />
 
-        {/* Floating controls - always visible */}
+        {/* Query input bar - bottom center */}
+        <form
+          onSubmit={handleQuerySubmit}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4"
+        >
+          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-2xl px-4 py-2 shadow-lg">
+            <input
+              type="text"
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              placeholder="Ask about your plans..."
+              disabled={isStreaming}
+              className="flex-1 bg-transparent text-slate-800 placeholder:text-slate-400 outline-none text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!queryInput.trim() || isStreaming}
+              className="p-2 rounded-xl bg-cyan-500 text-white hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+        </form>
+
+        {/* Floating controls */}
         <HoldToTalk
           onRecordingComplete={handleRecordingComplete}
           isProcessing={isStreaming}
@@ -199,7 +214,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           isHistoryOpen={showHistory}
         />
 
-        {/* Response mode only */}
+        {/* Response mode overlays */}
         {viewMode === 'response' && (
           <>
             <BackButton visible={true} onBack={handleBackButton} />
@@ -209,6 +224,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
               summary={response?.summary || ''}
             />
           </>
+        )}
+
+        {/* Thinking bubble during streaming (even in standard mode) */}
+        {isStreaming && viewMode === 'standard' && (
+          <ThinkingBubble
+            isThinking={isStreaming}
+            thinkingText={thinkingText}
+            summary=""
+          />
         )}
 
         {/* Popover when pointer active */}
@@ -221,7 +245,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
         {/* Error display */}
         {error && (
-          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-red-500/90 text-white px-4 py-2 rounded-lg">
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-red-500/90 text-white px-4 py-2 rounded-lg shadow-lg">
             {error}
           </div>
         )}
@@ -229,12 +253,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
       {/* History panel - slides in from right */}
       {showHistory && (
-        <div className="w-80 h-full bg-slate-800/95 backdrop-blur-md border-l border-slate-700/50 p-4">
+        <div className="w-80 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 p-4 z-20 shadow-lg">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-white">History</h2>
+            <h2 className="text-lg font-medium text-slate-800">History</h2>
             <button
               onClick={() => setShowHistory(false)}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
             >
               Close
             </button>
