@@ -93,10 +93,10 @@ const TraceStepItem: React.FC<{
   };
 
   return (
-    <div className="group">
+    <div className="group min-w-0">
       <button
         onClick={() => info.hasDetails && setIsExpanded(!isExpanded)}
-        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors min-w-0 ${
           info.hasDetails ? 'hover:bg-slate-100 cursor-pointer' : 'cursor-default'
         }`}
       >
@@ -121,7 +121,7 @@ const TraceStepItem: React.FC<{
         </div>
 
         {/* Title */}
-        <span className="text-xs text-slate-600 flex-1 text-left truncate">
+        <span className="text-xs text-slate-600 flex-1 text-left truncate min-w-0">
           {info.title}
         </span>
 
@@ -133,7 +133,7 @@ const TraceStepItem: React.FC<{
 
       {/* Expanded details */}
       {isExpanded && info.hasDetails && (
-        <div className={`ml-5 mr-2 mt-1 mb-2 p-2 rounded-lg ${info.bgColor} border border-slate-100 animate-fade-in`}>
+        <div className={`ml-5 mr-2 mt-1 mb-2 p-2 rounded-lg ${info.bgColor} border border-slate-100 animate-fade-in overflow-hidden`}>
           {step.type === 'reasoning' && step.content && (
             <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
               {step.content}
@@ -143,7 +143,7 @@ const TraceStepItem: React.FC<{
           {step.type === 'tool_call' && step.input && (
             <div className="space-y-1">
               <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Input</p>
-              <pre className="text-xs text-slate-600 font-mono overflow-x-auto">
+              <pre className="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all">
                 {JSON.stringify(step.input, null, 2)}
               </pre>
             </div>
@@ -152,7 +152,7 @@ const TraceStepItem: React.FC<{
           {step.type === 'tool_result' && step.result && (
             <div className="space-y-1">
               <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Result</p>
-              <pre className="text-xs text-slate-600 font-mono overflow-x-auto max-h-48 overflow-y-auto">
+              <pre className="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
                 {formatResult(step.result)}
               </pre>
             </div>
@@ -196,7 +196,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   const toolCallCount = trace.filter(s => s.type === 'tool_call').length;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200">
+    <div className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0">
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
