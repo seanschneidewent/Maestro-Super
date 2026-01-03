@@ -450,6 +450,7 @@ export const api = {
     list: (projectId: string) =>
       request<QueryResponse[]>(`/projects/${projectId}/queries`),
     get: (queryId: string) => request<QueryResponse>(`/queries/${queryId}`),
+    hide: (queryId: string) => request<void>(`/queries/${queryId}/hide`, { method: 'PATCH' }),
   },
 };
 

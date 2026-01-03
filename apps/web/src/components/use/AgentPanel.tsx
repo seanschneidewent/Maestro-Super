@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Clock, Plus, Bot, User, MessageSquare, Loader2 } from 'lucide-react';
+import { Send, Clock, Plus, Bot, User, MessageSquare, Loader2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
@@ -126,6 +126,18 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
     // Set messages to the restored conversation
     setMessages([userMessage, agentMessage]);
     setShowHistory(false);
+  }, []);
+
+  // Hide a session (soft delete)
+  const handleHideSession = useCallback(async (e: React.MouseEvent, queryId: string) => {
+    e.stopPropagation(); // Don't trigger restore when clicking delete
+    try {
+      await api.queries.hide(queryId);
+      // Remove from local state
+      setQueryHistory(prev => prev.filter(q => q.id !== queryId));
+    } catch (error) {
+      console.error('Failed to hide session:', error);
+    }
   }, []);
 
   // Auto-scroll to bottom when messages change
@@ -400,9 +412,16 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                 <div
                   key={query.id}
                   onClick={() => handleRestoreSession(query)}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition-all group"
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition-all group relative"
                 >
-                  <p className="text-sm text-slate-700 font-medium line-clamp-2 group-hover:text-cyan-600">
+                  <button
+                    onClick={(e) => handleHideSession(e, query.id)}
+                    className="absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                    title="Remove from history"
+                  >
+                    <X size={14} />
+                  </button>
+                  <p className="text-sm text-slate-700 font-medium line-clamp-2 group-hover:text-cyan-600 pr-6">
                     {query.queryText}
                   </p>
                   <div className="flex items-center justify-between mt-2">

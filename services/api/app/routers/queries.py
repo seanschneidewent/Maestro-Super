@@ -61,13 +61,14 @@ def list_queries(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Query]:
-    """List all queries for a project (filtered to current user)."""
+    """List all queries for a project (filtered to current user, excludes hidden)."""
     verify_project_exists(project_id, db)
 
     return (
         db.query(Query)
         .filter(Query.project_id == project_id)
         .filter(Query.user_id == user.id)
+        .filter(Query.hidden == False)
         .order_by(Query.created_at.desc())
         .all()
     )
@@ -104,6 +105,21 @@ def update_query(
     db.commit()
     db.refresh(query)
     return query
+
+
+@router.patch("/queries/{query_id}/hide", status_code=status.HTTP_204_NO_CONTENT)
+def hide_query(
+    query_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Hide a query (soft delete - keeps in database but hidden from UI)."""
+    query = db.query(Query).filter(Query.id == query_id).filter(Query.user_id == user.id).first()
+    if not query:
+        raise HTTPException(status_code=404, detail="Query not found")
+
+    query.hidden = True
+    db.commit()
 
 
 @router.post("/projects/{project_id}/queries/stream")

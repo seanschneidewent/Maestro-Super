@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, JSONVariant, created_at_column
@@ -55,6 +55,9 @@ class Query(Base):
 
     # Usage metrics
     tokens_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Soft delete flag
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = created_at_column()
 
