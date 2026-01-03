@@ -157,9 +157,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </div>
         )}
 
-        {/* Thinking bubble - bottom left (shows current thinking text) */}
+        {/* Thinking bubble - bottom left (thinking during stream, full answer after) */}
         <ThinkingBubble
           thinkingText={thinkingText}
+          finalAnswer={finalAnswer}
           isStreaming={isStreaming}
         />
 
