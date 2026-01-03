@@ -160,7 +160,7 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+    <div className="h-full overflow-y-auto px-2 py-2 space-y-1">
       {hierarchy.disciplines.map((discipline, index) => (
         <DisciplineNode
           key={discipline.id}
