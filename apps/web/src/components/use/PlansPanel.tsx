@@ -21,13 +21,6 @@ const PageNode: React.FC<PageNodeProps> = ({ page, isSelected, onSelect }) => {
     >
       <FileText size={14} className={isSelected ? 'text-cyan-500' : 'text-slate-400'} />
       <span className="truncate">{page.pageName}</span>
-      {page.pointerCount > 0 && (
-        <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${
-          isSelected ? 'bg-cyan-100 text-cyan-600' : 'bg-slate-200 text-slate-500'
-        }`}>
-          {page.pointerCount}
-        </span>
-      )}
     </button>
   );
 };
