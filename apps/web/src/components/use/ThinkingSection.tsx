@@ -204,7 +204,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   const toolCallCount = trace.filter(s => s.type === 'tool_call').length;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0">
+    <div className="w-1/2 rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0">
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
@@ -222,11 +222,6 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
 
         <span className="text-xs font-medium text-slate-600 flex-1 text-left">
           {isStreaming ? 'Thinking' : 'Thought process'}
-          {!isStreaming && toolCallCount > 0 && (
-            <span className="text-slate-400 font-normal ml-1">
-              ({toolCallCount} tool{toolCallCount !== 1 ? 's' : ''} used)
-            </span>
-          )}
         </span>
 
         {/* Animated dots while streaming */}
