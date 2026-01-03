@@ -16,6 +16,7 @@ interface UseFieldStreamReturn {
   submitQuery: (query: string) => Promise<void>
   isStreaming: boolean
   thinkingText: string
+  finalAnswer: string
   trace: AgentTraceStep[]
   response: FieldResponse | null
   error: string | null
@@ -37,6 +38,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [thinkingText, setThinkingText] = useState('')
+  const [finalAnswer, setFinalAnswer] = useState('')
   const [trace, setTrace] = useState<AgentTraceStep[]>([])
   const [response, setResponse] = useState<FieldResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -59,6 +61,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       setIsStreaming(true)
       setThinkingText('')
+      setFinalAnswer('')
       setTrace([])
       setResponse(null)
       setError(null)
@@ -231,9 +234,36 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'done':
         agentMessage.isComplete = true
-        if (data.final_answer && typeof data.final_answer === 'string') {
-          agentMessage.finalAnswer = data.final_answer
+
+        // Extract final answer from trace (reasoning after last tool result)
+        const traceSteps = agentMessage.trace
+        let extractedAnswer = ''
+
+        // Find the last tool_result index
+        let lastToolResultIndex = -1
+        for (let i = traceSteps.length - 1; i >= 0; i--) {
+          if (traceSteps[i].type === 'tool_result') {
+            lastToolResultIndex = i
+            break
+          }
         }
+
+        // Collect all reasoning after the last tool result as the final answer
+        const answerParts: string[] = []
+        for (let i = lastToolResultIndex + 1; i < traceSteps.length; i++) {
+          if (traceSteps[i].type === 'reasoning' && traceSteps[i].content) {
+            answerParts.push(traceSteps[i].content!)
+          }
+        }
+        extractedAnswer = answerParts.join('')
+
+        // If no tools were called, the entire reasoning is the answer
+        if (lastToolResultIndex === -1) {
+          extractedAnswer = agentMessage.reasoning.join('')
+        }
+
+        agentMessage.finalAnswer = extractedAnswer
+        setFinalAnswer(extractedAnswer)
 
         // Transform to FieldResponse
         const fieldResponse = transformAgentResponse(
@@ -271,10 +301,11 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     abort()
     setIsStreaming(false)
     setThinkingText('')
+    setFinalAnswer('')
     setTrace([])
     setResponse(null)
     setError(null)
   }, [abort])
 
-  return { submitQuery, isStreaming, thinkingText, trace, response, error, reset, abort }
+  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, response, error, reset, abort }
 }
