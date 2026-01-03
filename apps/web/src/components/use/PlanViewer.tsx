@@ -93,6 +93,35 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
     onVisiblePageChange?.(selectedPages[newIndex].pageId, selectedPages[newIndex].disciplineId);
   }, [agentPageIndex, selectedPages, onVisiblePageChange]);
 
+  // Touch swipe handling for iPad/mobile
+  const touchStartY = useRef<number | null>(null);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartY.current = e.touches[0].clientY;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (touchStartY.current === null || zoom !== 1) return;
+
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaY = touchStartY.current - touchEndY;
+
+    // Require a minimum swipe distance (50px)
+    if (Math.abs(deltaY) > 50) {
+      if (deltaY > 0) {
+        // Swiped up = go to next page
+        goToNextAgentPage();
+      } else {
+        // Swiped down = go to previous page
+        goToPrevAgentPage();
+      }
+    }
+
+    touchStartY.current = null;
+  }, [zoom, goToNextAgentPage, goToPrevAgentPage]);
+
   // Current agent page
   const currentAgentPage = selectedPages[agentPageIndex];
 
@@ -429,10 +458,10 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
           </div>
         </div>
 
-        {/* Canvas Area with wheel navigation */}
+        {/* Canvas Area with wheel/touch navigation */}
         <div
           ref={containerRef}
-          className="flex-1 overflow-auto bg-slate-100"
+          className="flex-1 overflow-auto bg-slate-100 touch-pan-x"
           style={{ position: 'relative' }}
           onWheel={(e) => {
             // Only navigate if not zoomed in (at natural scroll)
@@ -442,6 +471,8 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
               else goToPrevAgentPage();
             }
           }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
         >
           {isLoadingAgentPage && (
             <div className="flex-1 flex items-center justify-center h-full">
