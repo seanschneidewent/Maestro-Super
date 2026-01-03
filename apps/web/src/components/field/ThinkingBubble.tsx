@@ -6,11 +6,37 @@ interface ThinkingBubbleProps {
   finalAnswer: string
 }
 
+// Extract first sentence from text
+function getFirstSentence(text: string): string {
+  if (!text) return ''
+
+  // Clean up markdown formatting
+  const cleaned = text
+    .replace(/^#+\s*/gm, '') // Remove headers
+    .replace(/\*\*/g, '') // Remove bold
+    .replace(/\*/g, '') // Remove italic
+    .replace(/`/g, '') // Remove code
+    .trim()
+
+  // Find first sentence ending
+  const match = cleaned.match(/^[^.!?]*[.!?]/)
+  if (match) {
+    return match[0].trim()
+  }
+
+  // No sentence ending found, truncate
+  if (cleaned.length > 100) {
+    return cleaned.slice(0, 97) + '...'
+  }
+
+  return cleaned
+}
+
 export function ThinkingBubble({ isThinking, thinkingText, finalAnswer }: ThinkingBubbleProps) {
   // Determine what to display
   const displayText = isThinking
     ? (thinkingText || 'Let me look at that for you...')
-    : finalAnswer
+    : getFirstSentence(finalAnswer)
 
   // Don't render if nothing to show
   if (!displayText) {
