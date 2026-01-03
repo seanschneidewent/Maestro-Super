@@ -83,6 +83,21 @@ TOOL_DEFINITIONS = [
             "required": ["page_id"],
         },
     },
+    {
+        "name": "select_pointers",
+        "description": "Highlight specific pointers on the plan viewer to show the user which areas of the plans are relevant to their query. Call this after finding relevant pointers to display them visually.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pointer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of pointer UUIDs to highlight",
+                }
+            },
+            "required": ["pointer_ids"],
+        },
+    },
 ]
 
 AGENT_SYSTEM_PROMPT = """You are a construction plan analysis agent. You help superintendents find information across construction documents by navigating a graph of pages and details (pointers).
@@ -94,6 +109,7 @@ You have access to these tools:
 - get_discipline_overview: Get high-level view of a discipline (architectural, structural, etc.)
 - list_project_pages: See all pages in the project
 - get_references_to_page: Find what points TO a specific page (reverse lookup)
+- select_pointers: Highlight pointers on the plan viewer to show the user relevant areas
 
 STRATEGY:
 1. Start by searching for relevant pointers or identifying which discipline likely contains the answer
@@ -101,7 +117,8 @@ STRATEGY:
 3. When you find references to other pages, evaluate if they're relevant to the original query
 4. Follow relevant references - keep traversing until you have enough information
 5. If a reference exists but isn't relevant to the query, note it but don't follow it
-6. Stop when you can comprehensively answer the question
+6. Use select_pointers to highlight the most relevant pointers for the user to see on the plan viewer
+7. Stop when you can comprehensively answer the question
 
 REASONING:
 - Think through each step out loud
@@ -130,6 +147,8 @@ async def execute_tool(
             result = await tool_fn(db, project_id=project_id, **tool_input)
         elif tool_name == "list_project_pages":
             result = await tool_fn(db, project_id=project_id)
+        elif tool_name == "select_pointers":
+            result = await tool_fn(db, **tool_input)
         else:
             result = await tool_fn(db, **tool_input)
 

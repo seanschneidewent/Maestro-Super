@@ -261,6 +261,37 @@ async def get_references_to_page(db: Session, page_id: str) -> PageReferences | 
     )
 
 
+async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
+    """
+    Return pointer details for highlighting in the frontend.
+
+    Args:
+        db: Database session
+        pointer_ids: List of pointer UUIDs to highlight
+
+    Returns:
+        Dict with selected_pointer_ids and pointer details
+    """
+    pointers = (
+        db.query(Pointer)
+        .options(joinedload(Pointer.page))
+        .filter(Pointer.id.in_(pointer_ids))
+        .all()
+    )
+
+    return {
+        "selected_pointer_ids": pointer_ids,
+        "pointers": [
+            {
+                "pointer_id": str(p.id),
+                "title": p.title,
+                "page_id": str(p.page_id),
+            }
+            for p in pointers
+        ],
+    }
+
+
 # Tool Registry - maps tool names to functions
 # All tools take (db: Session, ...) as first argument and are async
 TOOL_REGISTRY: dict[str, Callable] = {
@@ -270,4 +301,5 @@ TOOL_REGISTRY: dict[str, Callable] = {
     "get_discipline_overview": get_discipline_overview,
     "list_project_pages": list_project_pages,
     "get_references_to_page": get_references_to_page,
+    "select_pointers": select_pointers,
 }

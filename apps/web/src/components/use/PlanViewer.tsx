@@ -19,11 +19,13 @@ interface PageImage {
 interface PlanViewerProps {
   pageId: string | null;
   onPointerClick?: (pointer: PointerResponse) => void;
+  selectedPointerIds?: string[];
 }
 
 export const PlanViewer: React.FC<PlanViewerProps> = ({
   pageId,
   onPointerClick,
+  selectedPointerIds = [],
 }) => {
   // Page data
   const [pageName, setPageName] = useState<string>('');
@@ -408,8 +410,10 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                   draggable={false}
                 />
 
-                {/* Pointer overlays (read-only) */}
-                {pointers.map(p => (
+                {/* Pointer overlays (only show selected pointers) */}
+                {pointers
+                  .filter(p => selectedPointerIds.includes(p.id))
+                  .map(p => (
                   <div
                     key={p.id}
                     onClick={() => onPointerClick?.(p)}

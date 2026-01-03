@@ -22,6 +22,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
 
+  // Selected pointers state (for agent highlighting)
+  const [selectedPointerIds, setSelectedPointerIds] = useState<string[]>([]);
+
   // Handle page selection from PlansPanel
   const handlePageSelect = (pageId: string, disciplineId: string, pageName: string) => {
     setSelectedPageId(pageId);
@@ -37,6 +40,19 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   const handlePointerClick = (pointer: PointerResponse) => {
     // For now, just log - in Phase 2 we might show a modal or pass to agent
     console.log('Pointer clicked:', pointer.title, pointer.id);
+  };
+
+  // Handle pointer selection from agent
+  const handleSelectPointers = (pointerIds: string[], firstPageId?: string) => {
+    setSelectedPointerIds(pointerIds);
+    if (firstPageId) {
+      setSelectedPageId(firstPageId);
+    }
+  };
+
+  // Handle new query (clear selection)
+  const handleNewQuery = () => {
+    setSelectedPointerIds([]);
   };
 
 
@@ -88,6 +104,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           projectId={projectId}
           onNavigateToPage={handleNavigateToPage}
           onOpenPointer={(pointerId) => console.log('Open pointer:', pointerId)}
+          onSelectPointers={handleSelectPointers}
+          onNewQuery={handleNewQuery}
         />
       </div>
 
@@ -137,6 +155,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         <PlanViewer
           pageId={selectedPageId}
           onPointerClick={handlePointerClick}
+          selectedPointerIds={selectedPointerIds}
         />
       </div>
     </div>

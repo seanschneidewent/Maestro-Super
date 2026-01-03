@@ -11,12 +11,16 @@ interface AgentPanelProps {
   projectId: string;
   onNavigateToPage?: (pageId: string) => void;
   onOpenPointer?: (pointerId: string) => void;
+  onSelectPointers?: (pointerIds: string[], firstPageId?: string) => void;
+  onNewQuery?: () => void;
 }
 
 export const AgentPanel: React.FC<AgentPanelProps> = ({
   projectId,
   onNavigateToPage,
   onOpenPointer,
+  onSelectPointers,
+  onNewQuery,
 }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<AgentMessage[]>([
@@ -134,6 +138,13 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
               };
               pagesVisited = [...pagesVisited, visit];
             }
+
+            // Handle select_pointers tool result
+            if (event.tool === 'select_pointers' && event.result.selected_pointer_ids) {
+              const pointerIds = event.result.selected_pointer_ids as string[];
+              const firstPageId = (event.result.pointers as Array<{ page_id: string }>)?.[0]?.page_id;
+              onSelectPointers?.(pointerIds, firstPageId);
+            }
           }
 
           return {
@@ -193,10 +204,13 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
           return msg;
       }
     }));
-  }, []);
+  }, [onSelectPointers]);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return;
+
+    // Clear pointer selection before new query
+    onNewQuery?.();
 
     const userMessage: AgentMessage = {
       id: Date.now().toString(),
