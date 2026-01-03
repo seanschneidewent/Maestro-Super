@@ -287,6 +287,31 @@
 </head>
   <body>
     <div id="root"></div>
+    <script>
+      // iOS Safari keyboard dismiss fix - debounced to wait for animation
+      if (window.visualViewport) {
+        var lastHeight = window.visualViewport.height;
+        var resizeTimer;
+
+        window.visualViewport.addEventListener('resize', function() {
+          var newHeight = window.visualViewport.height;
+
+          // Clear any pending timer
+          clearTimeout(resizeTimer);
+
+          // When keyboard closes (viewport grows), wait for animation to finish
+          if (newHeight > lastHeight) {
+            resizeTimer = setTimeout(function() {
+              // Micro-scroll to trigger Safari's layout recalculation
+              window.scrollTo(0, 1);
+              window.scrollTo(0, 0);
+            }, 300);
+          }
+
+          lastHeight = newHeight;
+        });
+      }
+    </script>
     <script type="module" src="/src/index.tsx"></script>
 </body>
 </html>
