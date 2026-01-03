@@ -6,6 +6,7 @@ import { useAgentStream } from '../../hooks/useAgentStream';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingSection } from './ThinkingSection';
 import { PagesVisitedBadges } from './PagesVisitedBadges';
+import { PageSearchCounter } from './PageSearchCounter';
 import { api, QueryResponse } from '../../lib/api';
 
 interface AgentPanelProps {
@@ -533,9 +534,16 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   {/* Tool calls */}
                   {msg.toolCalls && msg.toolCalls.length > 0 && (
                     <div className="space-y-1.5">
-                      {msg.toolCalls.map((tc, i) => (
-                        <ToolCallCard key={`${tc.tool}-${i}`} toolCall={tc} />
-                      ))}
+                      {/* Aggregated page search counter */}
+                      <PageSearchCounter
+                        toolCalls={msg.toolCalls.filter(tc => tc.tool === 'list_project_pages')}
+                      />
+                      {/* Other tool calls rendered individually */}
+                      {msg.toolCalls
+                        .filter(tc => tc.tool !== 'list_project_pages')
+                        .map((tc, i) => (
+                          <ToolCallCard key={`${tc.tool}-${i}`} toolCall={tc} />
+                        ))}
                     </div>
                   )}
 
