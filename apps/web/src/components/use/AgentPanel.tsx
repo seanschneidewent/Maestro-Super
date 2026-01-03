@@ -313,10 +313,10 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   <Bot size={18} />
                 </div>
                 <div className="flex-1 space-y-3 min-w-0">
-                  {/* Initial reasoning bubble - shows before thought process during streaming */}
+                  {/* Initial reasoning bubble - shows before first tool call, persists after completion */}
                   {(() => {
-                    // During streaming, show initial reasoning (before first tool call)
-                    if (!msg.isComplete && msg.trace && msg.trace.length > 0) {
+                    // Extract initial reasoning (before first tool call)
+                    if (msg.trace && msg.trace.length > 0) {
                       const initialReasoning: string[] = [];
                       for (const step of msg.trace) {
                         if (step.type === 'tool_call') break;
@@ -328,7 +328,9 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                         return (
                           <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
                             {initialReasoning.join('')}
-                            <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
+                            {!msg.isComplete && (
+                              <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
+                            )}
                           </div>
                         );
                       }
@@ -377,12 +379,44 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     />
                   )}
 
-                  {/* Final answer bubble - shows after everything when complete */}
-                  {msg.isComplete && msg.finalAnswer && (
-                    <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                      {msg.finalAnswer}
-                    </div>
-                  )}
+                  {/* Final answer bubble - streams after last tool result */}
+                  {(() => {
+                    // Find reasoning after the last tool_result
+                    const trace = msg.trace || [];
+                    let lastToolResultIndex = -1;
+                    for (let i = trace.length - 1; i >= 0; i--) {
+                      if (trace[i].type === 'tool_result') {
+                        lastToolResultIndex = i;
+                        break;
+                      }
+                    }
+
+                    // Only show if there was at least one tool call
+                    if (lastToolResultIndex === -1) return null;
+
+                    // Collect reasoning after last tool result
+                    const answerParts: string[] = [];
+                    for (let i = lastToolResultIndex + 1; i < trace.length; i++) {
+                      if (trace[i].type === 'reasoning' && trace[i].content) {
+                        answerParts.push(trace[i].content!);
+                      }
+                    }
+
+                    // Show if there's answer text (streaming or complete)
+                    if (answerParts.length > 0 || (msg.isComplete && msg.finalAnswer)) {
+                      const displayText = answerParts.length > 0 ? answerParts.join('') : msg.finalAnswer;
+                      return (
+                        <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
+                          {displayText}
+                          {!msg.isComplete && (
+                            <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </div>
               </div>
             )}
