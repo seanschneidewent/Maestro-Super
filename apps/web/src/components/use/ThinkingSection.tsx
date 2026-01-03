@@ -171,7 +171,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onNavigateToPage,
   onOpenPointer,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true); // Start expanded to show live updates
+  const [isExpanded, setIsExpanded] = useState(false); // Start collapsed
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -218,10 +218,10 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
           )}
         </div>
 
-        <Brain size={14} className={`flex-shrink-0 ${isStreaming ? 'text-cyan-500' : 'text-slate-400'}`} />
+        <Brain size={14} className="flex-shrink-0 text-cyan-500" />
 
         <span className="text-xs font-medium text-slate-600 flex-1 text-left">
-          {isStreaming ? 'Thinking' : 'Thought process'}
+          {isStreaming ? 'Thinking' : 'Thoughts'}
         </span>
 
         {/* Animated dots while streaming */}
