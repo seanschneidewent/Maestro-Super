@@ -313,38 +313,8 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   <Bot size={18} />
                 </div>
                 <div className="flex-1 space-y-3 min-w-0">
-                  {/* Thinking section (shows trace steps live during streaming) */}
-                  {((msg.trace && msg.trace.length > 0) || !msg.isComplete) && (
-                    <ThinkingSection
-                      reasoning={[]}
-                      isStreaming={!msg.isComplete}
-                      autoCollapse={true}
-                      trace={msg.trace || []}
-                      onNavigateToPage={onNavigateToPage}
-                      onOpenPointer={onOpenPointer}
-                    />
-                  )}
-
-                  {/* Tool calls */}
-                  {msg.toolCalls && msg.toolCalls.length > 0 && (
-                    <div className="space-y-1.5">
-                      {msg.toolCalls.map((tc, i) => (
-                        <ToolCallCard key={`${tc.tool}-${i}`} toolCall={tc} />
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Response bubble - shows initial reasoning during streaming, final answer when complete */}
+                  {/* Initial reasoning bubble - shows before thought process during streaming */}
                   {(() => {
-                    // When complete, show final answer
-                    if (msg.isComplete && msg.finalAnswer) {
-                      return (
-                        <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                          {msg.finalAnswer}
-                        </div>
-                      );
-                    }
-
                     // During streaming, show initial reasoning (before first tool call)
                     if (!msg.isComplete && msg.trace && msg.trace.length > 0) {
                       const initialReasoning: string[] = [];
@@ -378,12 +348,40 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     return null;
                   })()}
 
+                  {/* Thinking section (shows trace steps live during streaming) */}
+                  {((msg.trace && msg.trace.length > 0) || !msg.isComplete) && (
+                    <ThinkingSection
+                      reasoning={[]}
+                      isStreaming={!msg.isComplete}
+                      autoCollapse={true}
+                      trace={msg.trace || []}
+                      onNavigateToPage={onNavigateToPage}
+                      onOpenPointer={onOpenPointer}
+                    />
+                  )}
+
+                  {/* Tool calls */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="space-y-1.5">
+                      {msg.toolCalls.map((tc, i) => (
+                        <ToolCallCard key={`${tc.tool}-${i}`} toolCall={tc} />
+                      ))}
+                    </div>
+                  )}
+
                   {/* Pages visited */}
                   {msg.isComplete && msg.pagesVisited && msg.pagesVisited.length > 0 && (
                     <PagesVisitedBadges
                       pages={msg.pagesVisited}
                       onPageClick={onNavigateToPage}
                     />
+                  )}
+
+                  {/* Final answer bubble - shows after everything when complete */}
+                  {msg.isComplete && msg.finalAnswer && (
+                    <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
+                      {msg.finalAnswer}
+                    </div>
                   )}
                 </div>
               </div>
