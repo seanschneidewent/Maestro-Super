@@ -98,20 +98,20 @@
       }
     </script>
     <style>
-      /* Viewport lock - prevents body scroll on iPad */
+      /* Viewport sizing for iPad */
       html, body {
         height: 100%;
         height: 100dvh; /* Dynamic viewport height for iOS */
         width: 100%;
-        overflow: hidden;
         margin: 0;
         padding: 0;
+        /* No overflow:hidden - let iOS handle keyboard naturally */
       }
 
       #root {
         height: 100%;
         width: 100%;
-        overflow: hidden;
+        overflow: hidden; /* Content locked here only */
       }
 
       /* Custom scrollbar for dark mode */
@@ -287,24 +287,6 @@
 </head>
   <body>
     <div id="root"></div>
-    <script>
-      // iOS Safari keyboard dismiss fix
-      if (window.visualViewport) {
-        var lastHeight = window.visualViewport.height;
-        window.visualViewport.addEventListener('resize', function() {
-          var newHeight = window.visualViewport.height;
-          // When keyboard closes (viewport grows), force viewport update
-          if (newHeight > lastHeight) {
-            // Temporarily enable scrolling, do a micro-scroll, then disable
-            document.body.style.overflow = 'auto';
-            document.body.scrollTop = 1;
-            document.body.scrollTop = 0;
-            document.body.style.overflow = 'hidden';
-          }
-          lastHeight = newHeight;
-        });
-      }
-    </script>
     <script type="module" src="/src/index.tsx"></script>
 </body>
 </html>
