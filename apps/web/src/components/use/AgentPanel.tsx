@@ -380,10 +380,20 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     />
                   )}
 
-                  {/* Final answer bubble - streams after last tool result */}
+                  {/* Final answer bubble - streams after last tool result, or shows simple messages */}
                   {(() => {
-                    // Find reasoning after the last tool_result
                     const trace = msg.trace || [];
+
+                    // If no trace, show finalAnswer directly (e.g., greeting message)
+                    if (trace.length === 0 && msg.isComplete && msg.finalAnswer) {
+                      return (
+                        <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
+                          {msg.finalAnswer}
+                        </div>
+                      );
+                    }
+
+                    // Find reasoning after the last tool_result
                     let lastToolResultIndex = -1;
                     for (let i = trace.length - 1; i >= 0; i--) {
                       if (trace[i].type === 'tool_result') {
@@ -392,7 +402,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                       }
                     }
 
-                    // Only show if there was at least one tool call
+                    // Only show streaming/final answer if there was at least one tool call
                     if (lastToolResultIndex === -1) return null;
 
                     // Collect reasoning after last tool result
