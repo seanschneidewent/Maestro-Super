@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, Brain, Search, FileText, File, Folder, List, GitBranch, CheckCircle2 } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
 
@@ -36,11 +36,15 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onOpenPointer,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const wasStreamingRef = useRef(isStreaming);
 
-  // Auto-collapse when streaming completes
+  // Auto-collapse only when streaming transitions from true to false
   useEffect(() => {
-    if (autoCollapse && !isStreaming && isExpanded) {
-      // Delay collapse slightly so user can see the final state
+    const wasStreaming = wasStreamingRef.current;
+    wasStreamingRef.current = isStreaming;
+
+    // Only auto-collapse if streaming just completed (was streaming, now not)
+    if (autoCollapse && wasStreaming && !isStreaming && isExpanded) {
       const timer = setTimeout(() => {
         setIsExpanded(false);
       }, 500);
