@@ -324,21 +324,49 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     </div>
                   )}
 
-                  {/* Final answer */}
-                  {msg.finalAnswer && (
-                    <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                      {msg.finalAnswer}
-                    </div>
-                  )}
+                  {/* Response bubble - shows initial reasoning during streaming, final answer when complete */}
+                  {(() => {
+                    // When complete, show final answer
+                    if (msg.isComplete && msg.finalAnswer) {
+                      return (
+                        <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
+                          {msg.finalAnswer}
+                        </div>
+                      );
+                    }
 
-                  {/* Streaming indicator when no content yet */}
-                  {!msg.isComplete && !msg.finalAnswer && (!msg.reasoning || msg.reasoning.length === 0) && (!msg.toolCalls || msg.toolCalls.length === 0) && (
-                    <div className="flex items-center gap-1.5 px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
-                      <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                  )}
+                    // During streaming, show initial reasoning (before first tool call)
+                    if (!msg.isComplete && msg.trace && msg.trace.length > 0) {
+                      const initialReasoning: string[] = [];
+                      for (const step of msg.trace) {
+                        if (step.type === 'tool_call') break;
+                        if (step.type === 'reasoning' && step.content) {
+                          initialReasoning.push(step.content);
+                        }
+                      }
+                      if (initialReasoning.length > 0) {
+                        return (
+                          <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
+                            {initialReasoning.join('')}
+                            <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
+                          </div>
+                        );
+                      }
+                    }
+
+                    // Show loading dots if no content yet
+                    if (!msg.isComplete && (!msg.trace || msg.trace.length === 0)) {
+                      return (
+                        <div className="flex items-center gap-1.5 px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
 
                   {/* Pages visited */}
                   {msg.isComplete && msg.pagesVisited && msg.pagesVisited.length > 0 && (
