@@ -82,6 +82,10 @@ const FileNode: React.FC<FileNodeProps> = ({
     if (isSelected && !isDeleteMode) {
       return 'bg-cyan-500/15 border-l-2 border-cyan-400 text-cyan-300';
     }
+    // Sticky header for open folders
+    if (isFolder && isOpen) {
+      return 'sticky top-0 z-10 bg-slate-800 border-l-2 border-cyan-400/50 shadow-md';
+    }
     return 'border-l-2 border-transparent hover:bg-white/5';
   };
 
@@ -122,11 +126,13 @@ const FileNode: React.FC<FileNodeProps> = ({
               ? 'text-cyan-300 font-medium'
               : 'text-slate-300 hover:text-slate-200'
         }`}>{node.name}</span>
-        {!isFolder && node.pointerCount !== undefined && node.pointerCount > 0 && (
+        {!isFolder && node.pointerCount !== undefined && (
           <span className={`ml-auto text-xs px-1.5 py-0.5 rounded shrink-0 ${
             isSelected && !isDeleteMode
               ? 'bg-cyan-500/20 text-cyan-300'
-              : 'bg-slate-700 text-slate-400'
+              : node.pointerCount > 0
+                ? 'bg-slate-700 text-slate-400'
+                : 'bg-slate-800 text-slate-500'
           }`}>
             {node.pointerCount}
           </span>
