@@ -5,7 +5,7 @@ import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
 import { api, PointerResponse } from '../../lib/api';
-import { Send } from 'lucide-react';
+import { Send, PanelLeftClose, PanelLeft } from 'lucide-react';
 import {
   ThinkingBubble,
   HoldToTalk,
@@ -31,6 +31,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   // UI state
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Hierarchy data
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
@@ -121,30 +122,39 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
-      {/* Left panel - PlansPanel always visible */}
-      <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
-          <ModeToggle mode={mode} setMode={setMode} variant="light" />
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="font-bold text-lg text-slate-800">
-                Maestro<span className="text-cyan-600">Super</span>
-              </h1>
-              <p className="text-xs text-slate-500">Field Mode</p>
+      {/* Left panel - PlansPanel with collapse */}
+      {!isSidebarCollapsed && (
+        <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
+            <ModeToggle mode={mode} setMode={setMode} variant="light" />
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="font-bold text-lg text-slate-800">
+                  Maestro<span className="text-cyan-600">Super</span>
+                </h1>
+                <p className="text-xs text-slate-500">Field Mode</p>
+              </div>
+              <button
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                title="Collapse sidebar"
+              >
+                <PanelLeftClose size={18} />
+              </button>
             </div>
           </div>
-        </div>
 
-        {/* Plans Tree */}
-        <div className="flex-1 overflow-hidden">
-          <PlansPanel
-            projectId={projectId}
-            selectedPageId={selectedPageId}
-            onPageSelect={handlePageSelect}
-          />
+          {/* Plans Tree */}
+          <div className="flex-1 overflow-hidden">
+            <PlansPanel
+              projectId={projectId}
+              selectedPageId={selectedPageId}
+              onPageSelect={handlePageSelect}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main viewer area */}
       <div className="flex-1 relative flex flex-col overflow-hidden">
@@ -168,6 +178,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
               onNavigateToPage={handleNavigateToPage}
             />
           </div>
+        )}
+
+        {/* Floating expand button - shows when sidebar collapsed, below ThinkingSection */}
+        {isSidebarCollapsed && (
+          <button
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="absolute top-20 left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors"
+            title="Expand sidebar"
+          >
+            <PanelLeft size={20} />
+          </button>
         )}
 
         {/* Thinking bubble - bottom left (thinking during stream, full answer after) */}
