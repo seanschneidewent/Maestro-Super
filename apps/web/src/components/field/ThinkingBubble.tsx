@@ -1,45 +1,11 @@
-import ReactMarkdown from 'react-markdown'
-
 interface ThinkingBubbleProps {
-  isThinking: boolean
   thinkingText: string
-  finalAnswer: string
+  isStreaming: boolean
 }
 
-// Extract first sentence from text
-function getFirstSentence(text: string): string {
-  if (!text) return ''
-
-  // Clean up markdown formatting
-  const cleaned = text
-    .replace(/^#+\s*/gm, '') // Remove headers
-    .replace(/\*\*/g, '') // Remove bold
-    .replace(/\*/g, '') // Remove italic
-    .replace(/`/g, '') // Remove code
-    .trim()
-
-  // Find first sentence ending
-  const match = cleaned.match(/^[^.!?]*[.!?]/)
-  if (match) {
-    return match[0].trim()
-  }
-
-  // No sentence ending found, truncate
-  if (cleaned.length > 100) {
-    return cleaned.slice(0, 97) + '...'
-  }
-
-  return cleaned
-}
-
-export function ThinkingBubble({ isThinking, thinkingText, finalAnswer }: ThinkingBubbleProps) {
-  // Determine what to display
-  const displayText = isThinking
-    ? (thinkingText || 'Let me look at that for you...')
-    : getFirstSentence(finalAnswer)
-
-  // Don't render if nothing to show
-  if (!displayText) {
+export function ThinkingBubble({ thinkingText, isStreaming }: ThinkingBubbleProps) {
+  // Don't render if no thinking text
+  if (!thinkingText) {
     return null
   }
 
@@ -53,31 +19,16 @@ export function ThinkingBubble({ isThinking, thinkingText, finalAnswer }: Thinki
         animate-in fade-in slide-in-from-bottom-2 duration-200
       "
     >
-      {isThinking ? (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-600">{displayText}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-slate-600">{thinkingText}</span>
+        {isStreaming && (
           <div className="flex items-center gap-0.5">
             <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
             <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
             <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
           </div>
-        </div>
-      ) : (
-        <div className="text-sm text-slate-700 leading-relaxed">
-          <ReactMarkdown
-            components={{
-              p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
-              ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
-              ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
-              li: ({ children }) => <li className="my-0.5">{children}</li>,
-              strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
-              code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
-            }}
-          >
-            {displayText}
-          </ReactMarkdown>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
