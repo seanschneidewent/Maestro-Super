@@ -316,6 +316,14 @@ export interface PointerResponse {
 }
 
 // Query types (matching backend schema)
+export interface QueryTraceStep {
+  type: 'reasoning' | 'tool_call' | 'tool_result';
+  content?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+}
+
 export interface QueryResponse {
   id: string;
   userId: string;
@@ -323,6 +331,7 @@ export interface QueryResponse {
   queryText: string;
   responseText?: string;
   referencedPointers?: Array<{ pointerId: string }>;
+  trace?: QueryTraceStep[];
   tokensUsed?: number;
   createdAt: string;
 }

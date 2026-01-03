@@ -59,6 +59,75 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
       .catch(console.error);
   }, [projectId]);
 
+  // Restore a historical session from stored query data
+  const handleRestoreSession = useCallback((query: QueryResponse) => {
+    // Reconstruct user message
+    const userMessage: AgentMessage = {
+      id: `restored-user-${query.id}`,
+      role: 'user',
+      text: query.queryText,
+      timestamp: new Date(query.createdAt),
+      isComplete: true,
+    };
+
+    // Reconstruct agent message from stored data
+    const trace: AgentTraceStep[] = (query.trace || []).map(step => ({
+      type: step.type as 'reasoning' | 'tool_call' | 'tool_result',
+      content: step.content,
+      tool: step.tool,
+      input: step.input as Record<string, unknown> | undefined,
+      result: step.result as Record<string, unknown> | undefined,
+    }));
+
+    // Extract tool calls from trace
+    const toolCalls: ToolCallState[] = [];
+    for (let i = 0; i < trace.length; i++) {
+      const step = trace[i];
+      if (step.type === 'tool_call' && step.tool) {
+        // Find matching result
+        const resultStep = trace.find(
+          (s, j) => j > i && s.type === 'tool_result' && s.tool === step.tool
+        );
+        toolCalls.push({
+          tool: step.tool,
+          input: step.input || {},
+          result: resultStep?.result,
+          status: 'complete',
+        });
+      }
+    }
+
+    // Extract pages visited from tool results
+    const pagesVisited: PageVisit[] = [];
+    for (const step of trace) {
+      if (step.type === 'tool_result' && step.result) {
+        const result = step.result as Record<string, unknown>;
+        if (result.page_id && result.page_name) {
+          pagesVisited.push({
+            pageId: result.page_id as string,
+            pageName: result.page_name as string,
+          });
+        }
+      }
+    }
+
+    const agentMessage: AgentMessage = {
+      id: `restored-agent-${query.id}`,
+      role: 'agent',
+      timestamp: new Date(query.createdAt),
+      reasoning: trace.filter(s => s.type === 'reasoning').map(s => s.content || ''),
+      toolCalls,
+      pagesVisited,
+      trace,
+      finalAnswer: query.responseText || '',
+      isComplete: true,
+    };
+
+    // Set messages to the restored conversation
+    setMessages([userMessage, agentMessage]);
+    setShowHistory(false);
+  }, []);
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
@@ -330,6 +399,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
               queryHistory.map((query) => (
                 <div
                   key={query.id}
+                  onClick={() => handleRestoreSession(query)}
                   className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition-all group"
                 >
                   <p className="text-sm text-slate-700 font-medium line-clamp-2 group-hover:text-cyan-600">

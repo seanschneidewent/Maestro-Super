@@ -47,6 +47,12 @@ class Query(Base):
         nullable=True,
     )
 
+    # Full execution trace (reasoning, tool calls, tool results)
+    trace: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
+        JSONVariant,
+        nullable=True,
+    )
+
     # Usage metrics
     tokens_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 

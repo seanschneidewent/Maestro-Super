@@ -147,6 +147,7 @@ async def stream_query(
         total_tokens = 0
         response_text = ""
         referenced_pointers = []
+        stored_trace = []
         try:
             async for event in run_agent_query(db, project_id, data.query):
                 # Track tokens from done event and extract final answer
@@ -155,6 +156,7 @@ async def stream_query(
                     total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
                     # Extract the final response from trace
                     trace = event.get("trace", [])
+                    stored_trace = trace  # Save for storage
                     # Find last reasoning steps after tool calls
                     last_tool_idx = -1
                     for i, step in enumerate(trace):
@@ -176,11 +178,12 @@ async def stream_query(
 
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
-            # Update query record with response
+            # Update query record with response and trace
             try:
                 query_record.response_text = response_text or None
                 query_record.tokens_used = total_tokens
                 query_record.referenced_pointers = referenced_pointers if referenced_pointers else None
+                query_record.trace = stored_trace if stored_trace else None
                 db.commit()
                 logger.info(f"Updated query {query_id} with response ({total_tokens} tokens)")
             except Exception as e:

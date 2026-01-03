@@ -68,6 +68,7 @@ class QueryResponse(BaseModel):
     referenced_pointers: list[dict[str, Any]] | None = Field(
         default=None, alias="referencedPointers"
     )
+    trace: list[dict[str, Any]] | None = Field(default=None)
     tokens_used: int | None = Field(default=None, alias="tokensUsed")
     created_at: datetime = Field(alias="createdAt")
 
