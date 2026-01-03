@@ -141,12 +141,14 @@ DISPLAYING RESULTS:
 - Use select_pointers when you want to highlight specific details/areas on the plans
 - Always call one of these before your final answer so the user can see the relevant plans
 
-REASONING:
-- Think through each step out loud
-- Explain why you're following or not following references
-- Note when you have enough information to answer
+RESPONSE STYLE:
+- Keep final answers to 2 sentences maximum
+- Be direct and concise - superintendents are busy
+- Don't list what a page "typically contains" - just confirm you found it
 
-Always provide a complete answer synthesizing everything you found."""
+REASONING:
+- Think through each step briefly
+- Note when you have enough information to answer"""
 
 
 async def execute_tool(

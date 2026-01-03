@@ -226,7 +226,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_call':
         if (typeof data.tool === 'string') {
-          setThinkingText(`Searching ${data.tool}...`)
+          // Don't update thinkingText for tool calls - only show reasoning in the bubble
           const newStep: AgentTraceStep = {
             type: 'tool_call',
             tool: data.tool,
@@ -289,8 +289,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 selectedPagesRef.current = [...selectedPagesRef.current, ...uniqueNewPages]
                 setSelectedPages([...selectedPagesRef.current])
               }
-
-              setThinkingText(`Showing ${result.pages.length} page${result.pages.length !== 1 ? 's' : ''}...`)
+              // Don't update thinkingText for tool results - only show reasoning in the bubble
             }
           }
           // Extract selected pages from select_pointers tool
@@ -349,16 +348,10 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 selectedPagesRef.current = [...selectedPagesRef.current, ...newPages]
                 setSelectedPages([...selectedPagesRef.current])
               }
-
-              setThinkingText(`Found ${result.pointers.length} locations...`)
-            }
-          } else {
-            // Could preview results for other tools
-            const result = data.result as { pointers?: unknown[] }
-            if (result?.pointers && Array.isArray(result.pointers)) {
-              setThinkingText(`Found ${result.pointers.length} locations...`)
+              // Don't update thinkingText for tool results - only show reasoning in the bubble
             }
           }
+          // Don't update thinkingText for any tool results - only show reasoning in the bubble
         }
         break
 

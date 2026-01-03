@@ -173,6 +173,14 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true); // Start expanded to show live updates
   const wasStreamingRef = useRef(isStreaming);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when trace updates during streaming
+  useEffect(() => {
+    if (isStreaming && isExpanded && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [trace, isStreaming, isExpanded]);
 
   // Auto-collapse only when streaming transitions from true to false
   useEffect(() => {
@@ -233,7 +241,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
 
       {/* Trace steps */}
       {isExpanded && (
-        <div className="px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto overflow-x-hidden">
+        <div ref={scrollContainerRef} className="px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto overflow-x-hidden">
           {trace.length === 0 && isStreaming && (
             <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-400">
               <Loader2 size={12} className="animate-spin" />
