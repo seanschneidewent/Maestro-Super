@@ -184,21 +184,27 @@ async def run_agent_query(
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
             ) as stream:
-                # Collect response after streaming completes
+                # Stream text chunks as they arrive
+                current_text = ""
+                async for text in stream.text_stream:
+                    yield {"type": "text", "content": text}
+                    current_text += text
+
+                # Get final message for tool uses and usage stats
                 response = await stream.get_final_message()
 
             # Track token usage
             total_input_tokens += response.usage.input_tokens
             total_output_tokens += response.usage.output_tokens
 
-            # Process content blocks
+            # Add accumulated text to trace
+            if current_text:
+                trace.append({"type": "reasoning", "content": current_text})
+
+            # Process tool use blocks
             tool_uses = []
             for block in response.content:
-                if block.type == "text":
-                    yield {"type": "text", "content": block.text}
-                    trace.append({"type": "reasoning", "content": block.text})
-
-                elif block.type == "tool_use":
+                if block.type == "tool_use":
                     tool_uses.append(block)
                     tool_name = block.name
                     tool_input = block.input

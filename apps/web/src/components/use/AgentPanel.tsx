@@ -47,14 +47,24 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 
       switch (event.type) {
         case 'text': {
-          // Add reasoning step to live trace
-          const newTraceStep: AgentTraceStep = {
-            type: 'reasoning',
-            content: event.content,
-          };
-          const newTrace = [...(msg.trace || []), newTraceStep];
+          // Accumulate text into the current reasoning step (or create one)
+          const trace = msg.trace || [];
+          let newTrace: AgentTraceStep[];
 
-          // Accumulate text - we'll determine final answer at 'done'
+          // Check if the last trace step is a reasoning step we can append to
+          const lastStep = trace[trace.length - 1];
+          if (lastStep && lastStep.type === 'reasoning') {
+            // Append to existing reasoning step
+            newTrace = [
+              ...trace.slice(0, -1),
+              { ...lastStep, content: (lastStep.content || '') + event.content },
+            ];
+          } else {
+            // Create new reasoning step
+            newTrace = [...trace, { type: 'reasoning', content: event.content }];
+          }
+
+          // Also accumulate in reasoning array for legacy compatibility
           const newReasoning = [...(msg.reasoning || []), event.content];
 
           return {
