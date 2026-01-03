@@ -10,7 +10,7 @@ export function SessionControls({ onToggleHistory, isHistoryOpen }: SessionContr
     <div
       className="
         fixed top-4 right-4 z-30
-        bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 rounded-xl
+        bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl shadow-lg
         flex items-center gap-1 p-1
       "
     >
@@ -18,10 +18,11 @@ export function SessionControls({ onToggleHistory, isHistoryOpen }: SessionContr
         onClick={onToggleHistory}
         className={`
           p-2 rounded-lg transition-colors
-          ${isHistoryOpen ? 'bg-white/10' : 'hover:bg-white/10'}
+          ${isHistoryOpen ? 'bg-cyan-100 text-cyan-600' : 'hover:bg-slate-100 text-slate-500'}
         `}
+        title="Query history"
       >
-        <Clock size={20} className="text-slate-300" />
+        <Clock size={20} />
       </button>
     </div>
   )

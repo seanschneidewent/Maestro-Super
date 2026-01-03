@@ -22,6 +22,7 @@ interface UseFieldStreamReturn {
   error: string | null
   reset: () => void
   abort: () => void
+  restore: (trace: AgentTraceStep[], finalAnswer: string) => void
 }
 
 interface AgentMessageAccumulator {
@@ -316,5 +317,15 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setError(null)
   }, [abort])
 
-  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, response, error, reset, abort }
+  const restore = useCallback((restoredTrace: AgentTraceStep[], restoredFinalAnswer: string) => {
+    abort()
+    setIsStreaming(false)
+    setThinkingText('')
+    setFinalAnswer(restoredFinalAnswer)
+    setTrace(restoredTrace)
+    setResponse(null)
+    setError(null)
+  }, [abort])
+
+  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, response, error, reset, abort, restore }
 }

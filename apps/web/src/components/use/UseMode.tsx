@@ -11,7 +11,10 @@ import {
   HoldToTalk,
   SessionControls,
   useFieldStream,
+  QueryHistoryPanel,
 } from '../field';
+import { QueryResponse } from '../../lib/api';
+import { AgentTraceStep } from '../../types';
 
 interface UseModeProps {
   mode: AppMode;
@@ -48,12 +51,19 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     trace,
     error,
     reset: resetStream,
+    restore,
   } = useFieldStream({
     projectId,
     renderedPages,
     pageMetadata,
     contextPointers,
   });
+
+  // Handle restoring a previous session from history
+  const handleRestoreSession = (query: QueryResponse, restoredTrace: AgentTraceStep[], restoredFinalAnswer: string) => {
+    restore(restoredTrace, restoredFinalAnswer);
+    setShowHistory(false);
+  };
 
   // Load hierarchy on mount
   useEffect(() => {
@@ -197,20 +207,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       </div>
 
       {/* History panel - slides in from right */}
-      {showHistory && (
-        <div className="w-80 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 p-4 z-20 shadow-lg">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-slate-800">History</h2>
-            <button
-              onClick={() => setShowHistory(false)}
-              className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
-            >
-              Close
-            </button>
-          </div>
-          <p className="text-slate-500 text-sm">Session history coming soon...</p>
-        </div>
-      )}
+      <QueryHistoryPanel
+        projectId={projectId}
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        onRestoreSession={handleRestoreSession}
+      />
     </div>
   );
 };
