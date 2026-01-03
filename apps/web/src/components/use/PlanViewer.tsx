@@ -174,38 +174,14 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   onVisiblePageChange,
 }) => {
   // =====================================
-  // MULTI-PAGE MODE (when agent has selected pages)
+  // ALL HOOKS MUST BE AT THE TOP (unconditionally)
   // =====================================
 
-  const handlePageVisible = useCallback((visiblePageId: string, disciplineId: string) => {
-    onVisiblePageChange?.(visiblePageId, disciplineId);
-  }, [onVisiblePageChange]);
-
-  if (selectedPages.length > 0) {
-    return (
-      <div className="flex-1 h-full overflow-y-auto bg-slate-100 p-4">
-        <div className="max-w-4xl mx-auto">
-          {selectedPages.map((page) => (
-            <AgentPageCard
-              key={page.pageId}
-              page={page}
-              onVisible={handlePageVisible}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // =====================================
-  // SINGLE-PAGE MODE (manual page selection)
-  // =====================================
-
-  // Page data
+  // Page data (single-page mode)
   const [pageName, setPageName] = useState<string>('');
   const [pointers, setPointers] = useState<PointerResponse[]>([]);
 
-  // File state
+  // File state (single-page mode)
   const [file, setFile] = useState<File | null>(null);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -227,6 +203,11 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const zoomCenterRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Multi-page mode handler
+  const handlePageVisible = useCallback((visiblePageId: string, disciplineId: string) => {
+    onVisiblePageChange?.(visiblePageId, disciplineId);
+  }, [onVisiblePageChange]);
 
   // Measure container size
   useEffect(() => {
@@ -424,6 +405,29 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
       height: imgHeight * fitScale,
     };
   })() : { width: 800, height: 600 };
+
+  // =====================================
+  // MULTI-PAGE MODE (when agent has selected pages)
+  // =====================================
+  if (selectedPages.length > 0) {
+    return (
+      <div className="flex-1 h-full overflow-y-auto bg-slate-100 p-4">
+        <div className="max-w-4xl mx-auto">
+          {selectedPages.map((page) => (
+            <AgentPageCard
+              key={page.pageId}
+              page={page}
+              onVisible={handlePageVisible}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================
+  // SINGLE-PAGE MODE (manual page selection)
+  // =====================================
 
   // Empty state - no page selected
   if (!pageId) {
