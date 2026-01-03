@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Clock, Plus, Bot, User } from 'lucide-react';
-import type { AgentMessage, AgentEvent, ToolCallState, PageVisit } from '../../types';
+import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingSection } from './ThinkingSection';
@@ -47,17 +47,32 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 
       switch (event.type) {
         case 'text': {
-          // Accumulate reasoning text
+          // Add reasoning step to live trace
+          const newTraceStep: AgentTraceStep = {
+            type: 'reasoning',
+            content: event.content,
+          };
+          const newTrace = [...(msg.trace || []), newTraceStep];
+
+          // Accumulate text - we'll determine final answer at 'done'
           const newReasoning = [...(msg.reasoning || []), event.content];
-          // Latest text becomes the potential final answer
+
           return {
             ...msg,
             reasoning: newReasoning,
-            finalAnswer: newReasoning.join(''),
+            trace: newTrace,
           };
         }
 
         case 'tool_call': {
+          // Add tool call step to live trace
+          const newTraceStep: AgentTraceStep = {
+            type: 'tool_call',
+            tool: event.tool,
+            input: event.input,
+          };
+          const newTrace = [...(msg.trace || []), newTraceStep];
+
           // Add new tool call in pending state
           const newToolCall: ToolCallState = {
             tool: event.tool,
@@ -67,10 +82,19 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
           return {
             ...msg,
             toolCalls: [...(msg.toolCalls || []), newToolCall],
+            trace: newTrace,
           };
         }
 
         case 'tool_result': {
+          // Add tool result step to live trace
+          const newTraceStep: AgentTraceStep = {
+            type: 'tool_result',
+            tool: event.tool,
+            result: event.result,
+          };
+          const newTrace = [...(msg.trace || []), newTraceStep];
+
           // Find the matching pending tool call and mark complete
           const toolCalls = msg.toolCalls || [];
           const updatedToolCalls = toolCalls.map(tc => {
@@ -105,15 +129,43 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
             ...msg,
             toolCalls: updatedToolCalls,
             pagesVisited,
+            trace: newTrace,
           };
         }
 
         case 'done': {
-          // Mark message as complete, store trace
+          // Mark message as complete
+          // Extract final answer from trace - it's the last reasoning content after all tool calls
+          const trace = msg.trace || [];
+          let finalAnswer = '';
+
+          // Find the last reasoning step(s) after the last tool_result
+          let lastToolResultIndex = -1;
+          for (let i = trace.length - 1; i >= 0; i--) {
+            if (trace[i].type === 'tool_result') {
+              lastToolResultIndex = i;
+              break;
+            }
+          }
+
+          // Collect all reasoning after the last tool result as the final answer
+          const answerParts: string[] = [];
+          for (let i = lastToolResultIndex + 1; i < trace.length; i++) {
+            if (trace[i].type === 'reasoning' && trace[i].content) {
+              answerParts.push(trace[i].content!);
+            }
+          }
+          finalAnswer = answerParts.join('');
+
+          // If no tools were called, the entire reasoning is the answer
+          if (lastToolResultIndex === -1) {
+            finalAnswer = (msg.reasoning || []).join('');
+          }
+
           return {
             ...msg,
             isComplete: true,
-            trace: event.trace,
+            finalAnswer: finalAnswer || (msg.reasoning || []).join(''),
           };
         }
 
@@ -151,6 +203,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
       reasoning: [],
       toolCalls: [],
       pagesVisited: [],
+      trace: [],
       isComplete: false,
     };
 
@@ -250,13 +303,13 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   <Bot size={18} />
                 </div>
                 <div className="flex-1 space-y-3">
-                  {/* Thinking section (shows reasoning and trace) */}
-                  {((msg.reasoning && msg.reasoning.length > 0) || (msg.trace && msg.trace.length > 0)) && (
+                  {/* Thinking section (shows trace steps live during streaming) */}
+                  {((msg.trace && msg.trace.length > 0) || !msg.isComplete) && (
                     <ThinkingSection
-                      reasoning={msg.reasoning || []}
+                      reasoning={[]}
                       isStreaming={!msg.isComplete}
                       autoCollapse={true}
-                      trace={msg.trace}
+                      trace={msg.trace || []}
                       onNavigateToPage={onNavigateToPage}
                       onOpenPointer={onOpenPointer}
                     />

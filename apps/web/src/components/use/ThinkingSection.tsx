@@ -1,31 +1,167 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Brain, Search, FileText, File, Folder, List, GitBranch, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Brain, Search, FileText, File, Folder, List, GitBranch, CheckCircle2, Loader2 } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
 
-// Map tool names to icons
-const TOOL_ICONS: Record<string, React.ReactNode> = {
-  search_pointers: <Search size={12} />,
-  get_pointer: <FileText size={12} />,
-  get_page_context: <File size={12} />,
-  get_discipline_overview: <Folder size={12} />,
-  list_project_pages: <List size={12} />,
-  get_references_to_page: <GitBranch size={12} />,
+// Map tool names to icons and display names
+const TOOL_CONFIG: Record<string, { icon: React.ReactNode; name: string }> = {
+  search_pointers: { icon: <Search size={12} />, name: 'Search pointers' },
+  get_pointer: { icon: <FileText size={12} />, name: 'Get pointer details' },
+  get_page_context: { icon: <File size={12} />, name: 'Get page context' },
+  get_discipline_overview: { icon: <Folder size={12} />, name: 'Get discipline overview' },
+  list_project_pages: { icon: <List size={12} />, name: 'List project pages' },
+  get_references_to_page: { icon: <GitBranch size={12} />, name: 'Get page references' },
 };
 
 interface ThinkingSectionProps {
-  /** Array of reasoning strings streamed from the agent */
   reasoning: string[];
-  /** Whether the agent is still streaming */
   isStreaming: boolean;
-  /** Auto-collapse when streaming completes */
   autoCollapse?: boolean;
-  /** Trace steps from completed agent response */
   trace?: AgentTraceStep[];
-  /** Callback when navigating to a page */
   onNavigateToPage?: (pageId: string) => void;
-  /** Callback when opening a pointer */
   onOpenPointer?: (pointerId: string) => void;
 }
+
+// Individual expandable step component
+const TraceStepItem: React.FC<{
+  step: AgentTraceStep;
+  index: number;
+  isLast: boolean;
+  isStreaming: boolean;
+  onNavigateToPage?: (pageId: string) => void;
+  onOpenPointer?: (pointerId: string) => void;
+}> = ({ step, index, isLast, isStreaming, onNavigateToPage, onOpenPointer }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const toolConfig = step.tool ? TOOL_CONFIG[step.tool] : null;
+
+  // Get step display info
+  const getStepInfo = () => {
+    if (step.type === 'reasoning') {
+      // Truncate for display
+      const text = step.content || '';
+      const truncated = text.length > 80 ? text.slice(0, 80) + '...' : text;
+      return {
+        icon: <Brain size={12} />,
+        title: truncated || 'Thinking...',
+        color: 'text-purple-500',
+        bgColor: 'bg-purple-50',
+        hasDetails: text.length > 80,
+      };
+    }
+    if (step.type === 'tool_call') {
+      return {
+        icon: toolConfig?.icon || <FileText size={12} />,
+        title: toolConfig?.name || step.tool?.replace(/_/g, ' ') || 'Tool call',
+        color: 'text-cyan-500',
+        bgColor: 'bg-cyan-50',
+        hasDetails: !!step.input && Object.keys(step.input).length > 0,
+      };
+    }
+    if (step.type === 'tool_result') {
+      return {
+        icon: <CheckCircle2 size={12} />,
+        title: `${toolConfig?.name || step.tool?.replace(/_/g, ' ') || 'Tool'} result`,
+        color: 'text-green-500',
+        bgColor: 'bg-green-50',
+        hasDetails: !!step.result,
+      };
+    }
+    return { icon: <FileText size={12} />, title: 'Unknown', color: 'text-slate-500', bgColor: 'bg-slate-50', hasDetails: false };
+  };
+
+  const info = getStepInfo();
+  const showSpinner = isLast && isStreaming && step.type === 'tool_call';
+
+  // Format result data for display
+  const formatResult = (result: Record<string, unknown>) => {
+    // Check for common result patterns
+    if (result.pages && Array.isArray(result.pages)) {
+      return `Found ${result.pages.length} pages`;
+    }
+    if (result.pointers && Array.isArray(result.pointers)) {
+      return `Found ${result.pointers.length} pointers`;
+    }
+    if (result.disciplines && Array.isArray(result.disciplines)) {
+      return `Found ${result.disciplines.length} disciplines`;
+    }
+    if (result.error) {
+      return `Error: ${result.error}`;
+    }
+    // Truncate JSON for display
+    const json = JSON.stringify(result, null, 2);
+    return json.length > 500 ? json.slice(0, 500) + '...' : json;
+  };
+
+  return (
+    <div className="group">
+      <button
+        onClick={() => info.hasDetails && setIsExpanded(!isExpanded)}
+        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+          info.hasDetails ? 'hover:bg-slate-100 cursor-pointer' : 'cursor-default'
+        }`}
+      >
+        {/* Expand chevron or spacer */}
+        <div className="w-3 flex-shrink-0">
+          {info.hasDetails && (
+            isExpanded ? (
+              <ChevronDown size={10} className="text-slate-400" />
+            ) : (
+              <ChevronRight size={10} className="text-slate-400" />
+            )
+          )}
+        </div>
+
+        {/* Icon */}
+        <div className={`flex-shrink-0 ${info.color}`}>
+          {showSpinner ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            info.icon
+          )}
+        </div>
+
+        {/* Title */}
+        <span className="text-xs text-slate-600 flex-1 text-left truncate">
+          {info.title}
+        </span>
+
+        {/* Step number */}
+        <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+          {(index + 1).toString().padStart(2, '0')}
+        </span>
+      </button>
+
+      {/* Expanded details */}
+      {isExpanded && info.hasDetails && (
+        <div className={`ml-5 mr-2 mt-1 mb-2 p-2 rounded-lg ${info.bgColor} border border-slate-100 animate-fade-in`}>
+          {step.type === 'reasoning' && step.content && (
+            <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+              {step.content}
+            </p>
+          )}
+
+          {step.type === 'tool_call' && step.input && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Input</p>
+              <pre className="text-xs text-slate-600 font-mono overflow-x-auto">
+                {JSON.stringify(step.input, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {step.type === 'tool_result' && step.result && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Result</p>
+              <pre className="text-xs text-slate-600 font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                {formatResult(step.result)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   reasoning,
@@ -35,7 +171,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onNavigateToPage,
   onOpenPointer,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true); // Start expanded to show live updates
   const wasStreamingRef = useRef(isStreaming);
 
   // Auto-collapse only when streaming transitions from true to false
@@ -43,7 +179,6 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
     const wasStreaming = wasStreamingRef.current;
     wasStreamingRef.current = isStreaming;
 
-    // Only auto-collapse if streaming just completed (was streaming, now not)
     if (autoCollapse && wasStreaming && !isStreaming && isExpanded) {
       const timer = setTimeout(() => {
         setIsExpanded(false);
@@ -52,54 +187,13 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
     }
   }, [isStreaming, autoCollapse, isExpanded]);
 
-  // Don't render if no reasoning and no trace
-  if (reasoning.length === 0 && trace.length === 0 && !isStreaming) {
+  // Don't render if no trace and not streaming
+  if (trace.length === 0 && !isStreaming) {
     return null;
   }
 
-  const combinedText = reasoning.join('');
-
-  // Get icon for a trace step
-  const getStepIcon = (step: AgentTraceStep) => {
-    if (step.type === 'reasoning') {
-      return <Brain size={12} />;
-    }
-    if (step.type === 'tool_call' && step.tool) {
-      return TOOL_ICONS[step.tool] || <FileText size={12} />;
-    }
-    if (step.type === 'tool_result') {
-      return <CheckCircle2 size={12} />;
-    }
-    return <FileText size={12} />;
-  };
-
-  // Get display text for a trace step
-  const getStepText = (step: AgentTraceStep) => {
-    if (step.type === 'reasoning') {
-      return step.content || '';
-    }
-    if (step.type === 'tool_call') {
-      const toolName = step.tool?.replace(/_/g, ' ') || 'tool';
-      return `Called ${toolName}`;
-    }
-    if (step.type === 'tool_result') {
-      return 'Result received';
-    }
-    return 'Unknown step';
-  };
-
-  // Check if a step is clickable (has page or pointer reference)
-  const getClickHandler = (step: AgentTraceStep): (() => void) | undefined => {
-    if (step.type === 'tool_result' && step.result) {
-      if (step.result.pageId && onNavigateToPage) {
-        return () => onNavigateToPage(step.result!.pageId as string);
-      }
-      if (step.result.pointerId && onOpenPointer) {
-        return () => onOpenPointer(step.result!.pointerId as string);
-      }
-    }
-    return undefined;
-  };
+  // Count step types for header
+  const toolCallCount = trace.filter(s => s.type === 'tool_call').length;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200">
@@ -108,7 +202,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100/50 transition-colors"
       >
-        <div className={`flex-shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-0' : ''}`}>
+        <div className="flex-shrink-0">
           {isExpanded ? (
             <ChevronDown size={14} className="text-slate-400" />
           ) : (
@@ -120,6 +214,11 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
 
         <span className="text-xs font-medium text-slate-600 flex-1 text-left">
           {isStreaming ? 'Thinking' : 'Thought process'}
+          {!isStreaming && toolCallCount > 0 && (
+            <span className="text-slate-400 font-normal ml-1">
+              ({toolCallCount} tool{toolCallCount !== 1 ? 's' : ''} used)
+            </span>
+          )}
         </span>
 
         {/* Animated dots while streaming */}
@@ -132,63 +231,27 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         )}
       </button>
 
-      {/* Content */}
+      {/* Trace steps */}
       {isExpanded && (
-        <div className="px-3 pb-3 animate-fade-in space-y-2">
-          {/* Reasoning text */}
-          {(combinedText || isStreaming) && (
-            <div className="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap font-mono bg-white rounded-lg p-3 border border-slate-100 max-h-48 overflow-y-auto">
-              {combinedText || (isStreaming ? 'Starting to think...' : '')}
-              {isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-0.5 animate-pulse" />
-              )}
+        <div className="px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto">
+          {trace.length === 0 && isStreaming && (
+            <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-400">
+              <Loader2 size={12} className="animate-spin" />
+              Starting to think...
             </div>
           )}
 
-          {/* Trace steps */}
-          {trace.length > 0 && (
-            <div className="border-t border-slate-100 pt-2 space-y-1 max-h-64 overflow-y-auto">
-              {trace.map((step, index) => {
-                const clickHandler = getClickHandler(step);
-                const isClickable = !!clickHandler;
-
-                return (
-                  <div
-                    key={index}
-                    onClick={clickHandler}
-                    className={`flex items-start gap-2 py-1.5 px-2 rounded ${
-                      isClickable
-                        ? 'cursor-pointer hover:bg-cyan-50 transition-colors'
-                        : ''
-                    }`}
-                  >
-                    {/* Step number */}
-                    <span className="text-[10px] text-slate-400 font-mono w-4 flex-shrink-0 pt-0.5">
-                      {(index + 1).toString().padStart(2, '0')}
-                    </span>
-
-                    {/* Icon */}
-                    <div className={`flex-shrink-0 mt-0.5 ${
-                      step.type === 'reasoning'
-                        ? 'text-purple-400'
-                        : step.type === 'tool_call'
-                        ? 'text-cyan-500'
-                        : 'text-green-500'
-                    }`}>
-                      {getStepIcon(step)}
-                    </div>
-
-                    {/* Text */}
-                    <span className={`text-xs flex-1 ${
-                      isClickable ? 'text-cyan-600' : 'text-slate-600'
-                    }`}>
-                      {getStepText(step)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {trace.map((step, index) => (
+            <TraceStepItem
+              key={index}
+              step={step}
+              index={index}
+              isLast={index === trace.length - 1}
+              isStreaming={isStreaming}
+              onNavigateToPage={onNavigateToPage}
+              onOpenPointer={onOpenPointer}
+            />
+          ))}
         </div>
       )}
     </div>
