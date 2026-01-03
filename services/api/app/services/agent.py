@@ -84,8 +84,23 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "select_pages",
+        "description": "Display specific pages in the plan viewer for the user to see. Use this when the user asks to see specific pages or when you want to show them relevant plan sheets. Pages will be displayed without any pointer highlighting.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of page UUIDs to display",
+                }
+            },
+            "required": ["page_ids"],
+        },
+    },
+    {
         "name": "select_pointers",
-        "description": "Highlight specific pointers on the plan viewer to show the user which areas of the plans are relevant to their query. Call this after finding relevant pointers to display them visually.",
+        "description": "Highlight specific pointers on the plan viewer to show the user which areas of the plans are relevant to their query. This also displays the pages containing those pointers. Use when you want to highlight specific details on the plans.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -109,7 +124,8 @@ You have access to these tools:
 - get_discipline_overview: Get high-level view of a discipline (architectural, structural, etc.)
 - list_project_pages: See all pages in the project
 - get_references_to_page: Find what points TO a specific page (reverse lookup)
-- select_pointers: Highlight pointers on the plan viewer to show the user relevant areas
+- select_pages: Display specific pages in the plan viewer for the user to see
+- select_pointers: Highlight specific pointers on pages to show the user relevant areas
 
 STRATEGY:
 1. Start by searching for relevant pointers or identifying which discipline likely contains the answer
@@ -117,8 +133,13 @@ STRATEGY:
 3. When you find references to other pages, evaluate if they're relevant to the original query
 4. Follow relevant references - keep traversing until you have enough information
 5. If a reference exists but isn't relevant to the query, note it but don't follow it
-6. Use select_pointers to highlight the most relevant pointers for the user to see on the plan viewer
+6. Use select_pages to show relevant pages, or select_pointers to highlight specific details
 7. Stop when you can comprehensively answer the question
+
+DISPLAYING RESULTS:
+- Use select_pages when you want to show the user specific plan sheets without highlighting
+- Use select_pointers when you want to highlight specific details/areas on the plans
+- Always call one of these before your final answer so the user can see the relevant plans
 
 REASONING:
 - Think through each step out loud
@@ -147,7 +168,7 @@ async def execute_tool(
             result = await tool_fn(db, project_id=project_id, **tool_input)
         elif tool_name == "list_project_pages":
             result = await tool_fn(db, project_id=project_id)
-        elif tool_name == "select_pointers":
+        elif tool_name in ("select_pages", "select_pointers"):
             result = await tool_fn(db, **tool_input)
         else:
             result = await tool_fn(db, **tool_input)

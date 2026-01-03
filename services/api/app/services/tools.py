@@ -261,6 +261,38 @@ async def get_references_to_page(db: Session, page_id: str) -> PageReferences | 
     )
 
 
+async def select_pages(db: Session, page_ids: list[str]) -> dict:
+    """
+    Return page details for display in the frontend viewer.
+
+    Args:
+        db: Database session
+        page_ids: List of page UUIDs to display
+
+    Returns:
+        Dict with pages list containing page info for the viewer
+    """
+    pages = (
+        db.query(Page)
+        .options(joinedload(Page.discipline))
+        .filter(Page.id.in_(page_ids))
+        .all()
+    )
+
+    return {
+        "pages": [
+            {
+                "page_id": str(p.id),
+                "page_name": p.page_name,
+                "file_path": p.file_path,
+                "discipline_id": str(p.discipline_id) if p.discipline_id else None,
+                "discipline_name": p.discipline.display_name if p.discipline else None,
+            }
+            for p in pages
+        ],
+    }
+
+
 async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
     """
     Return pointer details for highlighting in the frontend.
@@ -308,5 +340,6 @@ TOOL_REGISTRY: dict[str, Callable] = {
     "get_discipline_overview": get_discipline_overview,
     "list_project_pages": list_project_pages,
     "get_references_to_page": get_references_to_page,
+    "select_pages": select_pages,
     "select_pointers": select_pointers,
 }

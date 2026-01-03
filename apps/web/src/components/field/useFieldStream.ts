@@ -258,8 +258,43 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           agentMessage.trace.push(newStep)
           setTrace([...agentMessage.trace])
 
+          // Extract selected pages from select_pages tool
+          if (data.tool === 'select_pages') {
+            const result = data.result as {
+              pages?: Array<{
+                page_id: string
+                page_name: string
+                file_path: string
+                discipline_id: string
+                discipline_name?: string
+              }>
+            }
+
+            if (result?.pages && Array.isArray(result.pages)) {
+              const newPages: AgentSelectedPage[] = result.pages
+                .filter((p) => p.page_id && p.file_path)
+                .map((p) => ({
+                  pageId: p.page_id,
+                  pageName: p.page_name || 'Unknown',
+                  filePath: p.file_path,
+                  disciplineId: p.discipline_id || '',
+                  pointers: [], // No pointers for select_pages
+                }))
+
+              // Merge with existing (avoid duplicates)
+              const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
+              const uniqueNewPages = newPages.filter((p) => !existingPageIds.has(p.pageId))
+
+              if (uniqueNewPages.length > 0) {
+                selectedPagesRef.current = [...selectedPagesRef.current, ...uniqueNewPages]
+                setSelectedPages([...selectedPagesRef.current])
+              }
+
+              setThinkingText(`Showing ${result.pages.length} page${result.pages.length !== 1 ? 's' : ''}...`)
+            }
+          }
           // Extract selected pages from select_pointers tool
-          if (data.tool === 'select_pointers') {
+          else if (data.tool === 'select_pointers') {
             const result = data.result as {
               pointers?: Array<{
                 pointer_id: string
