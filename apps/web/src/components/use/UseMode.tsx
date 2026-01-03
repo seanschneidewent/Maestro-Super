@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppMode, FieldResponse, FieldPage, FieldPointer, FieldViewMode, DisciplineInHierarchy, ContextPointer } from '../../types';
 import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
+import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
 import { api, PointerResponse } from '../../lib/api';
 import { Send } from 'lucide-react';
@@ -48,6 +49,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     submitQuery,
     isStreaming,
     thinkingText,
+    trace,
     response,
     error,
     reset: resetStream,
@@ -129,6 +131,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setQueryInput('');
   };
 
+  // Handle navigation from thinking section
+  const handleNavigateToPage = (pageId: string) => {
+    setSelectedPageId(pageId);
+  };
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
       {/* Left panel - changes based on view mode */}
@@ -180,6 +187,28 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           selectedPointerIds={selectedPointerIds}
         />
 
+        {/* Thought process dropdown - top left */}
+        {(isStreaming || trace.length > 0) && (
+          <div className="absolute top-4 left-4 z-30 w-80 max-w-[calc(100%-2rem)]">
+            <ThinkingSection
+              reasoning={[]}
+              isStreaming={isStreaming}
+              autoCollapse={true}
+              trace={trace}
+              onNavigateToPage={handleNavigateToPage}
+            />
+          </div>
+        )}
+
+        {/* Thinking bubble - bottom left (shows current thinking text) */}
+        {(isStreaming || thinkingText) && (
+          <ThinkingBubble
+            isThinking={isStreaming}
+            thinkingText={thinkingText}
+            summary={response?.summary || ''}
+          />
+        )}
+
         {/* Query input bar - bottom center */}
         <form
           onSubmit={handleQuerySubmit}
@@ -216,23 +245,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
         {/* Response mode overlays */}
         {viewMode === 'response' && (
-          <>
-            <BackButton visible={true} onBack={handleBackButton} />
-            <ThinkingBubble
-              isThinking={isStreaming}
-              thinkingText={thinkingText}
-              summary={response?.summary || ''}
-            />
-          </>
-        )}
-
-        {/* Thinking bubble during streaming (even in standard mode) */}
-        {isStreaming && viewMode === 'standard' && (
-          <ThinkingBubble
-            isThinking={isStreaming}
-            thinkingText={thinkingText}
-            summary=""
-          />
+          <BackButton visible={true} onBack={handleBackButton} />
         )}
 
         {/* Popover when pointer active */}

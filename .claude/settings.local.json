@@ -22,7 +22,12 @@
       "Bash(dir:*)",
       "Bash(pnpm add:*)",
       "Bash(pnpm run build:*)",
-      "Bash(pnpm list:*)"
+      "Bash(pnpm list:*)",
+      "Bash(.venvScriptspython -c \"from app.services.agent import run_agent_query, TOOL_DEFINITIONS, AGENT_SYSTEM_PROMPT; print\\(''Agent imports OK''\\); print\\(f''{len\\(TOOL_DEFINITIONS\\)} tools defined''\\)\")",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []

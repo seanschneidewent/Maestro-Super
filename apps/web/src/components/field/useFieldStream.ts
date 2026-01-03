@@ -16,6 +16,7 @@ interface UseFieldStreamReturn {
   submitQuery: (query: string) => Promise<void>
   isStreaming: boolean
   thinkingText: string
+  trace: AgentTraceStep[]
   response: FieldResponse | null
   error: string | null
   reset: () => void
@@ -36,6 +37,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [thinkingText, setThinkingText] = useState('')
+  const [trace, setTrace] = useState<AgentTraceStep[]>([])
   const [response, setResponse] = useState<FieldResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -57,6 +59,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       setIsStreaming(true)
       setThinkingText('')
+      setTrace([])
       setResponse(null)
       setError(null)
 
@@ -177,7 +180,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         // Update thinking text - REPLACE not append
         if (typeof data.content === 'string') {
           agentMessage.reasoning.push(data.content)
-          agentMessage.trace.push({ type: 'reasoning', content: data.content })
+          const newStep: AgentTraceStep = { type: 'reasoning', content: data.content }
+          agentMessage.trace.push(newStep)
+          setTrace([...agentMessage.trace])
           setThinkingText(extractLatestThinking(agentMessage.trace))
         }
         break
@@ -185,11 +190,13 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'tool_call':
         if (typeof data.tool === 'string') {
           setThinkingText(`Searching ${data.tool}...`)
-          agentMessage.trace.push({
+          const newStep: AgentTraceStep = {
             type: 'tool_call',
             tool: data.tool,
             input: data.input as Record<string, unknown>,
-          })
+          }
+          agentMessage.trace.push(newStep)
+          setTrace([...agentMessage.trace])
 
           // Track page visits from get_page_details tool
           if (data.tool === 'get_page_details' && data.input) {
@@ -206,11 +213,13 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_result':
         if (typeof data.tool === 'string') {
-          agentMessage.trace.push({
+          const newStep: AgentTraceStep = {
             type: 'tool_result',
             tool: data.tool,
             result: data.result as Record<string, unknown>,
-          })
+          }
+          agentMessage.trace.push(newStep)
+          setTrace([...agentMessage.trace])
 
           // Could preview results
           const result = data.result as { pointers?: unknown[] }
@@ -262,9 +271,10 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     abort()
     setIsStreaming(false)
     setThinkingText('')
+    setTrace([])
     setResponse(null)
     setError(null)
   }, [abort])
 
-  return { submitQuery, isStreaming, thinkingText, response, error, reset, abort }
+  return { submitQuery, isStreaming, thinkingText, trace, response, error, reset, abort }
 }
