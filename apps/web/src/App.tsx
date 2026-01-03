@@ -64,6 +64,7 @@ const App: React.FC = () => {
   // Load or create default project when authenticated
   useEffect(() => {
     if (mode === AppMode.LOGIN || checkingAuth) return;
+    if (project) return; // Already have project, skip loading
 
     async function loadProject() {
       try {
@@ -87,7 +88,7 @@ const App: React.FC = () => {
     }
 
     loadProject();
-  }, [mode, checkingAuth]);
+  }, [mode, checkingAuth, project]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
