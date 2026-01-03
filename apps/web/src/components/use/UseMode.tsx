@@ -5,10 +5,10 @@ import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
 import { api, PointerResponse } from '../../lib/api';
-import { Send, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import {
   ThinkingBubble,
-  HoldToTalk,
+  QueryInput,
   SessionControls,
   useFieldStream,
   QueryHistoryPanel,
@@ -107,13 +107,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     console.log('Recording complete:', audioBlob.size, 'bytes');
   };
 
-  // Handle text query submit
-  const handleQuerySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!queryInput.trim() || isStreaming) return;
-    submitQuery(queryInput.trim());
-    setQueryInput('');
-  };
 
   // Handle navigation from thinking section
   const handleNavigateToPage = (pageId: string) => {
@@ -199,34 +192,22 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         />
 
         {/* Query input bar - bottom center */}
-        <form
-          onSubmit={handleQuerySubmit}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4"
-        >
-          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-2xl px-4 py-2 shadow-lg">
-            <input
-              type="text"
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.target.value)}
-              placeholder="Ask about your plans..."
-              disabled={isStreaming}
-              className="flex-1 bg-transparent text-slate-800 placeholder:text-slate-400 outline-none text-sm"
-            />
-            <button
-              type="submit"
-              disabled={!queryInput.trim() || isStreaming}
-              className="p-2 rounded-xl bg-cyan-500 text-white hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send size={18} />
-            </button>
-          </div>
-        </form>
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
+          <QueryInput
+            value={queryInput}
+            onChange={setQueryInput}
+            onSubmit={() => {
+              if (queryInput.trim() && !isStreaming) {
+                submitQuery(queryInput.trim());
+                setQueryInput('');
+              }
+            }}
+            onRecordingComplete={handleRecordingComplete}
+            isProcessing={isStreaming}
+          />
+        </div>
 
         {/* Floating controls */}
-        <HoldToTalk
-          onRecordingComplete={handleRecordingComplete}
-          isProcessing={isStreaming}
-        />
         <SessionControls
           onToggleHistory={() => setShowHistory(!showHistory)}
           isHistoryOpen={showHistory}
