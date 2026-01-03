@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Clock, Plus, Bot, User } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { ToolCallCard } from './ToolCallCard';
@@ -407,7 +408,20 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                       const displayText = answerParts.length > 0 ? answerParts.join('') : msg.finalAnswer;
                       return (
                         <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                          {displayText}
+                          <ReactMarkdown
+                            components={{
+                              h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mt-4 mb-2 first:mt-0">{children}</h2>,
+                              h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-800 mt-3 mb-1">{children}</h3>,
+                              p: ({ children }) => <p className="my-2">{children}</p>,
+                              ul: ({ children }) => <ul className="my-2 ml-4 space-y-1">{children}</ul>,
+                              ol: ({ children }) => <ol className="my-2 ml-4 space-y-1 list-decimal">{children}</ol>,
+                              li: ({ children }) => <li className="pl-1">{children}</li>,
+                              strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                              code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                            }}
+                          >
+                            {displayText || ''}
+                          </ReactMarkdown>
                           {!msg.isComplete && (
                             <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
                           )}
