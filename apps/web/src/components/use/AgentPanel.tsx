@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Clock, Plus, Bot, User } from 'lucide-react';
+import { Send, Clock, Plus, Bot, User, MessageSquare, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingSection } from './ThinkingSection';
 import { PagesVisitedBadges } from './PagesVisitedBadges';
+import { api, QueryResponse } from '../../lib/api';
 
 interface AgentPanelProps {
   projectId: string;
@@ -33,10 +34,30 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
     }
   ]);
   const [showHistory, setShowHistory] = useState(false);
+  const [queryHistory, setQueryHistory] = useState<QueryResponse[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { sendQuery, isStreaming, abort } = useAgentStream({ projectId });
+
+  // Fetch query history when sidebar opens
+  useEffect(() => {
+    if (showHistory) {
+      setHistoryLoading(true);
+      api.queries.list(projectId)
+        .then(setQueryHistory)
+        .catch(console.error)
+        .finally(() => setHistoryLoading(false));
+    }
+  }, [showHistory, projectId]);
+
+  // Refresh history after a new query completes
+  const refreshHistory = useCallback(() => {
+    api.queries.list(projectId)
+      .then(setQueryHistory)
+      .catch(console.error);
+  }, [projectId]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -184,6 +205,9 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
             finalAnswer = (msg.reasoning || []).join('');
           }
 
+          // Refresh query history after completion
+          refreshHistory();
+
           return {
             ...msg,
             isComplete: true,
@@ -204,7 +228,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
           return msg;
       }
     }));
-  }, [onSelectPointers]);
+  }, [onSelectPointers, refreshHistory]);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return;
@@ -286,14 +310,54 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 
       {/* History Sidebar Overlay */}
       <div className={`absolute top-16 right-0 w-72 h-[calc(100%-4rem)] bg-white/95 backdrop-blur-xl border-l border-slate-200/50 transform transition-all duration-300 ease-out z-20 shadow-elevation-2 ${
-        showHistory ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+        showHistory ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 pointer-events-none'
       }`}>
-        <div className="p-4">
+        <div className="p-4 h-full flex flex-col">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Clock size={12} /> Recent Sessions
           </h3>
-          <div className="text-center text-slate-400 py-8">
-            <p className="text-sm">No recent sessions</p>
+          <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 text-cyan-500 animate-spin" />
+              </div>
+            ) : queryHistory.length === 0 ? (
+              <div className="text-center text-slate-400 py-8">
+                <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No recent sessions</p>
+              </div>
+            ) : (
+              queryHistory.map((query) => (
+                <div
+                  key={query.id}
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition-all group"
+                >
+                  <p className="text-sm text-slate-700 font-medium line-clamp-2 group-hover:text-cyan-600">
+                    {query.queryText}
+                  </p>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(query.createdAt).toLocaleDateString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    {query.tokensUsed && (
+                      <span className="text-[10px] text-slate-400 bg-slate-200/50 px-1.5 py-0.5 rounded">
+                        {query.tokensUsed.toLocaleString()} tokens
+                      </span>
+                    )}
+                  </div>
+                  {query.responseText && (
+                    <p className="text-xs text-slate-500 mt-2 line-clamp-2">
+                      {query.responseText}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

@@ -315,6 +315,18 @@ export interface PointerResponse {
   updatedAt?: string;
 }
 
+// Query types (matching backend schema)
+export interface QueryResponse {
+  id: string;
+  userId: string;
+  projectId?: string;
+  queryText: string;
+  responseText?: string;
+  referencedPointers?: Array<{ pointerId: string }>;
+  tokensUsed?: number;
+  createdAt: string;
+}
+
 // API functions
 
 // Projects
@@ -423,6 +435,12 @@ export const api = {
     update: (pointerId: string, data: { title?: string; description?: string }) =>
       request<PointerResponse>(`/pointers/${pointerId}`, { method: 'PATCH', body: data }),
     delete: (pointerId: string) => request<void>(`/pointers/${pointerId}`, { method: 'DELETE' }),
+  },
+
+  queries: {
+    list: (projectId: string) =>
+      request<QueryResponse[]>(`/projects/${projectId}/queries`),
+    get: (queryId: string) => request<QueryResponse>(`/queries/${queryId}`),
   },
 };
 
