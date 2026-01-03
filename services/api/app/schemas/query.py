@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class QueryCreate(BaseModel):
@@ -59,9 +60,9 @@ class QueryUpdate(BaseModel):
 class QueryResponse(BaseModel):
     """Schema for query response."""
 
-    id: str
+    id: str | UUID
     user_id: str = Field(alias="userId")
-    project_id: str | None = Field(default=None, alias="projectId")
+    project_id: str | UUID | None = Field(default=None, alias="projectId")
     query_text: str = Field(alias="queryText")
     response_text: str | None = Field(default=None, alias="responseText")
     referenced_pointers: list[dict[str, Any]] | None = Field(
@@ -71,3 +72,10 @@ class QueryResponse(BaseModel):
     created_at: datetime = Field(alias="createdAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_serializer("id", "project_id")
+    def serialize_uuid(self, value: str | UUID | None) -> str | None:
+        """Convert UUID to string for JSON serialization."""
+        if value is None:
+            return None
+        return str(value)
