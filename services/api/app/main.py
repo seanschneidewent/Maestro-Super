@@ -37,9 +37,14 @@ origins = [
     "http://localhost:5173",
 ]
 
-# Add production frontend URL if configured
+# Add production frontend URL if configured (handle www and non-www)
 if settings.frontend_url:
     origins.append(settings.frontend_url)
+    # Also add www/non-www variant
+    if "://www." in settings.frontend_url:
+        origins.append(settings.frontend_url.replace("://www.", "://"))
+    elif "://" in settings.frontend_url:
+        origins.append(settings.frontend_url.replace("://", "://www."))
 
 app.add_middleware(
     CORSMiddleware,
