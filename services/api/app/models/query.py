@@ -42,7 +42,7 @@ class Query(Base):
     response_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Context used for response
-    referenced_pointers: Mapped[Optional[dict[str, Any]]] = mapped_column(
+    referenced_pointers: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
         JSONVariant,
         nullable=True,
     )

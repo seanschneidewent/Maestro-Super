@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.auth.schemas import User
 from app.database.session import get_db
 from app.dependencies.rate_limit import check_rate_limit
@@ -57,14 +58,16 @@ def create_query(
 @router.get("/projects/{project_id}/queries", response_model=list[QueryResponse])
 def list_queries(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Query]:
-    """List all queries for a project."""
+    """List all queries for a project (filtered to current user)."""
     verify_project_exists(project_id, db)
 
     return (
         db.query(Query)
         .filter(Query.project_id == project_id)
+        .filter(Query.user_id == user.id)
         .order_by(Query.created_at.desc())
         .all()
     )
@@ -73,10 +76,11 @@ def list_queries(
 @router.get("/queries/{query_id}", response_model=QueryResponse)
 def get_query(
     query_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Query:
-    """Get a specific query."""
-    query = db.query(Query).filter(Query.id == query_id).first()
+    """Get a specific query (must be owned by current user)."""
+    query = db.query(Query).filter(Query.id == query_id).filter(Query.user_id == user.id).first()
     if not query:
         raise HTTPException(status_code=404, detail="Query not found")
     return query
