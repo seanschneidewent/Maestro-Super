@@ -72,20 +72,28 @@ export function extractLatestThinking(trace: AgentTraceStep[]): string {
   for (let i = trace.length - 1; i >= 0; i--) {
     const step = trace[i]
     if (step.type === 'reasoning' && step.content) {
-      // Return last ~100 chars or last sentence
-      const content = step.content.trim()
-      if (content.length <= 100) {
-        return content
+      // Clean up markdown and get first real sentence
+      let content = step.content
+        .replace(/^#+\s*.*/gm, '') // Remove markdown headers
+        .replace(/^\*\*[^*]+\*\*\s*/gm, '') // Remove bold headers like **Summary**
+        .replace(/^\s*[-*]\s*/gm, '') // Remove list markers
+        .trim()
+
+      // Skip if only headers/formatting was present
+      if (!content) continue
+
+      // Get first sentence
+      const sentenceMatch = content.match(/^[^.!?]*[.!?]/)
+      if (sentenceMatch) {
+        return sentenceMatch[0].trim()
       }
 
-      // Try to find a sentence break near the end
-      const lastPeriod = content.lastIndexOf('.', 100)
-      if (lastPeriod > 50) {
-        return content.slice(0, lastPeriod + 1)
+      // No sentence ending, truncate
+      if (content.length > 100) {
+        return content.slice(0, 97) + '...'
       }
 
-      // Just truncate with ellipsis
-      return content.slice(0, 97) + '...'
+      return content
     }
   }
 
