@@ -240,7 +240,8 @@ const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
         <ToastProvider>
-          {mode === AppMode.SETUP ? (
+          {/* Render both modes but hide inactive one to preserve state */}
+          <div className={mode === AppMode.SETUP ? 'contents' : 'hidden'}>
             <SetupMode
               mode={mode}
               setMode={setMode}
@@ -249,9 +250,10 @@ const App: React.FC = () => {
               setupState={setupState}
               setSetupState={setSetupState}
             />
-          ) : (
+          </div>
+          <div className={mode === AppMode.USE ? 'contents' : 'hidden'}>
             <UseMode mode={mode} setMode={setMode} projectId={project.id} />
-          )}
+          </div>
         </ToastProvider>
       </ErrorBoundary>
       <ReactQueryDevtools initialIsOpen={false} />

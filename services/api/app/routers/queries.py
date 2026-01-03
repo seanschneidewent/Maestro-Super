@@ -112,7 +112,7 @@ async def stream_query(
     """
     Stream agent query response via Server-Sent Events.
 
-    Rate limited per user. Tracks token usage.
+    Rate limited per user. Tracks token usage. Saves query to database.
 
     Yields SSE events:
     - data: {"type": "text", "content": "..."} - Claude's reasoning
@@ -124,21 +124,65 @@ async def stream_query(
     verify_project_exists(project_id, db)
     logger.info(f"Starting query stream for user {user.id} on project {project_id}")
 
+    # Create query record in database
+    query_record = Query(
+        user_id=user.id,
+        project_id=project_id,
+        query_text=data.query,
+    )
+    db.add(query_record)
+    db.commit()
+    db.refresh(query_record)
+    query_id = str(query_record.id)
+    logger.info(f"Created query record {query_id}")
+
     # Increment request count
     UsageService.increment_request(db, user.id)
 
     async def event_generator():
         total_tokens = 0
+        response_text = ""
+        referenced_pointers = []
         try:
             async for event in run_agent_query(db, project_id, data.query):
-                # Track tokens from done event
+                # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
                     usage = event.get("usage", {})
                     total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
+                    # Extract the final response from trace
+                    trace = event.get("trace", [])
+                    # Find last reasoning steps after tool calls
+                    last_tool_idx = -1
+                    for i, step in enumerate(trace):
+                        if step.get("type") == "tool_result":
+                            last_tool_idx = i
+                            # Collect pointer IDs from tool results
+                            result = step.get("result", {})
+                            if isinstance(result, dict):
+                                if result.get("pointer_id"):
+                                    referenced_pointers.append({"pointer_id": result["pointer_id"]})
+                                elif result.get("pointers"):
+                                    for p in result["pointers"]:
+                                        if isinstance(p, dict) and p.get("id"):
+                                            referenced_pointers.append({"pointer_id": p["id"]})
+                    # Collect final answer text
+                    for step in trace[last_tool_idx + 1:]:
+                        if step.get("type") == "reasoning" and step.get("content"):
+                            response_text += step["content"]
 
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
-            # Track token usage at end of stream
+            # Update query record with response
+            try:
+                query_record.response_text = response_text or None
+                query_record.tokens_used = total_tokens
+                query_record.referenced_pointers = referenced_pointers if referenced_pointers else None
+                db.commit()
+                logger.info(f"Updated query {query_id} with response ({total_tokens} tokens)")
+            except Exception as e:
+                logger.warning(f"Failed to update query record: {e}")
+
+            # Track token usage
             if total_tokens > 0:
                 try:
                     UsageService.increment_tokens(db, user.id, total_tokens)
