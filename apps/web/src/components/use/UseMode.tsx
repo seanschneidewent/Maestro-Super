@@ -1,11 +1,20 @@
-import React, { useState } from 'react';
-import { AppMode } from '../../types';
-import { Folder, ChevronLeft, ChevronRight, Bot } from 'lucide-react';
-import { AgentPanel } from './AgentPanel';
+import React, { useState, useRef, useEffect } from 'react';
+import { AppMode, FieldResponse, FieldPage, FieldPointer, FieldViewMode, DisciplineInHierarchy, ContextPointer } from '../../types';
 import { PlansPanel } from './PlansPanel';
-import { PlanViewer } from './PlanViewer';
 import { ModeToggle } from '../ModeToggle';
-import { PointerResponse } from '../../lib/api';
+import { api } from '../../lib/api';
+import {
+  PageViewer,
+  PageViewerHandle,
+  PointerPopover,
+  PageList,
+  FileTreeCollapsed,
+  ThinkingBubble,
+  HoldToTalk,
+  SessionControls,
+  BackButton,
+  useFieldStream,
+} from '../field';
 
 interface UseModeProps {
   mode: AppMode;
@@ -14,150 +23,225 @@ interface UseModeProps {
 }
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) => {
-  // Panel visibility state
-  const [showPlansPanel, setShowPlansPanel] = useState(true);
-  const [showAgentPanel, setShowAgentPanel] = useState(true);
+  // Page viewer ref
+  const pageViewerRef = useRef<PageViewerHandle>(null);
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
 
-  // Selected pointers state (for agent highlighting)
-  const [selectedPointerIds, setSelectedPointerIds] = useState<string[]>([]);
+  // Field mode state
+  const [activePointer, setActivePointer] = useState<FieldPointer | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Hierarchy data for FileTreeCollapsed
+  const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
+
+  // Rendered page PNGs cache
+  const [renderedPages, setRenderedPages] = useState<Map<string, string>>(new Map());
+
+  // Page metadata cache
+  const [pageMetadata, setPageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
+
+  // Context pointers cache
+  const [contextPointers, setContextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
+
+  // Field stream hook
+  const {
+    submitQuery,
+    isStreaming,
+    thinkingText,
+    response,
+    error,
+    reset: resetStream,
+  } = useFieldStream({
+    projectId,
+    renderedPages,
+    pageMetadata,
+    contextPointers,
+  });
+
+  // Derived view mode
+  const viewMode: FieldViewMode = response ? 'response' : 'standard';
+
+  // Current page's pointers (in response mode)
+  const currentFieldPage = response?.pages.find(p => p.id === selectedPageId);
+
+  // Load hierarchy on mount
+  useEffect(() => {
+    const loadHierarchy = async () => {
+      try {
+        const hierarchy = await api.projects.getHierarchy(projectId);
+        setDisciplines(hierarchy.disciplines);
+      } catch (err) {
+        console.error('Failed to load hierarchy:', err);
+      }
+    };
+    loadHierarchy();
+  }, [projectId]);
 
   // Handle page selection from PlansPanel
   const handlePageSelect = (pageId: string, disciplineId: string, pageName: string) => {
     setSelectedPageId(pageId);
     setSelectedDisciplineId(disciplineId);
+    setActivePointer(null);
   };
 
-  // Handle navigation from agent (for Phase 2)
-  const handleNavigateToPage = (pageId: string) => {
-    setSelectedPageId(pageId);
+  // Handle back button (exit response view)
+  const handleBackButton = () => {
+    resetStream();
+    setActivePointer(null);
+    // selectedPageId unchanged - stay on current page
   };
 
-  // Handle pointer click from PlanViewer
-  const handlePointerClick = (pointer: PointerResponse) => {
-    // For now, just log - in Phase 2 we might show a modal or pass to agent
-    console.log('Pointer clicked:', pointer.title, pointer.id);
-  };
-
-  // Handle pointer selection from agent
-  const handleSelectPointers = (pointerIds: string[], firstPageId?: string) => {
-    setSelectedPointerIds(pointerIds);
-    if (firstPageId) {
-      setSelectedPageId(firstPageId);
+  // Handle discipline selection from collapsed tree
+  const handleDisciplineSelect = (disciplineId: string) => {
+    resetStream();
+    setActivePointer(null);
+    setSelectedDisciplineId(disciplineId);
+    // Find first page in discipline and select it
+    const discipline = disciplines.find(d => d.id === disciplineId);
+    if (discipline && discipline.pages.length > 0) {
+      setSelectedPageId(discipline.pages[0].id);
     }
   };
 
-  // Handle new query (clear selection)
-  const handleNewQuery = () => {
-    setSelectedPointerIds([]);
+  // Handle pointer tap on viewer
+  const handlePointerTap = (pointer: FieldPointer) => {
+    setActivePointer(pointer);
+    pageViewerRef.current?.zoomToPointer(pointer);
   };
 
+  // Handle page selection from response list
+  const handlePageSelectFromList = (page: FieldPage) => {
+    setSelectedPageId(page.id);
+    setActivePointer(null);
+  };
+
+  // Handle voice recording complete
+  const handleRecordingComplete = async (audioBlob: Blob) => {
+    // TODO: Send to transcription API, then submit query
+    // For now, just log it
+    console.log('Recording complete:', audioBlob.size, 'bytes');
+  };
+
+  // Update rendered pages cache when page changes
+  const handlePageRendered = (pageId: string, pngDataUrl: string) => {
+    setRenderedPages(prev => {
+      const next = new Map(prev);
+      next.set(pageId, pngDataUrl);
+      return next;
+    });
+  };
+
+  // Get current page PNG
+  const currentPagePng = selectedPageId ? renderedPages.get(selectedPageId) || null : null;
 
   return (
-    <div className="flex h-full w-full bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 overflow-hidden font-sans relative blueprint-grid">
-
-      {/* LEFT PANEL: Plans Tree */}
-      <div
-        className={`absolute left-0 top-0 bottom-0 bg-white/90 backdrop-blur-xl border-r border-slate-200/50 transition-all duration-300 ease-out z-20 shadow-elevation-3 ${
-          showPlansPanel ? 'translate-x-0 w-72' : '-translate-x-full w-72'
-        }`}
-      >
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
-          <ModeToggle mode={mode} setMode={setMode} variant="light" />
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="font-bold text-lg text-slate-800">
-                Maestro<span className="text-cyan-600">Super</span>
-              </h1>
-              <p className="text-xs text-slate-500">Field Mode</p>
+    <div className="h-screen w-screen flex overflow-hidden bg-slate-900">
+      {/* Left panel - changes based on view mode */}
+      {viewMode === 'standard' ? (
+        <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
+            <ModeToggle mode={mode} setMode={setMode} variant="light" />
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="font-bold text-lg text-slate-800">
+                  Maestro<span className="text-cyan-600">Super</span>
+                </h1>
+                <p className="text-xs text-slate-500">Field Mode</p>
+              </div>
             </div>
-            <button
-              onClick={() => setShowPlansPanel(false)}
-              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <ChevronLeft size={18} />
-            </button>
+          </div>
+
+          {/* Plans Tree */}
+          <div className="flex-1 overflow-hidden">
+            <PlansPanel
+              projectId={projectId}
+              selectedPageId={selectedPageId}
+              onPageSelect={handlePageSelect}
+            />
           </div>
         </div>
-
-        {/* Plans Tree */}
-        <div className="h-[calc(100%-5rem)]">
-          <PlansPanel
-            projectId={projectId}
+      ) : (
+        <div className="flex h-full">
+          <FileTreeCollapsed
+            disciplines={disciplines}
+            selectedDisciplineId={selectedDisciplineId}
+            onDisciplineSelect={handleDisciplineSelect}
+          />
+          <PageList
+            pages={response?.pages || []}
             selectedPageId={selectedPageId}
-            onPageSelect={handlePageSelect}
+            onPageSelect={handlePageSelectFromList}
           />
         </div>
-      </div>
+      )}
 
-      {/* RIGHT PANEL: Agent Chat */}
-      <div
-        className={`absolute right-0 top-0 bottom-0 transition-all duration-300 ease-out z-20 ${
-          showAgentPanel ? 'translate-x-0 w-[400px]' : 'translate-x-full w-[400px]'
-        }`}
-      >
-        <AgentPanel
-          projectId={projectId}
-          onNavigateToPage={handleNavigateToPage}
-          onOpenPointer={(pointerId) => console.log('Open pointer:', pointerId)}
-          onSelectPointers={handleSelectPointers}
-          onNewQuery={handleNewQuery}
+      {/* Main viewer */}
+      <div className="flex-1 relative flex flex-col">
+        <PageViewer
+          ref={pageViewerRef}
+          pngDataUrl={currentPagePng}
+          pointers={viewMode === 'response' ? (currentFieldPage?.pointers || []) : []}
+          activePointerId={activePointer?.id || null}
+          onPointerTap={handlePointerTap}
         />
-      </div>
 
-      {/* CENTER: Plan Viewer */}
-      <div
-        className="flex-1 h-full relative overflow-hidden flex flex-col transition-all duration-300 ease-out"
-        style={{
-          marginLeft: showPlansPanel ? '18rem' : '0',
-          marginRight: showAgentPanel ? '400px' : '0',
-        }}
-      >
-        {/* Edge Toggle - Plans Panel */}
-        {!showPlansPanel && (
-          <button
-            onClick={() => setShowPlansPanel(true)}
-            className="absolute left-0 top-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur-sm border border-l-0 border-slate-200/50 shadow-elevation-2 rounded-r-2xl py-10 px-2 hover:bg-slate-50 group transition-all duration-200"
-          >
-            <span className="writing-vertical text-xs font-bold text-slate-500 group-hover:text-cyan-600 uppercase tracking-widest flex items-center gap-2">
-              <Folder size={14} className="rotate-90" /> Plans
-            </span>
-          </button>
-        )}
-
-        {/* Edge Toggle - Agent Panel */}
-        {!showAgentPanel && (
-          <button
-            onClick={() => setShowAgentPanel(true)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-gradient-to-l from-cyan-500 to-cyan-600 text-white shadow-glow-cyan rounded-l-2xl py-10 px-2 hover:from-cyan-400 hover:to-cyan-500 group transition-all duration-200"
-          >
-            <span className="writing-vertical text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-              <Bot size={14} className="rotate-90" /> AI Agent
-            </span>
-          </button>
-        )}
-
-        {/* Close button for Agent Panel (inside center area) */}
-        {showAgentPanel && (
-          <button
-            onClick={() => setShowAgentPanel(false)}
-            className="absolute right-2 top-4 z-30 p-2 bg-white/80 hover:bg-white rounded-lg shadow-sm text-slate-500 hover:text-slate-700 transition-all"
-          >
-            <ChevronRight size={18} />
-          </button>
-        )}
-
-        {/* Plan Viewer */}
-        <PlanViewer
-          pageId={selectedPageId}
-          onPointerClick={handlePointerClick}
-          selectedPointerIds={selectedPointerIds}
+        {/* Floating controls - always visible */}
+        <HoldToTalk
+          onRecordingComplete={handleRecordingComplete}
+          isProcessing={isStreaming}
         />
+        <SessionControls
+          onToggleHistory={() => setShowHistory(!showHistory)}
+          isHistoryOpen={showHistory}
+        />
+
+        {/* Response mode only */}
+        {viewMode === 'response' && (
+          <>
+            <BackButton visible={true} onBack={handleBackButton} />
+            <ThinkingBubble
+              isThinking={isStreaming}
+              thinkingText={thinkingText}
+              summary={response?.summary || ''}
+            />
+          </>
+        )}
+
+        {/* Popover when pointer active */}
+        {activePointer && (
+          <PointerPopover
+            pointer={activePointer}
+            onClose={() => setActivePointer(null)}
+          />
+        )}
+
+        {/* Error display */}
+        {error && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-red-500/90 text-white px-4 py-2 rounded-lg">
+            {error}
+          </div>
+        )}
       </div>
+
+      {/* History panel - slides in from right */}
+      {showHistory && (
+        <div className="w-80 h-full bg-slate-800/95 backdrop-blur-md border-l border-slate-700/50 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium text-white">History</h2>
+            <button
+              onClick={() => setShowHistory(false)}
+              className="text-slate-400 hover:text-white transition-colors"
+            >
+              Close
+            </button>
+          </div>
+          <p className="text-slate-500 text-sm">Session history coming soon...</p>
+        </div>
+      )}
     </div>
   );
 };
