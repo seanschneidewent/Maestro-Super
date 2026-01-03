@@ -69,8 +69,19 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Convert discipline hierarchy to ProjectFile format for tree display
   const convertDisciplinesToProjectFiles = (
-    disciplines: DisciplineWithPagesResponse[]
+    disciplines: DisciplineWithPagesResponse[],
+    hierarchyData?: ProjectHierarchy | null
   ): ProjectFile[] => {
+    // Build a map of page ID -> pointer count from hierarchy if available
+    const pointerCountMap = new Map<string, number>();
+    if (hierarchyData) {
+      for (const disc of hierarchyData.disciplines) {
+        for (const page of disc.pages) {
+          pointerCountMap.set(page.id, page.pointerCount);
+        }
+      }
+    }
+
     return disciplines.map(disc => ({
       id: disc.id,
       name: disc.displayName,
@@ -83,6 +94,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         type: FileType.PDF,
         parentId: disc.id,
         storagePath: page.filePath,
+        pointerCount: pointerCountMap.get(page.id) ?? 0,
         children: undefined,
       })),
     }));
@@ -118,6 +130,35 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
     loadHierarchy();
   }, [projectId, hierarchyRefresh]);
+
+  // Sync pointer counts from hierarchy to uploadedFiles
+  useEffect(() => {
+    if (!hierarchy || uploadedFiles.length === 0) return;
+
+    // Build pointer count map
+    const pointerCountMap = new Map<string, number>();
+    for (const disc of hierarchy.disciplines) {
+      for (const page of disc.pages) {
+        pointerCountMap.set(page.id, page.pointerCount);
+      }
+    }
+
+    // Update uploadedFiles with pointer counts
+    const updatePointerCounts = (files: ProjectFile[]): ProjectFile[] => {
+      return files.map(f => {
+        const updated = { ...f };
+        if (f.type !== FileType.FOLDER && pointerCountMap.has(f.id)) {
+          updated.pointerCount = pointerCountMap.get(f.id);
+        }
+        if (f.children) {
+          updated.children = updatePointerCounts(f.children);
+        }
+        return updated;
+      });
+    };
+
+    setUploadedFiles(prev => updatePointerCounts(prev));
+  }, [hierarchy]);
 
   // Load disciplines and pages from backend on mount
   useEffect(() => {

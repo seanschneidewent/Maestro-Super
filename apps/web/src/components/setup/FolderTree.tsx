@@ -115,13 +115,22 @@ const FileNode: React.FC<FileNodeProps> = ({
           {!isFolder && <div className="w-[14px]" />}
         </span>
         <span className="mr-2.5">{getIcon()}</span>
-        <span className={`text-sm transition-colors ${
+        <span className={`text-sm transition-colors truncate ${
           isMarkedForDeletion
             ? 'text-red-300 font-medium'
             : isSelected && !isDeleteMode
               ? 'text-cyan-300 font-medium'
               : 'text-slate-300 hover:text-slate-200'
         }`}>{node.name}</span>
+        {!isFolder && node.pointerCount !== undefined && node.pointerCount > 0 && (
+          <span className={`ml-auto text-xs px-1.5 py-0.5 rounded shrink-0 ${
+            isSelected && !isDeleteMode
+              ? 'bg-cyan-500/20 text-cyan-300'
+              : 'bg-slate-700 text-slate-400'
+          }`}>
+            {node.pointerCount}
+          </span>
+        )}
       </div>
       {isFolder && isOpen && node.children && (
         <div className="animate-fade-in">

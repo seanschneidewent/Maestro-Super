@@ -30,6 +30,7 @@ export interface ProjectFile {
   parentId?: string;
   storagePath?: string; // Supabase Storage path
   pageCount?: number;
+  pointerCount?: number; // Number of context pointers on this page
   category?: string; // For Use Mode grouping (e.g., "A-101")
   file?: File; // The actual file object for rendering (local only)
 }
