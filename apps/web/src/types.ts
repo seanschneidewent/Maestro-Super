@@ -185,3 +185,38 @@ export interface AgentMessage {
   pagesVisited?: PageVisit[];
   isComplete: boolean;
 }
+
+// Field Mode Types
+export type FieldViewMode = 'standard' | 'response'
+
+export interface FieldPointer {
+  id: string
+  label: string
+  region: {
+    bboxX: number      // 0-1 normalized
+    bboxY: number      // 0-1 normalized
+    bboxWidth: number  // 0-1 normalized
+    bboxHeight: number // 0-1 normalized
+  }
+  answer: string
+  evidence: {
+    type: 'quote' | 'explanation'
+    text: string
+  }
+}
+
+export interface FieldPage {
+  id: string
+  pageNumber: number
+  title: string
+  pngDataUrl: string
+  intro: string
+  pointers: FieldPointer[]
+}
+
+export interface FieldResponse {
+  id: string
+  query: string
+  summary: string
+  pages: FieldPage[]
+}
