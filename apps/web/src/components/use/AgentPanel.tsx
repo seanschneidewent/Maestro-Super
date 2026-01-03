@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Clock, Plus, Bot, User } from 'lucide-react';
-import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
+import type { AgentMessage, AgentEvent, ToolCallState, PageVisit } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingSection } from './ThinkingSection';
 import { PagesVisitedBadges } from './PagesVisitedBadges';
-import { ReasoningTrace } from './ReasoningTrace';
 
 interface AgentPanelProps {
   projectId: string;
@@ -251,12 +250,15 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   <Bot size={18} />
                 </div>
                 <div className="flex-1 space-y-3">
-                  {/* Thinking section (while streaming or has reasoning) */}
-                  {(msg.reasoning && msg.reasoning.length > 0) && (
+                  {/* Thinking section (shows reasoning and trace) */}
+                  {((msg.reasoning && msg.reasoning.length > 0) || (msg.trace && msg.trace.length > 0)) && (
                     <ThinkingSection
-                      reasoning={msg.reasoning}
+                      reasoning={msg.reasoning || []}
                       isStreaming={!msg.isComplete}
                       autoCollapse={true}
+                      trace={msg.trace}
+                      onNavigateToPage={onNavigateToPage}
+                      onOpenPointer={onOpenPointer}
                     />
                   )}
 
@@ -290,15 +292,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     <PagesVisitedBadges
                       pages={msg.pagesVisited}
                       onPageClick={onNavigateToPage}
-                    />
-                  )}
-
-                  {/* Reasoning trace (collapsed by default) */}
-                  {msg.isComplete && msg.trace && msg.trace.length > 0 && (
-                    <ReasoningTrace
-                      trace={msg.trace}
-                      onNavigateToPage={onNavigateToPage}
-                      onOpenPointer={onOpenPointer}
                     />
                   )}
                 </div>
