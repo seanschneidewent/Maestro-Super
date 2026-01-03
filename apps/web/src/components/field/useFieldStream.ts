@@ -180,11 +180,20 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   ) => {
     switch (data.type) {
       case 'text':
-        // Update thinking text - REPLACE not append
+        // Accumulate text into the current reasoning step (or create one)
         if (typeof data.content === 'string') {
           agentMessage.reasoning.push(data.content)
-          const newStep: AgentTraceStep = { type: 'reasoning', content: data.content }
-          agentMessage.trace.push(newStep)
+
+          // Check if the last trace step is a reasoning step we can append to
+          const lastStep = agentMessage.trace[agentMessage.trace.length - 1]
+          if (lastStep && lastStep.type === 'reasoning') {
+            // Append to existing reasoning step
+            lastStep.content = (lastStep.content || '') + data.content
+          } else {
+            // Create new reasoning step
+            agentMessage.trace.push({ type: 'reasoning', content: data.content })
+          }
+
           setTrace([...agentMessage.trace])
           setThinkingText(extractLatestThinking(agentMessage.trace))
         }
