@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
+import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { api, PointerResponse } from '../../lib/api';
 import { downloadFile, blobToFile } from '../../lib/storage';
@@ -10,6 +11,37 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 // Render scale for PNG conversion (2 = retina quality)
 const RENDER_SCALE = 2;
+
+// Zoom controls component that uses the library's API
+const ZoomControls: React.FC = () => {
+  const { zoomIn, zoomOut, resetTransform } = useControls();
+
+  return (
+    <div className="absolute top-4 right-4 z-20 flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl p-1.5 shadow-sm">
+      <button
+        onClick={() => zoomIn()}
+        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
+        title="Zoom In"
+      >
+        <ZoomIn size={18} />
+      </button>
+      <button
+        onClick={() => zoomOut()}
+        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
+        title="Zoom Out"
+      >
+        <ZoomOut size={18} />
+      </button>
+      <button
+        onClick={() => resetTransform()}
+        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
+        title="Reset Zoom"
+      >
+        <Maximize size={18} />
+      </button>
+    </div>
+  );
+};
 
 interface PageImage {
   dataUrl: string;
@@ -395,9 +427,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // MULTI-PAGE MODE (when agent has selected pages)
   // =====================================
   if (selectedPages.length > 0 && currentAgentPage) {
-    const contentWidth = agentDisplayDimensions.width * zoom;
-    const contentHeight = agentDisplayDimensions.height * zoom;
-
     return (
       <div className="flex-1 flex flex-col h-full relative overflow-hidden">
         {/* Page name header */}
@@ -434,65 +463,35 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
           </>
         )}
 
-        {/* Zoom toolbar */}
-        <div className="absolute top-4 right-4 z-20 flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl p-1.5 shadow-sm">
-          <button
-            onClick={handleZoomIn}
-            disabled={zoom >= 4}
-            className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Zoom In"
-          >
-            <ZoomIn size={18} />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            disabled={zoom <= 0.5}
-            className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Zoom Out"
-          >
-            <ZoomOut size={18} />
-          </button>
-          <button
-            onClick={handleZoomReset}
-            className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
-            title="Reset Zoom"
-          >
-            <Maximize size={18} />
-          </button>
-          <div className="text-[10px] text-slate-400 text-center py-1 border-t border-slate-200 mt-1">
-            {Math.round(zoom * 100)}%
+        {/* Loading state */}
+        {isLoadingAgentPage && (
+          <div className="flex-1 flex items-center justify-center h-full bg-slate-100">
+            <Loader2 size={48} className="text-cyan-500 animate-spin" />
           </div>
-        </div>
+        )}
 
-        {/* Canvas Area with wheel/touch navigation */}
-        <div
-          ref={containerRef}
-          className="flex-1 overflow-auto bg-slate-100 touch-pan-x"
-          style={{ position: 'relative' }}
-          onWheel={(e) => {
-            // Only navigate if not zoomed in (at natural scroll)
-            if (zoom === 1 && Math.abs(e.deltaY) > 50) {
-              e.preventDefault();
-              if (e.deltaY > 0) goToNextAgentPage();
-              else goToPrevAgentPage();
-            }
-          }}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          {isLoadingAgentPage && (
-            <div className="flex-1 flex items-center justify-center h-full">
-              <Loader2 size={48} className="text-cyan-500 animate-spin" />
-            </div>
-          )}
+        {/* Pinch-to-zoom enabled viewer */}
+        {agentPageImage && (
+          <TransformWrapper
+            initialScale={1}
+            minScale={0.5}
+            maxScale={5}
+            centerOnInit={true}
+            doubleClick={{ mode: "reset" }}
+            panning={{ velocityDisabled: true }}
+          >
+            {/* Zoom controls - must be inside TransformWrapper to use useControls */}
+            <ZoomControls />
 
-          {agentPageImage && (
-            <div
-              style={{
-                minWidth: '100%',
-                minHeight: '100%',
-                width: contentWidth + 64,
-                height: contentHeight + 64,
+            <TransformComponent
+              wrapperStyle={{
+                width: '100%',
+                height: '100%',
+                backgroundColor: '#f1f5f9', // bg-slate-100
+              }}
+              contentStyle={{
+                width: '100%',
+                height: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -501,8 +500,8 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
               <div
                 className="relative select-none rounded-sm"
                 style={{
-                  width: contentWidth,
-                  height: contentHeight,
+                  width: agentDisplayDimensions.width,
+                  height: agentDisplayDimensions.height,
                   boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15), 0 8px 40px rgba(0, 0, 0, 0.1)',
                 }}
               >
@@ -513,7 +512,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                   draggable={false}
                 />
 
-                {/* Pointer overlays */}
+                {/* Pointer overlays - scale with zoom since they're inside TransformComponent */}
                 {currentAgentPage.pointers.map((pointer) => (
                   <div
                     key={pointer.pointerId}
@@ -531,9 +530,9 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
+            </TransformComponent>
+          </TransformWrapper>
+        )}
       </div>
     );
   }
