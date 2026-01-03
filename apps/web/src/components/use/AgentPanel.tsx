@@ -298,11 +298,11 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 
             {/* Agent message */}
             {msg.role === 'agent' && (
-              <div className="flex max-w-[90%] gap-3 flex-row">
+              <div className="flex w-full max-w-[90%] gap-3 flex-row">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-glow-cyan-sm">
                   <Bot size={18} />
                 </div>
-                <div className="flex-1 space-y-3 min-w-0 overflow-hidden">
+                <div className="flex-1 space-y-3 min-w-0">
                   {/* Thinking section (shows trace steps live during streaming) */}
                   {((msg.trace && msg.trace.length > 0) || !msg.isComplete) && (
                     <ThinkingSection
