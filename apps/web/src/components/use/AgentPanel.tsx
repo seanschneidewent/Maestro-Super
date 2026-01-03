@@ -3,10 +3,8 @@ import { Send, Clock, Plus, Bot, User, MessageSquare, Loader2, X } from 'lucide-
 import ReactMarkdown from 'react-markdown';
 import type { AgentMessage, AgentEvent, ToolCallState, PageVisit, AgentTraceStep } from '../../types';
 import { useAgentStream } from '../../hooks/useAgentStream';
-import { ToolCallCard } from './ToolCallCard';
 import { ThinkingSection } from './ThinkingSection';
 import { PagesVisitedBadges } from './PagesVisitedBadges';
-import { PageSearchCounter } from './PageSearchCounter';
 import { api, QueryResponse } from '../../lib/api';
 
 interface AgentPanelProps {
@@ -482,43 +480,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                   <Bot size={18} />
                 </div>
                 <div className="flex-1 space-y-3 min-w-0">
-                  {/* Initial reasoning bubble - shows before first tool call, persists after completion */}
-                  {(() => {
-                    // Extract initial reasoning (before first tool call)
-                    if (msg.trace && msg.trace.length > 0) {
-                      const initialReasoning: string[] = [];
-                      for (const step of msg.trace) {
-                        if (step.type === 'tool_call') break;
-                        if (step.type === 'reasoning' && step.content) {
-                          initialReasoning.push(step.content);
-                        }
-                      }
-                      if (initialReasoning.length > 0) {
-                        return (
-                          <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                            {initialReasoning.join('')}
-                            {!msg.isComplete && (
-                              <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
-                            )}
-                          </div>
-                        );
-                      }
-                    }
-
-                    // Show loading dots if no content yet
-                    if (!msg.isComplete && (!msg.trace || msg.trace.length === 0)) {
-                      return (
-                        <div className="flex items-center gap-1.5 px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
-                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                      );
-                    }
-
-                    return null;
-                  })()}
-
                   {/* Thinking section (shows trace steps live during streaming) */}
                   {((msg.trace && msg.trace.length > 0) || !msg.isComplete) && (
                     <ThinkingSection
@@ -531,22 +492,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     />
                   )}
 
-                  {/* Tool calls */}
-                  {msg.toolCalls && msg.toolCalls.length > 0 && (
-                    <div className="space-y-1.5">
-                      {/* Aggregated page search counter */}
-                      <PageSearchCounter
-                        toolCalls={msg.toolCalls.filter(tc => tc.tool === 'list_project_pages')}
-                      />
-                      {/* Other tool calls rendered individually */}
-                      {msg.toolCalls
-                        .filter(tc => tc.tool !== 'list_project_pages')
-                        .map((tc, i) => (
-                          <ToolCallCard key={`${tc.tool}-${i}`} toolCall={tc} />
-                        ))}
-                    </div>
-                  )}
-
                   {/* Pages visited */}
                   {msg.isComplete && msg.pagesVisited && msg.pagesVisited.length > 0 && (
                     <PagesVisitedBadges
@@ -555,7 +500,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                     />
                   )}
 
-                  {/* Final answer bubble - streams after last tool result, or shows simple messages */}
+                  {/* Persistent reasoning bubble - shows current/latest reasoning segment */}
                   {(() => {
                     const trace = msg.trace || [];
 
@@ -568,46 +513,59 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
                       );
                     }
 
-                    // Find reasoning after the last tool_result
-                    let lastToolResultIndex = -1;
+                    // Find the current/latest reasoning segment
+                    // Walk backwards to find where the latest reasoning segment starts
+                    let segmentStart = -1;
                     for (let i = trace.length - 1; i >= 0; i--) {
-                      if (trace[i].type === 'tool_result') {
-                        lastToolResultIndex = i;
+                      if (trace[i].type === 'reasoning') {
+                        segmentStart = i;
+                      } else if (segmentStart !== -1) {
+                        // Found reasoning then hit non-reasoning, segment starts after this
                         break;
                       }
                     }
 
-                    // Only show streaming/final answer if there was at least one tool call
-                    if (lastToolResultIndex === -1) return null;
-
-                    // Collect reasoning after last tool result
-                    const answerParts: string[] = [];
-                    for (let i = lastToolResultIndex + 1; i < trace.length; i++) {
-                      if (trace[i].type === 'reasoning' && trace[i].content) {
-                        answerParts.push(trace[i].content!);
+                    // Collect the current reasoning segment
+                    const currentReasoning: string[] = [];
+                    if (segmentStart !== -1) {
+                      for (let i = segmentStart; i < trace.length; i++) {
+                        if (trace[i].type === 'reasoning' && trace[i].content) {
+                          currentReasoning.push(trace[i].content!);
+                        } else {
+                          break;
+                        }
                       }
                     }
 
-                    // Show if there's answer text (streaming or complete)
-                    if (answerParts.length > 0 || (msg.isComplete && msg.finalAnswer)) {
-                      const displayText = answerParts.length > 0 ? answerParts.join('') : msg.finalAnswer;
+                    const displayText = currentReasoning.join('');
+
+                    // Always show the bubble if there's content OR if we're streaming
+                    if (displayText || !msg.isComplete) {
                       return (
                         <div className="p-4 rounded-2xl text-sm leading-relaxed shadow-elevation-1 bg-white text-slate-700 rounded-tl-sm border border-slate-100">
-                          <ReactMarkdown
-                            components={{
-                              h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mt-4 mb-2 first:mt-0">{children}</h2>,
-                              h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-800 mt-3 mb-1">{children}</h3>,
-                              p: ({ children }) => <p className="my-2">{children}</p>,
-                              ul: ({ children }) => <ul className="my-2 ml-4 space-y-1">{children}</ul>,
-                              ol: ({ children }) => <ol className="my-2 ml-4 space-y-1 list-decimal">{children}</ol>,
-                              li: ({ children }) => <li className="pl-1">{children}</li>,
-                              strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
-                              code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
-                            }}
-                          >
-                            {displayText || ''}
-                          </ReactMarkdown>
-                          {!msg.isComplete && (
+                          {displayText ? (
+                            <ReactMarkdown
+                              components={{
+                                h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mt-4 mb-2 first:mt-0">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-800 mt-3 mb-1">{children}</h3>,
+                                p: ({ children }) => <p className="my-2">{children}</p>,
+                                ul: ({ children }) => <ul className="my-2 ml-4 space-y-1">{children}</ul>,
+                                ol: ({ children }) => <ol className="my-2 ml-4 space-y-1 list-decimal">{children}</ol>,
+                                li: ({ children }) => <li className="pl-1">{children}</li>,
+                                strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                                code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                              }}
+                            >
+                              {displayText}
+                            </ReactMarkdown>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                          )}
+                          {displayText && !msg.isComplete && (
                             <span className="inline-block w-1.5 h-4 bg-cyan-400 ml-1 animate-pulse align-middle" />
                           )}
                         </div>
