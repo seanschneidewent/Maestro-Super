@@ -62,7 +62,7 @@ const DisciplineNode: React.FC<DisciplineNodeProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         className={`w-full flex items-center gap-2 py-2.5 px-3 rounded-lg transition-all duration-150 ${
           isOpen
-            ? 'bg-slate-100 text-slate-800'
+            ? 'sticky top-0 z-10 bg-slate-100 text-slate-800 shadow-sm'
             : 'hover:bg-slate-50 text-slate-600'
         }`}
       >
