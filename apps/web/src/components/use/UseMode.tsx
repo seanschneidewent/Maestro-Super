@@ -309,7 +309,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         )}
 
         {/* Query stack - bottom left (shows previous queries in session) */}
-        {!isStreaming && sessionQueries.length > 0 && (
+        {/* Always visible when there are queries, even during streaming */}
+        {sessionQueries.length > 0 && (
           <QueryStack
             queries={sessionQueries}
             activeQueryId={activeQueryId}
@@ -317,13 +318,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           />
         )}
 
-        {/* Thinking bubble - bottom left (thinking during stream, full answer after) */}
-        {/* Only show while streaming or if there's a current answer but no session queries yet */}
+        {/* Thinking bubble - shows during streaming or for first query's answer */}
+        {/* When there are session queries, this appears ABOVE the QueryStack */}
         {(isStreaming || (finalAnswer && sessionQueries.length === 0)) && (
           <ThinkingBubble
             thinkingText={thinkingText}
             finalAnswer={finalAnswer}
             isStreaming={isStreaming}
+            hasQueryStack={sessionQueries.length > 0}
           />
         )}
 

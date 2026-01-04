@@ -6,9 +6,10 @@ interface ThinkingBubbleProps {
   thinkingText: string
   finalAnswer: string
   isStreaming: boolean
+  hasQueryStack?: boolean
 }
 
-export function ThinkingBubble({ thinkingText, finalAnswer, isStreaming }: ThinkingBubbleProps) {
+export function ThinkingBubble({ thinkingText, finalAnswer, isStreaming, hasQueryStack = false }: ThinkingBubbleProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const hasScheduledCollapse = useRef(false)
 
@@ -40,20 +41,23 @@ export function ThinkingBubble({ thinkingText, finalAnswer, isStreaming }: Think
     return null
   }
 
+  // Position class - higher when QueryStack is visible
+  const positionClass = hasQueryStack ? 'bottom-36' : 'bottom-20'
+
   // Collapsed state - show small pill with robot chat icon
   if (isCollapsed && !isStreaming) {
     return (
       <button
         onClick={() => setIsCollapsed(false)}
-        className="
-          absolute bottom-20 left-4 z-30
+        className={`
+          absolute ${positionClass} left-4 z-30
           flex items-center gap-2 px-3 py-2
           rounded-full bg-gradient-to-r from-cyan-50 to-slate-50
           border border-cyan-200/50 shadow-sm
           hover:shadow-md hover:border-cyan-300
           transition-all duration-200 group
           animate-in fade-in slide-in-from-bottom-2 duration-200
-        "
+        `}
         title="Click to expand response"
       >
         <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center shadow-glow-cyan-sm">
@@ -70,7 +74,7 @@ export function ThinkingBubble({ thinkingText, finalAnswer, isStreaming }: Think
     <div
       onClick={!isStreaming ? () => setIsCollapsed(true) : undefined}
       className={`
-        absolute bottom-20 left-4 z-30
+        absolute ${positionClass} left-4 z-30
         max-w-lg w-auto
         bg-white/95 backdrop-blur-md border border-slate-200/50
         rounded-2xl rounded-bl-sm px-4 py-3 shadow-lg
