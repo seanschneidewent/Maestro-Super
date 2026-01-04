@@ -651,6 +651,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Reload disciplines and pages from backend
       const response = await api.projects.getFull(projectId);
       setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
+      setHierarchyRefresh(prev => prev + 1);
 
     } catch (err) {
       console.error('Failed to upload files:', err);
