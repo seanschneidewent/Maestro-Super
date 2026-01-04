@@ -204,7 +204,7 @@ export function layoutHierarchy(
       y1: projectCenterY,
       x2: discCenterX,
       y2: discCenterY,
-      color: discipline.processed ? 'rgba(245, 158, 11, 0.3)' : 'rgba(71, 85, 105, 0.3)',
+      color: discipline.processed ? 'rgba(245, 158, 11, 0.5)' : 'rgba(100, 116, 139, 0.4)',
       width: 2,
     });
 

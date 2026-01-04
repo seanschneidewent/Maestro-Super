@@ -9,7 +9,7 @@ import ReactFlow, {
   ReactFlowProvider,
   useReactFlow,
   ConnectionMode,
-  useViewport,
+  useStore,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -18,16 +18,24 @@ import { layoutHierarchy, getInitialExpandedState, ConnectionLine } from './layo
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
 import { MindMapSkeleton } from '../../ui/Skeleton';
 
-// Custom SVG layer for connection lines
+// Custom SVG layer for connection lines - uses ReactFlow's internal store for transform
 function ConnectionLinesLayer({ lines }: { lines: ConnectionLine[] }) {
-  const { x, y, zoom } = useViewport();
+  const transform = useStore((state) => state.transform);
+  const [x, y, zoom] = transform;
 
   if (lines.length === 0) return null;
 
   return (
     <svg
-      className="absolute inset-0 pointer-events-none"
-      style={{ overflow: 'visible' }}
+      className="react-flow__edges"
+      style={{
+        position: 'absolute',
+        width: '100%',
+        height: '100%',
+        overflow: 'visible',
+        pointerEvents: 'none',
+        zIndex: 0,
+      }}
     >
       <g transform={`translate(${x}, ${y}) scale(${zoom})`}>
         {lines.map((line, i) => (
@@ -38,7 +46,7 @@ function ConnectionLinesLayer({ lines }: { lines: ConnectionLine[] }) {
             x2={line.x2}
             y2={line.y2}
             stroke={line.color}
-            strokeWidth={line.width / zoom}
+            strokeWidth={line.width}
             strokeLinecap="round"
           />
         ))}
