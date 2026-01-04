@@ -20,7 +20,7 @@ interface ContextPanelProps {
   onNavigateToPage: (pageId: string) => void;
   onHighlightPointer?: (pointerId: string) => void;
   expandedNodes: string[];
-  setExpandedNodes: (nodes: string[]) => void;
+  setExpandedNodes: (updater: string[] | ((prev: string[]) => string[])) => void;
 }
 
 export function ContextPanel({

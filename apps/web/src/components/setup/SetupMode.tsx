@@ -49,8 +49,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setSetupState(prev => ({ ...prev, activeTool: tool }));
   };
   const expandedNodes = setupState.expandedNodes;
-  const setExpandedNodes = (nodes: string[]) => {
-    setSetupState(prev => ({ ...prev, expandedNodes: nodes }));
+  const setExpandedNodes = (updater: string[] | ((prev: string[]) => string[])) => {
+    if (typeof updater === 'function') {
+      setSetupState(prev => ({ ...prev, expandedNodes: updater(prev.expandedNodes) }));
+    } else {
+      setSetupState(prev => ({ ...prev, expandedNodes: updater }));
+    }
   };
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);

@@ -31,7 +31,7 @@ interface ContextMindMapProps {
   onDisciplineClick?: (disciplineId: string) => void;
   refreshTrigger?: number;
   expandedNodes: string[];
-  setExpandedNodes: (nodes: string[]) => void;
+  setExpandedNodes: (updater: string[] | ((prev: string[]) => string[])) => void;
 }
 
 function ContextMindMapInner({
@@ -65,12 +65,12 @@ function ContextMindMapInner({
   }, [hierarchy, expandedNodes.length, setExpandedNodes]);
 
   const toggleExpanded = useCallback((nodeId: string) => {
-    setExpandedNodes(
-      expandedNodes.includes(nodeId)
-        ? expandedNodes.filter(id => id !== nodeId)
-        : [...expandedNodes, nodeId]
+    setExpandedNodes(prev =>
+      prev.includes(nodeId)
+        ? prev.filter(id => id !== nodeId)
+        : [...prev, nodeId]
     );
-  }, [expandedNodes, setExpandedNodes]);
+  }, [setExpandedNodes]);
 
   const callbacks = useMemo(() => ({
     onProjectExpand: () => {
