@@ -159,6 +159,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSessionQueries(restoredQueries);
     setActiveQueryId(selectedQueryId);
 
+    // Set the submitted query text for the selected query
+    const selectedQuery = queries.find(q => q.id === selectedQueryId);
+    setSubmittedQuery(selectedQuery?.queryText ?? null);
+    setIsQueryExpanded(false);
+
     // Load pages for the selected query from cache
     const cachedPages = queryPagesCache.get(selectedQueryId);
     if (cachedPages) {
@@ -223,6 +228,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     if (!query) return;
 
     setActiveQueryId(queryId);
+    setSubmittedQuery(query.queryText);
+    setIsQueryExpanded(false);
 
     // Restore pages from cache
     const cachedPages = queryPagesCache.get(queryId);
