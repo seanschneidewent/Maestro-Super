@@ -8,6 +8,7 @@ import ReactFlow, {
   NodeTypes,
   ReactFlowProvider,
   useReactFlow,
+  ConnectionMode,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -15,7 +16,6 @@ import { ProjectNode, DisciplineNode, PageNode, PointerNode } from './nodes';
 import { layoutHierarchy, getInitialExpandedState } from './layout';
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
 import { MindMapSkeleton } from '../../ui/Skeleton';
-import type { ProjectHierarchy } from '../../../types';
 
 // Register custom node types
 const nodeTypes: NodeTypes = {
@@ -23,6 +23,14 @@ const nodeTypes: NodeTypes = {
   discipline: DisciplineNode,
   page: PageNode,
   pointer: PointerNode,
+};
+
+// Default edge options for floating bezier curves
+const defaultEdgeOptions = {
+  type: 'default',
+  style: {
+    strokeWidth: 2,
+  },
 };
 
 interface ContextMindMapProps {
@@ -81,8 +89,8 @@ function ContextMindMapInner({
   // Layout callbacks
   const callbacks = useMemo(() => ({
     onProjectExpand: () => {
-      const projId = hierarchy ? `project-${hierarchy.name}` : '';
-      if (projId) toggleExpanded(projId);
+      const projectId = hierarchy ? `project-${hierarchy.name}` : '';
+      if (projectId) toggleExpanded(projectId);
     },
     onDisciplineClick: (id: string) => {
       onDisciplineClick?.(id);
@@ -117,7 +125,7 @@ function ContextMindMapInner({
 
     // Fit view after layout updates
     setTimeout(() => {
-      fitView({ padding: 0.2, duration: 300 });
+      fitView({ padding: 0.3, duration: 300 });
     }, 50);
   }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges, fitView]);
 
@@ -156,8 +164,10 @@ function ContextMindMapInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
+        connectionMode={ConnectionMode.Loose}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.3 }}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}

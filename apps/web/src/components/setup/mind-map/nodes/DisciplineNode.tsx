@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position, NodeProps } from 'reactflow';
+import { NodeProps } from 'reactflow';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import type { DisciplineNodeData } from '../types';
 
@@ -13,18 +13,11 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
         <div className="absolute inset-0 rounded-lg bg-amber-400/10 blur-lg group-hover:bg-amber-400/20 transition-all" />
       )}
 
-      {/* Input handle */}
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!w-2.5 !h-2.5 !bg-slate-600 !border-2 !border-slate-800"
-      />
-
       {/* Node body */}
       <div
         className={`relative flex items-center gap-2 px-4 py-2.5 rounded-lg
                    bg-slate-800 border-2
-                   shadow-lg transition-all duration-200 cursor-pointer min-w-[160px]
+                   shadow-lg transition-all duration-200 cursor-pointer
                    ${processed
                      ? 'border-amber-400/50 hover:border-amber-400 shadow-amber-900/20'
                      : 'border-slate-600 hover:border-slate-500 shadow-slate-900/30'
@@ -52,13 +45,6 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
       </div>
-
-      {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className={`!w-2.5 !h-2.5 !border-2 !border-slate-800 ${processed ? '!bg-amber-400' : '!bg-slate-600'}`}
-      />
     </div>
   );
 }

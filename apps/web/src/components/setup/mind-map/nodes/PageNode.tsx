@@ -1,12 +1,12 @@
 import { memo } from 'react';
-import { Handle, Position, NodeProps } from 'reactflow';
+import { NodeProps } from 'reactflow';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { PageNodeData } from '../types';
 
 function getStatusIcon(pointerCount: number, processedPass2: boolean): string {
-  if (pointerCount === 0) return '\u25CB'; // Circle outline
-  if (!processedPass2) return '\u25D0'; // Half circle
-  return '\u25CF'; // Filled circle
+  if (pointerCount === 0) return '○';
+  if (!processedPass2) return '◐';
+  return '●';
 }
 
 function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
@@ -30,18 +30,11 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
         <div className="absolute inset-0 rounded-lg bg-cyan-400/20 blur-md" />
       )}
 
-      {/* Input handle */}
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!w-2 !h-2 !bg-slate-600 !border-2 !border-slate-800"
-      />
-
       {/* Node body */}
       <div
         className={`relative flex items-center gap-2 px-3 py-2 rounded-lg
                    bg-slate-800 border shadow-md
-                   transition-all duration-200 cursor-pointer min-w-[140px]
+                   transition-all duration-200 cursor-pointer
                    ${isActive
                      ? 'border-cyan-400 shadow-cyan-900/30'
                      : 'border-slate-600/50 hover:border-slate-500 shadow-slate-900/20'
@@ -76,15 +69,6 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
           </button>
         )}
       </div>
-
-      {/* Output handle - only if has pointers */}
-      {hasPointers && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className="!w-2 !h-2 !bg-slate-600 !border-2 !border-slate-800"
-        />
-      )}
     </div>
   );
 }

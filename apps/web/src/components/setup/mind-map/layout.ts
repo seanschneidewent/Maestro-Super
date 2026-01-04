@@ -23,7 +23,6 @@ interface LayoutResult {
 
 /**
  * Distributes items radially around a center point within an angular range.
- * Returns array of {x, y, angle} positions.
  */
 function distributeRadially(
   count: number,
@@ -66,22 +65,44 @@ function countDisciplineWeight(
   expandedNodes: Set<string>
 ): number {
   if (!expandedNodes.has(discipline.id)) {
-    return 1; // Just the discipline node itself
+    return 1;
   }
 
-  let weight = 1; // The discipline itself
+  let weight = 1;
   for (const page of discipline.pages) {
-    weight += 1; // The page
+    weight += 1;
     if (expandedNodes.has(page.id)) {
-      weight += page.pointers.length; // Add pointers if page is expanded
+      weight += page.pointers.length;
     }
   }
   return weight;
 }
 
 /**
+ * Creates a floating bezier edge style
+ */
+function createEdge(
+  sourceId: string,
+  targetId: string,
+  color: string,
+  width: number = 2
+): MindMapEdge {
+  return {
+    id: `e-${sourceId}-${targetId}`,
+    source: sourceId,
+    target: targetId,
+    type: 'default',
+    style: {
+      stroke: color,
+      strokeWidth: width,
+      opacity: 0.6,
+    },
+  };
+}
+
+/**
  * Converts hierarchy data to positioned ReactFlow nodes and edges.
- * Uses radial layout with project at center.
+ * Uses radial layout with project at center and floating bezier edges.
  */
 export function layoutHierarchy(
   hierarchy: ProjectHierarchy,
@@ -116,15 +137,14 @@ export function layoutHierarchy(
   }
 
   // --- Calculate angular allocation for disciplines ---
-  // Weight each discipline by its visible descendants
   const disciplineWeights = hierarchy.disciplines.map(d =>
     countDisciplineWeight(d, expandedNodes)
   );
   const totalWeight = disciplineWeights.reduce((a, b) => a + b, 0);
 
-  // Distribute disciplines around full circle (with small gaps)
+  // Full circle with gaps between disciplines
   const fullCircle = Math.PI * 2;
-  const gapAngle = 0.1; // Small gap between major sections
+  const gapAngle = 0.15; // Gap between discipline clusters
   const availableAngle = fullCircle - (gapAngle * hierarchy.disciplines.length);
 
   let currentAngle = -Math.PI / 2; // Start from top
@@ -132,7 +152,6 @@ export function layoutHierarchy(
   hierarchy.disciplines.forEach((discipline, discIndex) => {
     const weight = disciplineWeights[discIndex];
     const allocatedAngle = (weight / totalWeight) * availableAngle;
-    const discEndAngle = currentAngle + allocatedAngle;
     const discMidAngle = currentAngle + allocatedAngle / 2;
 
     // Position discipline node
@@ -141,8 +160,6 @@ export function layoutHierarchy(
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
-
-    // Count total pointers in discipline
     const totalPointers = discipline.pages.reduce((sum, p) => sum + p.pointers.length, 0);
 
     nodes.push({
@@ -163,22 +180,16 @@ export function layoutHierarchy(
       },
     });
 
-    // Edge from project to discipline
-    edges.push({
-      id: `e-${projectId}-${disciplineNodeId}`,
-      source: projectId,
-      target: disciplineNodeId,
-      type: 'smoothstep',
-      style: {
-        stroke: discipline.processed ? '#f59e0b' : '#64748b',
-        strokeWidth: 2,
-        opacity: 0.5,
-      },
-    });
+    // Edge: project → discipline
+    edges.push(createEdge(
+      projectId,
+      disciplineNodeId,
+      discipline.processed ? '#f59e0b' : '#475569',
+      2
+    ));
 
     // --- Pages within discipline ---
     if (isDisciplineExpanded && discipline.pages.length > 0) {
-      // Calculate angular space for each page based on its weight
       const pageWeights = discipline.pages.map(page =>
         expandedNodes.has(page.id) ? 1 + page.pointers.length : 1
       );
@@ -216,18 +227,13 @@ export function layoutHierarchy(
           },
         });
 
-        // Edge from discipline to page
-        edges.push({
-          id: `e-${disciplineNodeId}-${pageNodeId}`,
-          source: disciplineNodeId,
-          target: pageNodeId,
-          type: 'smoothstep',
-          style: {
-            stroke: '#64748b',
-            strokeWidth: 1.5,
-            opacity: 0.4,
-          },
-        });
+        // Edge: discipline → page
+        edges.push(createEdge(
+          disciplineNodeId,
+          pageNodeId,
+          '#475569',
+          1.5
+        ));
 
         // --- Pointers within page ---
         if (isPageExpanded && page.pointers.length > 0) {
@@ -258,18 +264,13 @@ export function layoutHierarchy(
               },
             });
 
-            // Edge from page to pointer
-            edges.push({
-              id: `e-${pageNodeId}-${pointerNodeId}`,
-              source: pageNodeId,
-              target: pointerNodeId,
-              type: 'smoothstep',
-              style: {
-                stroke: '#8b5cf6',
-                strokeWidth: 1,
-                opacity: 0.4,
-              },
-            });
+            // Edge: page → pointer
+            edges.push(createEdge(
+              pageNodeId,
+              pointerNodeId,
+              '#8b5cf6',
+              1
+            ));
           });
         }
 
@@ -277,16 +278,16 @@ export function layoutHierarchy(
       });
     }
 
-    currentAngle = discEndAngle + gapAngle;
+    currentAngle += allocatedAngle + gapAngle;
   });
 
   return { nodes, edges };
 }
 
 /**
- * Generates initial expanded state (project + disciplines visible)
+ * Generates initial expanded state (project expanded, disciplines visible)
  */
 export function getInitialExpandedState(hierarchy: ProjectHierarchy): string[] {
   const projectId = `project-${hierarchy.name}`;
-  return [projectId]; // Just project expanded, disciplines visible but not their children
+  return [projectId];
 }

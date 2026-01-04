@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position, NodeProps } from 'reactflow';
+import { NodeProps } from 'reactflow';
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import type { ProjectNodeData } from '../types';
 
@@ -17,7 +17,7 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
                    bg-slate-800 border-2 border-cyan-400/60
                    shadow-lg shadow-cyan-900/30
                    hover:border-cyan-400 hover:shadow-cyan-400/20
-                   transition-all duration-200 cursor-pointer min-w-[180px]"
+                   transition-all duration-200 cursor-pointer"
         onClick={onExpand}
       >
         <div className="p-2 rounded-lg bg-cyan-400/10">
@@ -41,13 +41,6 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
       </div>
-
-      {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!w-3 !h-3 !bg-cyan-400 !border-2 !border-slate-800"
-      />
     </div>
   );
 }
