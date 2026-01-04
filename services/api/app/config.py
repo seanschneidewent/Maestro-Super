@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # Rate Limiting
     max_requests_per_day: int = 100
-    max_tokens_per_day: int = 500000
+    max_tokens_per_day: int = 5000000  # 5 million
     max_pointers_per_project: int = 1000
 
     @property
