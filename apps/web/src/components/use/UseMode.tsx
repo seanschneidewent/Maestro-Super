@@ -161,16 +161,22 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSubmittedQuery(selectedQuery?.queryText ?? null);
     setIsQueryExpanded(false);
 
-    // Load pages for the selected query from cache
-    const cachedPages = queryPagesCache.get(selectedQueryId);
-    if (cachedPages) {
-      loadPages(cachedPages);
-    }
-
-    // Reset stream state
+    // Reset stream state BEFORE loading pages (resetStream clears selectedPages)
     resetStream();
     setQueryInput('');
     setShowHistory(false);
+
+    // Load pages for the selected query from cache (must be AFTER resetStream)
+    const cachedPages = queryPagesCache.get(selectedQueryId);
+    console.log('handleRestoreSession:', {
+      selectedQueryId,
+      cachedPages,
+      cacheSize: queryPagesCache.size,
+      cacheKeys: [...queryPagesCache.keys()]
+    });
+    if (cachedPages) {
+      loadPages(cachedPages);
+    }
   };
 
   // Handle visible page change from scrolling in multi-page mode
