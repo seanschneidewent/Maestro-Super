@@ -210,27 +210,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSelectedPageId(pageId);
     setSelectedDisciplineId(disciplineId);
 
-    // Fetch page data and pointers
+    // Fetch page data (skip pointers - not shown for file tree navigation)
     try {
-      const [pageData, pointersData] = await Promise.all([
-        api.pages.get(pageId),
-        api.pointers.list(pageId),
-      ]);
+      const pageData = await api.pages.get(pageId);
 
-      // Load into agent viewer via loadPages
+      // Load into viewer without pointers (clean sheet browsing)
       loadPages([{
         pageId,
         pageName: pageData.pageName,
         filePath: pageData.filePath,
         disciplineId,
-        pointers: pointersData.map(p => ({
-          pointerId: p.id,
-          title: p.title ?? '',
-          bboxX: p.bboxX,
-          bboxY: p.bboxY,
-          bboxWidth: p.bboxWidth,
-          bboxHeight: p.bboxHeight,
-        })),
+        pointers: [], // Empty - pointers only shown for query results
       }]);
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
@@ -314,6 +304,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         <PlanViewer
           selectedPages={selectedPages}
           onVisiblePageChange={handleVisiblePageChange}
+          showPointers={isStreaming || activeQueryId !== null}
         />
 
         {/* Thought process dropdown - top left */}

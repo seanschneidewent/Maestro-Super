@@ -20,6 +20,7 @@ interface PageImage {
 interface PlanViewerProps {
   selectedPages?: AgentSelectedPage[];
   onVisiblePageChange?: (pageId: string, disciplineId: string) => void;
+  showPointers?: boolean; // Only show pointer overlays when viewing query results
 }
 
 // Cache for rendered page images
@@ -87,6 +88,7 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
 export const PlanViewer: React.FC<PlanViewerProps> = ({
   selectedPages = [],
   onVisiblePageChange,
+  showPointers = false,
 }) => {
   // =====================================
   // ALL HOOKS MUST BE AT THE TOP (unconditionally)
@@ -311,8 +313,8 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                 draggable={false}
               />
 
-              {/* Pointer overlays - scale with zoom since they're inside TransformComponent */}
-              {agentPageImage && currentAgentPage?.pointers.map((pointer) => (
+              {/* Pointer overlays - only shown when viewing query results */}
+              {showPointers && agentPageImage && currentAgentPage?.pointers.map((pointer) => (
                 <div
                   key={pointer.pointerId}
                   className="absolute border-2 border-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/30 transition-colors cursor-pointer group"
