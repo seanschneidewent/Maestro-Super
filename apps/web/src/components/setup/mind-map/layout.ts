@@ -53,10 +53,10 @@ export function layoutHierarchy(
   const g = new dagre.graphlib.Graph();
   g.setGraph({
     rankdir: 'LR',
-    nodesep: 40,
-    ranksep: 100,
-    marginx: 20,
-    marginy: 20,
+    nodesep: 20,      // Reduced vertical separation
+    ranksep: 80,      // Reduced horizontal separation
+    marginx: 10,
+    marginy: 10,
   });
   g.setDefaultEdgeLabel(() => ({}));
 

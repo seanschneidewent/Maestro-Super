@@ -107,9 +107,12 @@ function ContextMindMapInner({
     setNodes(layoutNodes);
     setEdges(layoutEdges);
 
-    setTimeout(() => {
-      fitView({ padding: 0.2, duration: 300 });
-    }, 50);
+    // Use requestAnimationFrame + setTimeout for reliable fitView after render
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        fitView({ padding: 0.15, duration: 300, minZoom: 0.3, maxZoom: 1.5 });
+      }, 100);
+    });
   }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges, fitView]);
 
   if (isLoading) {
