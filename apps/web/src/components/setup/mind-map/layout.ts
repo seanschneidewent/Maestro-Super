@@ -92,6 +92,37 @@ function createEdge(
 }
 
 /**
+ * Calculates the intersection point where a line from center at angle θ
+ * crosses the boundary of a rectangle.
+ */
+function getRectEdgePoint(
+  centerX: number,
+  centerY: number,
+  halfWidth: number,
+  halfHeight: number,
+  angle: number
+): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  // Avoid division by zero
+  const absCos = Math.abs(cos) < 0.0001 ? 0.0001 : Math.abs(cos);
+  const absSin = Math.abs(sin) < 0.0001 ? 0.0001 : Math.abs(sin);
+
+  // Distance to edge in each direction
+  const rX = halfWidth / absCos;
+  const rY = halfHeight / absSin;
+
+  // Take the minimum (whichever edge is hit first)
+  const r = Math.min(rX, rY);
+
+  return {
+    x: centerX + r * cos,
+    y: centerY + r * sin,
+  };
+}
+
+/**
  * Converts hierarchy data to positioned ReactFlow nodes and edges.
  * Uses radial layout with project at center and floating bezier edges.
  */
@@ -228,13 +259,35 @@ export function layoutHierarchy(
       2
     ));
 
-    // SVG line: project VISUAL CENTER → discipline VISUAL CENTER
-    // This ensures lines appear at exactly equal angles
+    // SVG line: project EDGE → discipline EDGE (edge-to-edge connection)
+    // This ensures equal visible gap between node boundaries
+    const projectHalfW = NODE_DIMENSIONS.project.width / 2;
+    const projectHalfH = NODE_DIMENSIONS.project.height / 2;
+
+    // Project edge point (where line exits project node boundary)
+    const projectEdge = getRectEdgePoint(
+      projectVisualCenterX,
+      projectVisualCenterY,
+      projectHalfW,
+      projectHalfH,
+      angle // angle from project center to discipline
+    );
+
+    // Discipline edge point (where line enters discipline node boundary)
+    // Angle is reversed (π + angle) since we're coming FROM the project
+    const disciplineEdge = getRectEdgePoint(
+      visualCenterX,
+      visualCenterY,
+      discHalfW,
+      discHalfH,
+      angle + Math.PI // opposite direction
+    );
+
     lines.push({
-      x1: projectVisualCenterX,
-      y1: projectVisualCenterY,
-      x2: visualCenterX,
-      y2: visualCenterY,
+      x1: projectEdge.x,
+      y1: projectEdge.y,
+      x2: disciplineEdge.x,
+      y2: disciplineEdge.y,
       color: 'rgba(100, 116, 139, 0.5)', // Subtle slate color
       width: 2,
     });
