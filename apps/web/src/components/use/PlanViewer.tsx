@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
-import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
-import { ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { api, PointerResponse } from '../../lib/api';
 import { downloadFile, blobToFile } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
@@ -11,37 +11,6 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 // Render scale for PNG conversion (2 = retina quality)
 const RENDER_SCALE = 2;
-
-// Zoom controls component that uses the library's API
-const ZoomControls: React.FC = () => {
-  const { zoomIn, zoomOut, resetTransform } = useControls();
-
-  return (
-    <div className="absolute top-4 right-4 z-20 flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl p-1.5 shadow-sm">
-      <button
-        onClick={() => zoomIn()}
-        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
-        title="Zoom In"
-      >
-        <ZoomIn size={18} />
-      </button>
-      <button
-        onClick={() => zoomOut()}
-        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
-        title="Zoom Out"
-      >
-        <ZoomOut size={18} />
-      </button>
-      <button
-        onClick={() => resetTransform()}
-        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-700 transition-all"
-        title="Reset Zoom"
-      >
-        <Maximize size={18} />
-      </button>
-    </div>
-  );
-};
 
 interface PageImage {
   dataUrl: string;
@@ -88,7 +57,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
   // Viewer state
   const [pageNumber, setPageNumber] = useState(1);
-  const [zoom, setZoom] = useState(1);
   const [hoveredPointerId, setHoveredPointerId] = useState<string | null>(null);
 
   // Container size for fit calculation
@@ -97,7 +65,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLDivElement>(null);
-  const zoomCenterRef = useRef<{ x: number; y: number } | null>(null);
 
   // Multi-page mode: current page index
   const [agentPageIndex, setAgentPageIndex] = useState(0);
@@ -135,7 +102,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   }, []);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (touchStartY.current === null || zoom !== 1) return;
+    if (touchStartY.current === null) return;
 
     const touchEndY = e.changedTouches[0].clientY;
     const deltaY = touchStartY.current - touchEndY;
@@ -152,7 +119,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
     }
 
     touchStartY.current = null;
-  }, [zoom, goToNextAgentPage, goToPrevAgentPage]);
+  }, [goToNextAgentPage, goToPrevAgentPage]);
 
   // Current agent page
   const currentAgentPage = selectedPages[agentPageIndex];
@@ -283,7 +250,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
       setIsConverting(true);
       setPageImages([]);
       setPageNumber(1);
-      setZoom(1);
 
       try {
         const arrayBuffer = await file.arrayBuffer();
@@ -330,46 +296,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
     convertPdfToImages();
   }, [file]);
-
-  // Zoom handlers
-  const captureCenter = () => {
-    if (!containerRef.current) return;
-    const container = containerRef.current;
-    zoomCenterRef.current = {
-      x: (container.scrollLeft + container.clientWidth / 2) / container.scrollWidth,
-      y: (container.scrollTop + container.clientHeight / 2) / container.scrollHeight,
-    };
-  };
-
-  const handleZoomIn = () => {
-    captureCenter();
-    setZoom(prev => Math.min(prev + 0.25, 4));
-  };
-
-  const handleZoomOut = () => {
-    captureCenter();
-    setZoom(prev => Math.max(prev - 0.25, 0.5));
-  };
-
-  const handleZoomReset = () => {
-    zoomCenterRef.current = null;
-    setZoom(1);
-  };
-
-  // Restore center position after zoom changes
-  useEffect(() => {
-    if (!containerRef.current || !zoomCenterRef.current) return;
-
-    requestAnimationFrame(() => {
-      const container = containerRef.current;
-      if (!container || !zoomCenterRef.current) return;
-
-      const { x, y } = zoomCenterRef.current;
-      container.scrollLeft = x * container.scrollWidth - container.clientWidth / 2;
-      container.scrollTop = y * container.scrollHeight - container.clientHeight / 2;
-      zoomCenterRef.current = null;
-    });
-  }, [zoom]);
 
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
@@ -480,9 +406,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
             doubleClick={{ mode: "reset" }}
             panning={{ velocityDisabled: true }}
           >
-            {/* Zoom controls - must be inside TransformWrapper to use useControls */}
-            <ZoomControls />
-
             <TransformComponent
               wrapperStyle={{
                 width: '100%',
@@ -608,36 +531,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="absolute top-4 right-4 z-20 flex flex-col gap-1 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
-        <button
-          onClick={handleZoomIn}
-          disabled={zoom >= 4}
-          className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Zoom In"
-        >
-          <ZoomIn size={18} />
-        </button>
-        <button
-          onClick={handleZoomOut}
-          disabled={zoom <= 0.5}
-          className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Zoom Out"
-        >
-          <ZoomOut size={18} />
-        </button>
-        <button
-          onClick={handleZoomReset}
-          className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
-          title="Reset Zoom"
-        >
-          <Maximize size={18} />
-        </button>
-        <div className="text-[10px] text-slate-400 text-center py-1 border-t border-white/10 mt-1">
-          {Math.round(zoom * 100)}%
-        </div>
-      </div>
-
       {/* Page Navigation */}
       {pageImages.length > 1 && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 glass rounded-xl px-3 py-2 animate-fade-in">
@@ -668,8 +561,8 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
         style={{ position: 'relative' }}
       >
         {currentImage && (() => {
-          const contentWidth = displayDimensions.width * zoom;
-          const contentHeight = displayDimensions.height * zoom;
+          const contentWidth = displayDimensions.width;
+          const contentHeight = displayDimensions.height;
 
           return (
             <div
