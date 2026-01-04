@@ -24,7 +24,7 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
   const hasPointers = pointerCount > 0;
 
   return (
-    <div className="relative group">
+    <div className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"

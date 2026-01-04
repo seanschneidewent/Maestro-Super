@@ -7,7 +7,7 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
   const { displayName, processed, pageCount, pointerCount, onExpand, onClick, isExpanded } = data;
 
   return (
-    <div className="relative group">
+    <div className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"

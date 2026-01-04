@@ -7,7 +7,7 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
   const { name, disciplineCount, onExpand, isExpanded } = data;
 
   return (
-    <div className="relative group">
+    <div className="relative group animate-scale-in">
       {/* Source handle (right side) */}
       <Handle
         type="source"
