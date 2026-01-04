@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect } from 'react';
+import { useCallback, useMemo, useEffect, useRef } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -47,6 +47,7 @@ function ContextMindMapInner({
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const prevNodeCountRef = useRef(0);
 
   const { data: hierarchy, isLoading, error, refetch } = useHierarchy(projectId);
   const invalidateHierarchy = useInvalidateHierarchy();
@@ -106,17 +107,24 @@ function ContextMindMapInner({
 
     setNodes(layoutNodes);
     setEdges(layoutEdges);
+  }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges]);
 
-    // Use multiple requestAnimationFrame + setTimeout for reliable fitView after ReactFlow positions nodes
-    // 400ms delay needed for large expansions (31+ page nodes)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          fitView({ padding: 0.15, duration: 300, minZoom: 0.1, maxZoom: 1.5 });
-        }, 400);
-      });
-    });
-  }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges, fitView]);
+  // Separate useEffect for fitView - triggers after nodes are rendered
+  useEffect(() => {
+    if (nodes.length === 0) return;
+
+    // Only fit view when node count changes (expansion/collapse)
+    if (nodes.length !== prevNodeCountRef.current) {
+      prevNodeCountRef.current = nodes.length;
+
+      // Use setTimeout to ensure ReactFlow has positioned the nodes
+      const timeoutId = setTimeout(() => {
+        fitView({ padding: 0.15, duration: 300, minZoom: 0.1, maxZoom: 1.5 });
+      }, 50);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [nodes.length, fitView]);
 
   if (isLoading) {
     return <MindMapSkeleton />;
