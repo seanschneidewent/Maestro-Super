@@ -199,13 +199,14 @@ export function layoutHierarchy(
     ));
 
     // SVG line: project center → discipline center
+    // Using bright colors to verify deployment
     lines.push({
       x1: projectCenterX,
       y1: projectCenterY,
       x2: discCenterX,
       y2: discCenterY,
-      color: discipline.processed ? 'rgba(245, 158, 11, 0.5)' : 'rgba(100, 116, 139, 0.4)',
-      width: 2,
+      color: 'rgba(34, 211, 238, 0.6)', // Bright cyan for all lines
+      width: 3,
     });
 
     // --- Pages within discipline ---
