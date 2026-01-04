@@ -358,6 +358,7 @@ export interface SessionResponse {
   projectId: string;
   createdAt: string;
   updatedAt: string;
+  title?: string | null;
 }
 
 export interface SessionWithQueriesResponse extends SessionResponse {

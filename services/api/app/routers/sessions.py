@@ -3,6 +3,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.dependencies import get_current_user
@@ -61,17 +62,43 @@ def list_sessions(
     project_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[SessionModel]:
-    """List all sessions for a project (filtered to current user, most recent first)."""
+) -> list[dict]:
+    """List all sessions for a project with titles (filtered to current user, most recent first)."""
     verify_project_exists(project_id, db)
 
-    return (
-        db.query(SessionModel)
+    # Subquery: get first query's display_title per session (by sequence_order, fallback to created_at)
+    first_query_subq = (
+        select(Query.display_title)
+        .where(Query.session_id == SessionModel.id)
+        .where(Query.hidden == False)
+        .order_by(Query.sequence_order.asc().nulls_last(), Query.created_at.asc())
+        .limit(1)
+        .correlate(SessionModel)
+        .scalar_subquery()
+    )
+
+    results = (
+        db.query(
+            SessionModel,
+            first_query_subq.label("title")
+        )
         .filter(SessionModel.project_id == project_id)
         .filter(SessionModel.user_id == user.id)
         .order_by(SessionModel.created_at.desc())
         .all()
     )
+
+    return [
+        {
+            "id": session.id,
+            "user_id": session.user_id,
+            "project_id": session.project_id,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "title": title,
+        }
+        for session, title in results
+    ]
 
 
 @router.get(

@@ -26,6 +26,7 @@ class SessionResponse(BaseModel):
     project_id: str | UUID = Field(alias="projectId")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+    title: str | None = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

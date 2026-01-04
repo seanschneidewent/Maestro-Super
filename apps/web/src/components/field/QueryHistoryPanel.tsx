@@ -172,7 +172,7 @@ export function QueryHistoryPanel({
                         <p className="text-sm font-medium text-slate-700 truncate">
                           {isExpanded && expandedSessionData
                             ? getSessionTitle(expandedSessionData)
-                            : 'Session'}
+                            : (session.title || 'Session')}
                         </p>
                         <p className="text-xs text-slate-400">
                           {formatTimeAgo(session.createdAt)}
