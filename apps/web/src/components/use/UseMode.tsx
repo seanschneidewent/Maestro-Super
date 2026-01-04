@@ -168,12 +168,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
     // Load pages for the selected query from cache (must be AFTER resetStream)
     const cachedPages = queryPagesCache.get(selectedQueryId);
-    console.log('handleRestoreSession:', {
-      selectedQueryId,
-      cachedPages,
-      cacheSize: queryPagesCache.size,
-      cacheKeys: [...queryPagesCache.keys()]
-    });
     if (cachedPages) {
       loadPages(cachedPages);
     }
