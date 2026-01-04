@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ChevronUp, MessageSquare } from 'lucide-react'
+import { ChevronUp, ChevronDown, MessageCircle } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import type { QueryWithPages } from '../../types'
 
 interface QueryStackProps {
@@ -19,125 +20,159 @@ function getDisplayTitle(query: QueryWithPages): string {
 }
 
 export function QueryStack({ queries, activeQueryId, onSelectQuery }: QueryStackProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
+  const [isResponseExpanded, setIsResponseExpanded] = useState(false)
 
   // Don't render if no queries
   if (queries.length === 0) {
     return null
   }
 
-  // Sort by sequence order (most recent last for bottom-up display)
+  // Sort by sequence order (oldest first)
   const sortedQueries = [...queries].sort(
     (a, b) => (a.sequenceOrder ?? 0) - (b.sequenceOrder ?? 0)
   )
 
-  // In collapsed mode, only show the most recent query (last in sorted list)
-  const visibleQueries = isExpanded ? sortedQueries : [sortedQueries[sortedQueries.length - 1]]
-  const hasMore = queries.length > 3
-  const hiddenCount = queries.length - 1
+  // Find active query, default to most recent if none selected
+  const activeQuery = activeQueryId
+    ? sortedQueries.find(q => q.id === activeQueryId) ?? sortedQueries[sortedQueries.length - 1]
+    : sortedQueries[sortedQueries.length - 1]
 
-  // Single query - show simple pill
-  if (queries.length === 1) {
-    const query = queries[0]
-    const isActive = query.id === activeQueryId
+  // History queries = all except active
+  const historyQueries = sortedQueries.filter(q => q.id !== activeQuery.id)
 
-    return (
-      <div className="absolute bottom-20 left-4 z-30 animate-in fade-in slide-in-from-bottom-2 duration-200">
-        <button
-          onClick={() => onSelectQuery(query.id)}
-          className={`
-            flex items-center gap-2 px-3 py-2
-            rounded-full shadow-sm
-            transition-all duration-200
-            ${isActive
-              ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-glow-cyan-sm'
-              : 'bg-white/95 backdrop-blur-md border border-slate-200/50 hover:border-cyan-300 hover:shadow-md'
-            }
-          `}
-        >
-          <MessageSquare size={14} className={isActive ? 'text-white' : 'text-cyan-500'} />
-          <span className={`text-sm font-medium ${isActive ? 'text-white' : 'text-slate-700'}`}>
-            {getDisplayTitle(query)}
-          </span>
-        </button>
-      </div>
-    )
-  }
+  // In collapsed mode, show only last 2 history items
+  const maxCollapsedHistory = 2
+  const visibleHistory = isHistoryExpanded
+    ? historyQueries
+    : historyQueries.slice(-maxCollapsedHistory)
+  const hasMoreHistory = historyQueries.length > maxCollapsedHistory
 
   return (
-    <div className="absolute bottom-20 left-4 z-30 animate-in fade-in slide-in-from-bottom-2 duration-200">
-      <div className="flex flex-col-reverse gap-1.5">
-        {/* Query items - displayed in reverse order so newest is at bottom visually */}
-        {visibleQueries.map((query, index) => {
-          const isActive = query.id === activeQueryId
-          const isNewest = index === visibleQueries.length - 1
+    <div className="absolute bottom-20 left-4 z-30 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+      {/* === UPPER SECTION: Query History === */}
+      {historyQueries.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {/* "See all" toggle at top when collapsed with hidden items */}
+          {!isHistoryExpanded && hasMoreHistory && (
+            <button
+              onClick={() => setIsHistoryExpanded(true)}
+              className="
+                flex items-center gap-1.5 px-3 py-1.5
+                rounded-lg bg-slate-100/80 backdrop-blur-sm
+                border border-slate-200/50
+                hover:bg-slate-200/80 hover:border-slate-300
+                transition-all duration-200
+                text-slate-500 hover:text-slate-700
+                text-xs font-medium
+              "
+            >
+              <ChevronUp size={12} />
+              See all ({historyQueries.length})
+            </button>
+          )}
 
-          return (
+          {/* Collapse toggle when expanded */}
+          {isHistoryExpanded && hasMoreHistory && (
+            <button
+              onClick={() => setIsHistoryExpanded(false)}
+              className="
+                flex items-center gap-1.5 px-3 py-1.5
+                rounded-lg bg-slate-100/80 backdrop-blur-sm
+                border border-slate-200/50
+                hover:bg-slate-200/80 hover:border-slate-300
+                transition-all duration-200
+                text-slate-500 hover:text-slate-700
+                text-xs font-medium
+              "
+            >
+              <ChevronDown size={12} />
+              Collapse
+            </button>
+          )}
+
+          {/* History items - older queries */}
+          {visibleHistory.map((query) => (
             <button
               key={query.id}
-              onClick={() => onSelectQuery(query.id)}
-              className={`
-                flex items-center gap-2 px-3 py-2
-                rounded-xl shadow-sm
+              onClick={() => {
+                onSelectQuery(query.id)
+                setIsResponseExpanded(false) // Collapse response when switching
+              }}
+              className="
+                flex items-center gap-2 px-3 py-1.5
+                rounded-lg bg-white/80 backdrop-blur-sm
+                border border-slate-200/50
+                hover:bg-slate-50 hover:border-cyan-300 hover:shadow-sm
                 transition-all duration-200
-                ${isActive
-                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-glow-cyan-sm'
-                  : 'bg-white/95 backdrop-blur-md border border-slate-200/50 hover:border-cyan-300 hover:shadow-md'
-                }
-                ${!isNewest && !isExpanded ? 'scale-95 opacity-80' : ''}
-              `}
+                text-left
+              "
             >
-              <div className={`
-                w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium
-                ${isActive ? 'bg-white/20' : 'bg-slate-100'}
-              `}>
-                <span className={isActive ? 'text-white' : 'text-slate-500'}>
-                  {query.sequenceOrder ?? index + 1}
+              <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center">
+                <span className="text-[10px] font-medium text-slate-500">
+                  {query.sequenceOrder ?? '?'}
                 </span>
               </div>
-              <span className={`text-sm font-medium ${isActive ? 'text-white' : 'text-slate-700'}`}>
+              <span className="text-xs font-medium text-slate-600 truncate max-w-[200px]">
                 {getDisplayTitle(query)}
               </span>
             </button>
-          )
-        })}
+          ))}
+        </div>
+      )}
 
-        {/* "See all" / collapse toggle - shown at top when collapsed with >1 query */}
-        {!isExpanded && hiddenCount > 0 && (
-          <button
-            onClick={() => setIsExpanded(true)}
-            className="
-              flex items-center gap-1.5 px-3 py-1.5
-              rounded-xl bg-slate-100/90 backdrop-blur-md
-              border border-slate-200/50
-              hover:bg-slate-200/90 hover:border-slate-300
-              transition-all duration-200
-              text-slate-500 hover:text-slate-700
-            "
-          >
-            <ChevronUp size={14} />
-            <span className="text-xs font-medium">
-              {hiddenCount} more {hiddenCount === 1 ? 'query' : 'queries'}
-            </span>
-          </button>
-        )}
+      {/* === LOWER SECTION: Active Query Bubble === */}
+      {/* This is always visible and shows the currently selected query */}
+      <div
+        className={`
+          bg-white/95 backdrop-blur-md border border-slate-200/50
+          rounded-2xl rounded-bl-sm shadow-lg
+          transition-all duration-200
+          ${isResponseExpanded ? 'max-w-lg' : 'max-w-xs'}
+        `}
+      >
+        {/* Header - always visible, clickable to expand/collapse */}
+        <button
+          onClick={() => setIsResponseExpanded(!isResponseExpanded)}
+          className="
+            w-full flex items-center gap-2 px-3 py-2
+            hover:bg-slate-50/50 rounded-2xl
+            transition-colors duration-200
+          "
+        >
+          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center shadow-sm">
+            <MessageCircle size={12} className="text-white" />
+          </div>
+          <span className="flex-1 text-sm font-medium text-slate-700 text-left truncate">
+            {getDisplayTitle(activeQuery)}
+          </span>
+          <ChevronDown
+            size={16}
+            className={`
+              text-slate-400 transition-transform duration-200
+              ${isResponseExpanded ? 'rotate-180' : ''}
+            `}
+          />
+        </button>
 
-        {/* Collapse button when expanded */}
-        {isExpanded && hasMore && (
-          <button
-            onClick={() => setIsExpanded(false)}
-            className="
-              flex items-center gap-1.5 px-3 py-1.5
-              rounded-xl bg-slate-100/90 backdrop-blur-md
-              border border-slate-200/50
-              hover:bg-slate-200/90 hover:border-slate-300
-              transition-all duration-200
-              text-slate-500 hover:text-slate-700
-            "
-          >
-            <ChevronUp size={14} className="rotate-180" />
-            <span className="text-xs font-medium">Show less</span>
-          </button>
+        {/* Expanded response content */}
+        {isResponseExpanded && activeQuery.responseText && (
+          <div className="px-4 pb-3 pt-1 border-t border-slate-100">
+            <div className="text-sm text-slate-700 leading-relaxed max-h-64 overflow-y-auto">
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
+                  ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
+                  ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
+                  li: ({ children }) => <li className="my-0.5">{children}</li>,
+                  strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                  code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                }}
+              >
+                {activeQuery.responseText}
+              </ReactMarkdown>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -318,9 +318,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           />
         )}
 
-        {/* Thinking bubble - shows during streaming or for first query's answer */}
-        {/* When there are session queries, this appears ABOVE the QueryStack */}
-        {(isStreaming || (finalAnswer && sessionQueries.length === 0)) && (
+        {/* Thinking bubble - only shows DURING streaming (thinking indicator) */}
+        {/* QueryStack's active bubble handles displaying completed responses */}
+        {isStreaming && (
           <ThinkingBubble
             thinkingText={thinkingText}
             finalAnswer={finalAnswer}
