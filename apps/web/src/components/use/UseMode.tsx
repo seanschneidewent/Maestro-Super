@@ -34,6 +34,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   // UI state
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Hierarchy data
@@ -207,6 +208,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     await clearSession();
     resetStream();
     setQueryInput('');
+    setSubmittedQuery(null);
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
@@ -334,6 +336,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
         {/* Query input bar - bottom center */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
+          {/* User query bubble - appears above input when query is active */}
+          {submittedQuery && (isStreaming || activeQueryId) && (
+            <div className="mb-2 bg-blue-600 text-white rounded-t-xl rounded-b-sm px-4 py-2 text-sm shadow-lg">
+              <span className="opacity-70 text-xs mr-2">You:</span>
+              {submittedQuery}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <QueryInput
@@ -341,6 +351,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
                 onChange={setQueryInput}
                 onSubmit={() => {
                   if (queryInput.trim() && !isStreaming) {
+                    setSubmittedQuery(queryInput.trim());
                     submitQuery(queryInput.trim(), currentSession?.id);
                     setQueryInput('');
                   }
