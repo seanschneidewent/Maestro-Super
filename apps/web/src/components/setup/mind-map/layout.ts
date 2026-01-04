@@ -1,4 +1,5 @@
-import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG, NODE_DIMENSIONS } from './types';
+import dagre from '@dagrejs/dagre';
+import { MindMapNode, MindMapEdge, NODE_DIMENSIONS } from './types';
 import type { ProjectHierarchy } from '../../../types';
 
 interface LayoutCallbacks {
@@ -16,60 +17,61 @@ interface LayoutOptions {
   callbacks: LayoutCallbacks;
 }
 
-export interface ConnectionLine {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  width: number;
-}
-
 interface LayoutResult {
   nodes: MindMapNode[];
   edges: MindMapEdge[];
-  lines: ConnectionLine[];
 }
 
-/**
- * Simple radial layout:
- * - Project center at origin (0, 0)
- * - Discipline centers at radius R, equal angles
- * - Lines from center to center, all same length
- */
+function createEdge(
+  sourceId: string,
+  targetId: string,
+  color: string,
+  width: number = 2
+): MindMapEdge {
+  return {
+    id: `e-${sourceId}-${targetId}`,
+    source: sourceId,
+    target: targetId,
+    type: 'smoothstep',
+    style: {
+      stroke: color,
+      strokeWidth: width,
+      opacity: 0.5,
+    },
+  };
+}
+
 export function layoutHierarchy(
   hierarchy: ProjectHierarchy,
   options: LayoutOptions
 ): LayoutResult {
   const { expandedNodes, activePageId, callbacks } = options;
-  const config = DEFAULT_LAYOUT_CONFIG;
 
   const nodes: MindMapNode[] = [];
   const edges: MindMapEdge[] = [];
-  const lines: ConnectionLine[] = [];
+
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({
+    rankdir: 'LR',
+    nodesep: 40,
+    ranksep: 100,
+    marginx: 20,
+    marginy: 20,
+  });
+  g.setDefaultEdgeLabel(() => ({}));
 
   const projectId = `project-${hierarchy.name}`;
   const isProjectExpanded = expandedNodes.has(projectId);
 
-  // ===========================================
-  // ORIGIN: The center of our radial layout
-  // ===========================================
-  const ORIGIN_X = 0;
-  const ORIGIN_Y = 0;
-
-  // ===========================================
-  // PROJECT NODE
-  // Position so its CENTER is at origin
-  // ===========================================
-  const projectWidth = NODE_DIMENSIONS.project.width;
-  const projectHeight = NODE_DIMENSIONS.project.height;
-  const projectNodeX = ORIGIN_X - projectWidth / 2;
-  const projectNodeY = ORIGIN_Y - projectHeight / 2;
+  g.setNode(projectId, {
+    width: NODE_DIMENSIONS.project.width,
+    height: NODE_DIMENSIONS.project.height,
+  });
 
   nodes.push({
     id: projectId,
     type: 'project',
-    position: { x: projectNodeX, y: projectNodeY },
+    position: { x: 0, y: 0 },
     data: {
       type: 'project',
       id: projectId,
@@ -81,39 +83,31 @@ export function layoutHierarchy(
   });
 
   if (!isProjectExpanded || hierarchy.disciplines.length === 0) {
-    return { nodes, edges, lines };
+    dagre.layout(g);
+    const projectPos = g.node(projectId);
+    nodes[0].position = {
+      x: projectPos.x - NODE_DIMENSIONS.project.width / 2,
+      y: projectPos.y - NODE_DIMENSIONS.project.height / 2,
+    };
+    return { nodes, edges };
   }
 
-  // ===========================================
-  // DISCIPLINE NODES
-  // All centers at radius R from origin
-  // Equal angles: i * (2π / n), starting at top
-  // ===========================================
-  const n = hierarchy.disciplines.length;
-  const radius = config.levelRadius[1];
-  const discWidth = NODE_DIMENSIONS.discipline.width;
-  const discHeight = NODE_DIMENSIONS.discipline.height;
-
-  hierarchy.disciplines.forEach((discipline, i) => {
-    // Angle: start at top (-π/2), equal spacing
-    const angle = -Math.PI / 2 + (i * 2 * Math.PI / n);
-
-    // Discipline CENTER position (on the circle)
-    const discCenterX = ORIGIN_X + radius * Math.cos(angle);
-    const discCenterY = ORIGIN_Y + radius * Math.sin(angle);
-
-    // Node position (top-left, offset from center)
-    const discNodeX = discCenterX - discWidth / 2;
-    const discNodeY = discCenterY - discHeight / 2;
-
+  hierarchy.disciplines.forEach((discipline) => {
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
     const totalPointers = discipline.pages.reduce((sum, p) => sum + p.pointers.length, 0);
 
+    g.setNode(disciplineNodeId, {
+      width: NODE_DIMENSIONS.discipline.width,
+      height: NODE_DIMENSIONS.discipline.height,
+    });
+
+    g.setEdge(projectId, disciplineNodeId);
+
     nodes.push({
       id: disciplineNodeId,
       type: 'discipline',
-      position: { x: discNodeX, y: discNodeY },
+      position: { x: 0, y: 0 },
       data: {
         type: 'discipline',
         id: discipline.id,
@@ -128,67 +122,29 @@ export function layoutHierarchy(
       },
     });
 
-    // ReactFlow edge (for interaction/selection if needed)
-    edges.push({
-      id: `e-${projectId}-${disciplineNodeId}`,
-      source: projectId,
-      target: disciplineNodeId,
-      type: 'straight',
-      style: {
-        stroke: discipline.processed ? '#f59e0b' : '#475569',
-        strokeWidth: 2,
-        opacity: 0.4,
-      },
-      zIndex: 0,
-    });
+    edges.push(createEdge(
+      projectId,
+      disciplineNodeId,
+      discipline.processed ? '#f59e0b' : '#475569',
+      2
+    ));
 
-    // SVG line: center-to-center (origin to discipline center)
-    // All lines have the same length (radius)
-    lines.push({
-      x1: ORIGIN_X,
-      y1: ORIGIN_Y,
-      x2: discCenterX,
-      y2: discCenterY,
-      color: 'rgba(100, 116, 139, 0.5)',
-      width: 2,
-    });
-
-    // ===========================================
-    // PAGES (when discipline is expanded)
-    // ===========================================
     if (isDisciplineExpanded && discipline.pages.length > 0) {
-      const pageRadius = config.levelRadius[2];
-      const pageWidth = NODE_DIMENSIONS.page.width;
-      const pageHeight = NODE_DIMENSIONS.page.height;
-
-      // Angular slice for this discipline's children
-      const angleStep = (2 * Math.PI) / n;
-      const sliceStart = angle - angleStep / 2;
-      const sliceEnd = angle + angleStep / 2;
-
-      // Distribute pages within slice
-      const pageCount = discipline.pages.length;
-      discipline.pages.forEach((page, pageIndex) => {
-        // Page angle within slice
-        const pageAngle = pageCount === 1
-          ? angle
-          : sliceStart + ((pageIndex + 0.5) / pageCount) * (sliceEnd - sliceStart);
-
-        // Page CENTER position
-        const pageCenterX = ORIGIN_X + pageRadius * Math.cos(pageAngle);
-        const pageCenterY = ORIGIN_Y + pageRadius * Math.sin(pageAngle);
-
-        // Node position (top-left)
-        const pageNodeX = pageCenterX - pageWidth / 2;
-        const pageNodeY = pageCenterY - pageHeight / 2;
-
+      discipline.pages.forEach((page) => {
         const pageNodeId = page.id;
         const isPageExpanded = expandedNodes.has(pageNodeId);
+
+        g.setNode(pageNodeId, {
+          width: NODE_DIMENSIONS.page.width,
+          height: NODE_DIMENSIONS.page.height,
+        });
+
+        g.setEdge(disciplineNodeId, pageNodeId);
 
         nodes.push({
           id: pageNodeId,
           type: 'page',
-          position: { x: pageNodeX, y: pageNodeY },
+          position: { x: 0, y: 0 },
           data: {
             type: 'page',
             id: page.id,
@@ -204,50 +160,28 @@ export function layoutHierarchy(
           },
         });
 
-        // Edge: discipline → page
-        edges.push({
-          id: `e-${disciplineNodeId}-${pageNodeId}`,
-          source: disciplineNodeId,
-          target: pageNodeId,
-          type: 'straight',
-          style: {
-            stroke: '#475569',
-            strokeWidth: 1.5,
-            opacity: 0.4,
-          },
-          zIndex: 0,
-        });
+        edges.push(createEdge(
+          disciplineNodeId,
+          pageNodeId,
+          '#475569',
+          1.5
+        ));
 
-        // ===========================================
-        // POINTERS (when page is expanded)
-        // ===========================================
         if (isPageExpanded && page.pointers.length > 0) {
-          const pointerRadius = config.levelRadius[3];
-          const pointerWidth = NODE_DIMENSIONS.pointer.width;
-          const pointerHeight = NODE_DIMENSIONS.pointer.height;
-
-          // Distribute pointers around the page's angle
-          const pointerCount = page.pointers.length;
-          const pointerSliceStart = pageAngle - angleStep / (2 * pageCount);
-          const pointerSliceEnd = pageAngle + angleStep / (2 * pageCount);
-
-          page.pointers.forEach((pointer, ptrIndex) => {
-            const pointerAngle = pointerCount === 1
-              ? pageAngle
-              : pointerSliceStart + ((ptrIndex + 0.5) / pointerCount) * (pointerSliceEnd - pointerSliceStart);
-
-            const pointerCenterX = ORIGIN_X + pointerRadius * Math.cos(pointerAngle);
-            const pointerCenterY = ORIGIN_Y + pointerRadius * Math.sin(pointerAngle);
-
-            const pointerNodeX = pointerCenterX - pointerWidth / 2;
-            const pointerNodeY = pointerCenterY - pointerHeight / 2;
-
+          page.pointers.forEach((pointer) => {
             const pointerNodeId = pointer.id;
+
+            g.setNode(pointerNodeId, {
+              width: NODE_DIMENSIONS.pointer.width,
+              height: NODE_DIMENSIONS.pointer.height,
+            });
+
+            g.setEdge(pageNodeId, pointerNodeId);
 
             nodes.push({
               id: pointerNodeId,
               type: 'pointer',
-              position: { x: pointerNodeX, y: pointerNodeY },
+              position: { x: 0, y: 0 },
               data: {
                 type: 'pointer',
                 id: pointer.id,
@@ -258,31 +192,34 @@ export function layoutHierarchy(
               },
             });
 
-            // Edge: page → pointer
-            edges.push({
-              id: `e-${pageNodeId}-${pointerNodeId}`,
-              source: pageNodeId,
-              target: pointerNodeId,
-              type: 'straight',
-              style: {
-                stroke: '#8b5cf6',
-                strokeWidth: 1,
-                opacity: 0.4,
-              },
-              zIndex: 0,
-            });
+            edges.push(createEdge(
+              pageNodeId,
+              pointerNodeId,
+              '#8b5cf6',
+              1
+            ));
           });
         }
       });
     }
   });
 
-  return { nodes, edges, lines };
+  dagre.layout(g);
+
+  nodes.forEach((node) => {
+    const nodeWithPosition = g.node(node.id);
+    if (nodeWithPosition) {
+      const dims = NODE_DIMENSIONS[node.data.type as keyof typeof NODE_DIMENSIONS];
+      node.position = {
+        x: nodeWithPosition.x - dims.width / 2,
+        y: nodeWithPosition.y - dims.height / 2,
+      };
+    }
+  });
+
+  return { nodes, edges };
 }
 
-/**
- * Initial expanded state: project expanded so disciplines are visible
- */
 export function getInitialExpandedState(hierarchy: ProjectHierarchy): string[] {
   const projectId = `project-${hierarchy.name}`;
   return [projectId];
