@@ -35,6 +35,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+  const [isQueryExpanded, setIsQueryExpanded] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Hierarchy data
@@ -209,6 +210,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     resetStream();
     setQueryInput('');
     setSubmittedQuery(null);
+    setIsQueryExpanded(false);
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
@@ -337,13 +339,33 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         {/* Query input bar - bottom center */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
           {/* User query bubble - appears above input when query is active */}
-          {submittedQuery && (isStreaming || activeQueryId) && (
-            <div className="flex justify-end mb-2">
-              <div className="bg-blue-600 text-white rounded-2xl px-4 py-2 text-sm shadow-lg max-w-[80%]">
-                {submittedQuery}
+          {submittedQuery && (isStreaming || activeQueryId) && (() => {
+            const words = submittedQuery.split(/\s+/);
+            const isLong = words.length > 7;
+            const truncatedText = isLong ? words.slice(0, 7).join(' ') : submittedQuery;
+            const showFade = isLong && !isQueryExpanded;
+
+            return (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => isLong && setIsQueryExpanded(!isQueryExpanded)}
+                  className={`
+                    bg-blue-600 text-white rounded-2xl px-4 py-2 text-sm shadow-lg max-w-[80%]
+                    text-left relative overflow-hidden
+                    ${isLong ? 'cursor-pointer hover:bg-blue-700' : 'cursor-default'}
+                    transition-colors
+                  `}
+                >
+                  <span className={showFade ? 'line-clamp-1' : ''}>
+                    {isQueryExpanded || !isLong ? submittedQuery : truncatedText}
+                  </span>
+                  {showFade && (
+                    <span className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-blue-600 to-transparent pointer-events-none" />
+                  )}
+                </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div className="flex items-center gap-3">
             <div className="flex-1">
@@ -353,6 +375,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
                 onSubmit={() => {
                   if (queryInput.trim() && !isStreaming) {
                     setSubmittedQuery(queryInput.trim());
+                    setIsQueryExpanded(false);
                     submitQuery(queryInput.trim(), currentSession?.id);
                     setQueryInput('');
                   }
