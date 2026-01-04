@@ -338,9 +338,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
           {/* User query bubble - appears above input when query is active */}
           {submittedQuery && (isStreaming || activeQueryId) && (
-            <div className="mb-2 bg-blue-600 text-white rounded-t-xl rounded-b-sm px-4 py-2 text-sm shadow-lg">
-              <span className="opacity-70 text-xs mr-2">You:</span>
-              {submittedQuery}
+            <div className="flex justify-end mb-2">
+              <div className="bg-blue-600 text-white rounded-2xl px-4 py-2 text-sm shadow-lg max-w-[80%]">
+                {submittedQuery}
+              </div>
             </div>
           )}
 
