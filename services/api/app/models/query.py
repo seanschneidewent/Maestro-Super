@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, JSONVariant, created_at_column
@@ -22,24 +23,25 @@ class Query(Base):
 
     __tablename__ = "queries"
 
-    id: Mapped[str] = mapped_column(
-        String(36),
+    # Note: Using UUID to match production database schema
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid4()),
+        default=uuid4,
     )
     user_id: Mapped[str] = mapped_column(
         String(255),
         index=True,
         nullable=False,
     )
-    project_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
+    project_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
         nullable=True,
     )
-    session_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
+    session_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("sessions.id", ondelete="SET NULL"),
         index=True,
         nullable=True,

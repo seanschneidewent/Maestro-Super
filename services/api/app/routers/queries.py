@@ -214,7 +214,8 @@ async def stream_query(
         )
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        if session.project_id != project_id:
+        # Compare as strings to handle UUID vs string mismatch
+        if str(session.project_id) != str(project_id):
             raise HTTPException(status_code=400, detail="Session belongs to a different project")
 
         # Calculate sequence_order as count of existing queries in session + 1

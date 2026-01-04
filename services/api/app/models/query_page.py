@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING, Any, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, JSONVariant
@@ -21,19 +22,19 @@ class QueryPage(Base):
 
     __tablename__ = "query_pages"
 
-    id: Mapped[str] = mapped_column(
-        String(36),
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid4()),
+        default=uuid4,
     )
-    query_id: Mapped[str] = mapped_column(
-        String(36),
+    query_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("queries.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
-    page_id: Mapped[str] = mapped_column(
-        String(36),
+    page_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("pages.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
