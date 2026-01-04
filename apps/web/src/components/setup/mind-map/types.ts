@@ -66,7 +66,7 @@ export interface LayoutConfig {
 export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   centerX: 0,
   centerY: 0,
-  levelRadius: [0, 180, 360, 520, 680],  // Project, Discipline, Page, Pointer
+  levelRadius: [0, 220, 400, 560, 720],  // Project, Discipline, Page, Pointer (increased for better spread)
   nodeSpacing: 60,
 };
 

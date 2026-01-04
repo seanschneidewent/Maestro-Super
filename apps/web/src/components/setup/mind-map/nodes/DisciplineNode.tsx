@@ -16,7 +16,7 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
       {/* Node body */}
       <div
         className={`relative flex items-center gap-2 px-4 py-2.5 rounded-lg
-                   bg-slate-800 border-2
+                   bg-slate-800 border-2 min-w-[140px] max-w-[180px]
                    shadow-lg transition-all duration-200 cursor-pointer
                    ${processed
                      ? 'border-amber-400/50 hover:border-amber-400 shadow-amber-900/20'
