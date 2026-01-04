@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { NodeProps } from 'reactflow';
+import { NodeProps, Handle, Position } from 'reactflow';
 import { Crosshair } from 'lucide-react';
 import type { PointerNodeData } from '../types';
 
@@ -8,6 +8,12 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
 
   return (
     <div className="relative group">
+      {/* Target handle (left side) */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-violet-400 !w-2 !h-2 !border-0"
+      />
       {/* Glow effect on hover */}
       <div className="absolute inset-0 rounded-md bg-violet-400/0 blur-md group-hover:bg-violet-400/20 transition-all" />
 

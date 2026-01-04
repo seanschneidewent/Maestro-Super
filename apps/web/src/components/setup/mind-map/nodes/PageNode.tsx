@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { NodeProps } from 'reactflow';
+import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { PageNodeData } from '../types';
 
@@ -25,6 +25,18 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
 
   return (
     <div className="relative group">
+      {/* Target handle (left side) */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+      />
+      {/* Source handle (right side) */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+      />
       {/* Active glow */}
       {isActive && (
         <div className="absolute inset-0 rounded-lg bg-cyan-400/20 blur-md" />

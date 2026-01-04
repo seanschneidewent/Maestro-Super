@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { NodeProps } from 'reactflow';
+import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import type { ProjectNodeData } from '../types';
 
@@ -8,6 +8,12 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
 
   return (
     <div className="relative group">
+      {/* Source handle (right side) */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-cyan-400 !w-2 !h-2 !border-0"
+      />
       {/* Glow effect */}
       <div className="absolute inset-0 rounded-xl bg-cyan-400/20 blur-xl group-hover:bg-cyan-400/30 transition-all" />
 

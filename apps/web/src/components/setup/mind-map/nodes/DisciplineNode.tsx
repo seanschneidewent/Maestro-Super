@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { NodeProps } from 'reactflow';
+import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import type { DisciplineNodeData } from '../types';
 
@@ -8,6 +8,18 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
 
   return (
     <div className="relative group">
+      {/* Target handle (left side) */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+      />
+      {/* Source handle (right side) */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+      />
       {/* Glow effect */}
       {processed && (
         <div className="absolute inset-0 rounded-lg bg-amber-400/10 blur-lg group-hover:bg-amber-400/20 transition-all" />
