@@ -24,11 +24,12 @@ def upgrade() -> None:
     """Add sessions table, update queries, and create query_pages junction table."""
 
     # Create sessions table
+    # Note: Using UUID to match production database types
     op.create_table(
         'sessions',
-        sa.Column('id', sa.String(length=36), nullable=False),
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('user_id', sa.String(length=255), nullable=False),
-        sa.Column('project_id', sa.String(length=36), nullable=False),
+        sa.Column('project_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('NOW()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('NOW()'), nullable=False),
         sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
@@ -41,7 +42,7 @@ def upgrade() -> None:
     # Add columns to queries table
     with op.batch_alter_table('queries', schema=None) as batch_op:
         batch_op.add_column(
-            sa.Column('session_id', sa.String(length=36), nullable=True)
+            sa.Column('session_id', postgresql.UUID(as_uuid=True), nullable=True)
         )
         batch_op.add_column(
             sa.Column('display_title', sa.String(length=100), nullable=True)
@@ -61,9 +62,9 @@ def upgrade() -> None:
     # Create query_pages junction table
     op.create_table(
         'query_pages',
-        sa.Column('id', sa.String(length=36), nullable=False),
-        sa.Column('query_id', sa.String(length=36), nullable=False),
-        sa.Column('page_id', sa.String(length=36), nullable=False),
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('query_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('page_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('page_order', sa.Integer(), nullable=False),
         sa.Column('pointers_shown', sa.JSON().with_variant(postgresql.JSONB(astext_type=Text()), 'postgresql'), nullable=True),
         sa.ForeignKeyConstraint(['query_id'], ['queries.id'], ondelete='CASCADE'),
