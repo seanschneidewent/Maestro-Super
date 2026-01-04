@@ -201,11 +201,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     console.log('Pointer clicked:', pointer.title, pointer.id);
   };
 
-  // Handle voice recording complete
-  const handleRecordingComplete = async (audioBlob: Blob) => {
-    // TODO: Send to transcription API, then submit query
-    console.log('Recording complete:', audioBlob.size, 'bytes');
-  };
 
   // Handle starting a new session (clears query stack)
   const handleNewSession = async () => {
@@ -349,7 +344,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
                     setQueryInput('');
                   }
                 }}
-                onRecordingComplete={handleRecordingComplete}
                 isProcessing={isStreaming}
               />
             </div>
