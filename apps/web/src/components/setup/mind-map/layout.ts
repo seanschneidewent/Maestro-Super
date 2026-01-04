@@ -1,4 +1,4 @@
-import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG, NODE_DIMENSIONS } from './types';
+import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG } from './types';
 import type { ProjectHierarchy } from '../../../types';
 
 interface LayoutCallbacks {
@@ -113,18 +113,11 @@ export function layoutHierarchy(
   const projectCenterX = config.centerX;
   const projectCenterY = config.centerY;
 
-  // --- Project Node (center) - offset by half dimensions so node is centered ---
-  const projectOffset = {
-    x: NODE_DIMENSIONS.project.width / 2,
-    y: NODE_DIMENSIONS.project.height / 2,
-  };
+  // --- Project Node (center) ---
   nodes.push({
     id: projectId,
     type: 'project',
-    position: {
-      x: projectCenterX - projectOffset.x,
-      y: projectCenterY - projectOffset.y
-    },
+    position: { x: projectCenterX, y: projectCenterY },
     data: {
       type: 'project',
       id: projectId,
@@ -150,12 +143,6 @@ export function layoutHierarchy(
   const angleStep = (Math.PI * 2) / disciplineCount;
   const startAngle = -Math.PI / 2; // Start from top (12 o'clock)
 
-  // Discipline node offset for centering
-  const discOffset = {
-    x: NODE_DIMENSIONS.discipline.width / 2,
-    y: NODE_DIMENSIONS.discipline.height / 2,
-  };
-
   sortedDisciplines.forEach((discipline, discIndex) => {
     // Calculate angle: start + (index * step)
     // This places disciplines evenly around the circle
@@ -165,22 +152,19 @@ export function layoutHierarchy(
     const sliceStartAngle = discMidAngle - angleStep / 2;
     const sliceEndAngle = discMidAngle + angleStep / 2;
 
-    // Calculate discipline CENTER position (for SVG lines)
-    const discCenterX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
-    const discCenterY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
+    // Calculate discipline position on the circle
+    const discX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
+    const discY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
     const totalPointers = discipline.pages.reduce((sum, p) => sum + p.pointers.length, 0);
 
-    // Position node offset by half dimensions so center aligns with calculated position
+    // Position node at calculated position (ReactFlow positions by top-left)
     nodes.push({
       id: disciplineNodeId,
       type: 'discipline',
-      position: {
-        x: discCenterX - discOffset.x,
-        y: discCenterY - discOffset.y
-      },
+      position: { x: discX, y: discY },
       data: {
         type: 'discipline',
         id: discipline.id,
@@ -203,13 +187,12 @@ export function layoutHierarchy(
       2
     ));
 
-    // SVG line: project center → discipline center
-    // Using bright colors to verify deployment
+    // SVG line: project center → discipline position
     lines.push({
       x1: projectCenterX,
       y1: projectCenterY,
-      x2: discCenterX,
-      y2: discCenterY,
+      x2: discX,
+      y2: discY,
       color: 'rgba(34, 211, 238, 0.6)', // Bright cyan for all lines
       width: 3,
     });
