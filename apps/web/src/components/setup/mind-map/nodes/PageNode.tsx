@@ -39,7 +39,7 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
       />
       {/* Active glow */}
       {isActive && (
-        <div className="absolute inset-0 rounded-lg bg-cyan-400/20 blur-md" />
+        <div className="absolute inset-0 rounded-lg bg-cyan-400/20 blur-md pointer-events-none" />
       )}
 
       {/* Node body */}

@@ -15,7 +15,7 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
         className="!bg-cyan-400 !w-2 !h-2 !border-0"
       />
       {/* Glow effect */}
-      <div className="absolute inset-0 rounded-xl bg-cyan-400/20 blur-xl group-hover:bg-cyan-400/30 transition-all" />
+      <div className="absolute inset-0 rounded-xl bg-cyan-400/20 blur-xl group-hover:bg-cyan-400/30 transition-all pointer-events-none" />
 
       {/* Node body */}
       <div

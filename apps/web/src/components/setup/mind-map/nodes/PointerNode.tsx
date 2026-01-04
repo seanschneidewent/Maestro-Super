@@ -15,7 +15,7 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
         className="!bg-violet-400 !w-2 !h-2 !border-0"
       />
       {/* Glow effect on hover */}
-      <div className="absolute inset-0 rounded-md bg-violet-400/0 blur-md group-hover:bg-violet-400/20 transition-all" />
+      <div className="absolute inset-0 rounded-md bg-violet-400/0 blur-md group-hover:bg-violet-400/20 transition-all pointer-events-none" />
 
       {/* Node body */}
       <div

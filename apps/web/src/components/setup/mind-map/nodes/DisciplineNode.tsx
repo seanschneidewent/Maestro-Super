@@ -22,7 +22,7 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
       />
       {/* Glow effect */}
       {processed && (
-        <div className="absolute inset-0 rounded-lg bg-amber-400/10 blur-lg group-hover:bg-amber-400/20 transition-all" />
+        <div className="absolute inset-0 rounded-lg bg-amber-400/10 blur-lg group-hover:bg-amber-400/20 transition-all pointer-events-none" />
       )}
 
       {/* Node body */}
