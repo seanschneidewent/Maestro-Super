@@ -1,0 +1,55 @@
+import { memo } from 'react';
+import { Handle, Position, NodeProps } from 'reactflow';
+import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import type { ProjectNodeData } from '../types';
+
+function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
+  const { name, disciplineCount, onExpand, isExpanded } = data;
+
+  return (
+    <div className="relative group">
+      {/* Glow effect */}
+      <div className="absolute inset-0 rounded-xl bg-cyan-400/20 blur-xl group-hover:bg-cyan-400/30 transition-all" />
+
+      {/* Node body */}
+      <div
+        className="relative flex items-center gap-3 px-5 py-3 rounded-xl
+                   bg-slate-800 border-2 border-cyan-400/60
+                   shadow-lg shadow-cyan-900/30
+                   hover:border-cyan-400 hover:shadow-cyan-400/20
+                   transition-all duration-200 cursor-pointer min-w-[180px]"
+        onClick={onExpand}
+      >
+        <div className="p-2 rounded-lg bg-cyan-400/10">
+          <Layers size={20} className="text-cyan-400" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-100 truncate">{name}</p>
+          <p className="text-xs text-slate-400">
+            {disciplineCount} discipline{disciplineCount !== 1 ? 's' : ''}
+          </p>
+        </div>
+
+        <button
+          className="p-1 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
+        >
+          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+      </div>
+
+      {/* Output handle */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!w-3 !h-3 !bg-cyan-400 !border-2 !border-slate-800"
+      />
+    </div>
+  );
+}
+
+export const ProjectNode = memo(ProjectNodeComponent);

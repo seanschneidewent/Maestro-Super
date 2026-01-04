@@ -15,6 +15,7 @@ interface SetupState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
   activeTool: 'select' | 'rect' | 'text';
+  expandedNodes: string[];  // Mind map expanded state
 }
 
 interface SetupModeProps {
@@ -46,6 +47,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   };
   const setActiveTool = (tool: 'select' | 'rect' | 'text') => {
     setSetupState(prev => ({ ...prev, activeTool: tool }));
+  };
+  const expandedNodes = setupState.expandedNodes;
+  const setExpandedNodes = (nodes: string[]) => {
+    setSetupState(prev => ({ ...prev, expandedNodes: nodes }));
   };
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -820,6 +825,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 refreshTrigger={hierarchyRefresh}
                 onNavigateToPage={handleNavigateToPage}
                 onHighlightPointer={handleHighlightPointer}
+                expandedNodes={expandedNodes}
+                setExpandedNodes={setExpandedNodes}
               />
            </div>
         </div>

@@ -16,6 +16,7 @@ interface SetupState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
   activeTool: 'select' | 'rect' | 'text';
+  expandedNodes: string[];
 }
 
 const App: React.FC = () => {
@@ -35,6 +36,7 @@ const App: React.FC = () => {
     selectedFileId: null,
     selectedPointerId: null,
     activeTool: 'select',
+    expandedNodes: [],
   });
 
   // Check for existing session on mount

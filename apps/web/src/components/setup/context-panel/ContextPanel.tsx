@@ -1,4 +1,4 @@
-import { ContextMindMap } from '../ContextMindMap';
+import { ContextMindMap } from '../mind-map';
 import { DisciplineDetail } from './DisciplineDetail';
 import { PageDetail } from './PageDetail';
 import { PointerDetail } from './PointerDetail';
@@ -19,6 +19,8 @@ interface ContextPanelProps {
   refreshTrigger?: number;
   onNavigateToPage: (pageId: string) => void;
   onHighlightPointer?: (pointerId: string) => void;
+  expandedNodes: string[];
+  setExpandedNodes: (nodes: string[]) => void;
 }
 
 export function ContextPanel({
@@ -30,6 +32,8 @@ export function ContextPanel({
   refreshTrigger,
   onNavigateToPage,
   onHighlightPointer,
+  expandedNodes,
+  setExpandedNodes,
 }: ContextPanelProps) {
   // Get data for current view from hierarchy
   const getDiscipline = (id: string): DisciplineInHierarchy | undefined => {
@@ -69,6 +73,8 @@ export function ContextPanel({
         projectId={projectId}
         activePageId={activePageId}
         refreshTrigger={refreshTrigger}
+        expandedNodes={expandedNodes}
+        setExpandedNodes={setExpandedNodes}
         onDisciplineClick={(disciplineId) => {
           setPanelView({ type: 'discipline', disciplineId });
         }}
@@ -76,13 +82,12 @@ export function ContextPanel({
           setPanelView({ type: 'page', pageId, disciplineId });
           onNavigateToPage(pageId);
         }}
-        onPointerClick={(pointerId, pageId) => {
-          const disc = getDisciplineForPage(pageId);
+        onPointerClick={(pointerId, pageId, disciplineId) => {
           setPanelView({
             type: 'pointer',
             pointerId,
             pageId,
-            disciplineId: disc?.id || '',
+            disciplineId,
           });
           onNavigateToPage(pageId);
           onHighlightPointer?.(pointerId);
