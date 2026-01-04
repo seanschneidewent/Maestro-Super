@@ -28,8 +28,9 @@ def extract_pages_from_trace(trace: list[dict]) -> list[dict]:
     """
     Extract ordered page sequence from agent trace.
 
-    Looks for select_pages and select_pointers tool results to build
-    an ordered list of pages with their associated pointers.
+    Uses tool_call inputs (not tool_results) to preserve the agent's intended
+    page ordering. The tool_result from select_pages doesn't preserve order
+    because the SQL query uses .in_() which returns arbitrary order.
 
     Returns:
         List of dicts: [{"page_id": str, "pointers": [{"pointer_id": str}, ...]}]
@@ -38,30 +39,40 @@ def extract_pages_from_trace(trace: list[dict]) -> list[dict]:
     pages_seen: dict[str, list[dict]] = {}  # page_id -> list of pointer dicts
     page_order: list[str] = []  # Maintains insertion order
 
+    # Build a map of pointer_id -> page_id from tool_results (for select_pointers)
+    pointer_to_page: dict[str, str] = {}
     for step in trace:
-        if step.get("type") != "tool_result":
+        if step.get("type") == "tool_result" and step.get("tool") == "select_pointers":
+            result = step.get("result", {})
+            if isinstance(result, dict):
+                for pointer in result.get("pointers", []):
+                    pointer_id = pointer.get("pointer_id")
+                    page_id = pointer.get("page_id")
+                    if pointer_id and page_id:
+                        pointer_to_page[pointer_id] = page_id
+
+    # Process tool_calls to get the agent's intended ordering
+    for step in trace:
+        if step.get("type") != "tool_call":
             continue
 
         tool = step.get("tool")
-        result = step.get("result", {})
+        tool_input = step.get("input", {})
 
-        if not isinstance(result, dict):
+        if not isinstance(tool_input, dict):
             continue
 
         if tool == "select_pages":
-            # select_pages returns {"pages": [{"page_id": ..., ...}]}
-            for page in result.get("pages", []):
-                page_id = page.get("page_id")
+            # Use the agent's page_ids input order (not the scrambled result order)
+            for page_id in tool_input.get("page_ids", []):
                 if page_id and page_id not in pages_seen:
                     pages_seen[page_id] = []
                     page_order.append(page_id)
 
         elif tool == "select_pointers":
-            # select_pointers returns {"selected_pointer_ids": [...], "pointers": [...]}
-            # Each pointer has page_id, so we group pointers by page
-            for pointer in result.get("pointers", []):
-                page_id = pointer.get("page_id")
-                pointer_id = pointer.get("pointer_id")
+            # Process pointers in input order, look up their page_ids
+            for pointer_id in tool_input.get("pointer_ids", []):
+                page_id = pointer_to_page.get(pointer_id)
                 if not page_id or not pointer_id:
                     continue
 

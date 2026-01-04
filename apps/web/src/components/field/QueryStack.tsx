@@ -102,7 +102,7 @@ export function QueryStack({ queries, activeQueryId, onSelectQuery }: QueryStack
         >
           <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center">
             <span className="text-[10px] font-medium text-slate-500">
-              {query.sequenceOrder ?? '?'}
+              {query.pages?.length ?? 0}
             </span>
           </div>
           <span className="text-xs font-medium text-slate-600 truncate max-w-[200px]">
