@@ -1,4 +1,4 @@
-import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG } from './types';
+import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG, NODE_DIMENSIONS } from './types';
 import type { ProjectHierarchy } from '../../../types';
 
 interface LayoutCallbacks {
@@ -109,15 +109,19 @@ export function layoutHierarchy(
   const projectId = `project-${hierarchy.name}`;
   const isProjectExpanded = expandedNodes.has(projectId);
 
-  // Project center position (for SVG lines)
-  const projectCenterX = config.centerX;
-  const projectCenterY = config.centerY;
+  // Project node position (top-left corner at origin)
+  const projectPosX = config.centerX;
+  const projectPosY = config.centerY;
+
+  // Project VISUAL CENTER (for SVG lines) - offset by half dimensions
+  const projectVisualCenterX = projectPosX + NODE_DIMENSIONS.project.width / 2;
+  const projectVisualCenterY = projectPosY + NODE_DIMENSIONS.project.height / 2;
 
   // --- Project Node (center) ---
   nodes.push({
     id: projectId,
     type: 'project',
-    position: { x: projectCenterX, y: projectCenterY },
+    position: { x: projectPosX, y: projectPosY },
     data: {
       type: 'project',
       id: projectId,
@@ -137,15 +141,23 @@ export function layoutHierarchy(
   // With N disciplines, each gets 360/N degrees of arc
   const n = hierarchy.disciplines.length;
   const radius = config.levelRadius[1];
-  const cx = config.centerX;  // Center X (0)
-  const cy = config.centerY;  // Center Y (0)
+
+  // The center point for the radial layout is the PROJECT'S VISUAL CENTER
+  const cx = projectVisualCenterX;
+  const cy = projectVisualCenterY;
+
+  // Discipline node half-dimensions for centering
+  const discHalfW = NODE_DIMENSIONS.discipline.width / 2;
+  const discHalfH = NODE_DIMENSIONS.discipline.height / 2;
 
   // Pre-calculate all positions with EXACT equal angles
   const disciplinePositions: Array<{
     discipline: typeof hierarchy.disciplines[0];
     angle: number;
-    x: number;
-    y: number;
+    visualCenterX: number;  // Where the line should END (discipline visual center)
+    visualCenterY: number;
+    nodeX: number;  // Where to place the node (top-left)
+    nodeY: number;
   }> = [];
 
   for (let i = 0; i < n; i++) {
@@ -154,20 +166,26 @@ export function layoutHierarchy(
     // Each step is (2π / n) radians = (360 / n) degrees
     const angleRad = -Math.PI / 2 + (i * 2 * Math.PI / n);
 
-    // Position on circle: x = cx + r*cos(θ), y = cy + r*sin(θ)
-    const x = cx + radius * Math.cos(angleRad);
-    const y = cy + radius * Math.sin(angleRad);
+    // Visual center on circle: this is where the MIDDLE of the discipline node should be
+    const visualCenterX = cx + radius * Math.cos(angleRad);
+    const visualCenterY = cy + radius * Math.sin(angleRad);
+
+    // Node position is offset so that visual center aligns with circle
+    const nodeX = visualCenterX - discHalfW;
+    const nodeY = visualCenterY - discHalfH;
 
     disciplinePositions.push({
       discipline: hierarchy.disciplines[i],
       angle: angleRad,
-      x,
-      y,
+      visualCenterX,
+      visualCenterY,
+      nodeX,
+      nodeY,
     });
   }
 
   // Now create nodes and lines using the calculated positions
-  disciplinePositions.forEach(({ discipline, angle, x, y }, discIndex) => {
+  disciplinePositions.forEach(({ discipline, angle, visualCenterX, visualCenterY, nodeX, nodeY }, discIndex) => {
     const discMidAngle = angle;
     const angleStep = (2 * Math.PI) / n;
 
@@ -175,9 +193,9 @@ export function layoutHierarchy(
     const sliceStartAngle = discMidAngle - angleStep / 2;
     const sliceEndAngle = discMidAngle + angleStep / 2;
 
-    // Use pre-calculated position
-    const discX = x;
-    const discY = y;
+    // Position for the node (top-left corner)
+    const discX = nodeX;
+    const discY = nodeY;
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
@@ -210,12 +228,13 @@ export function layoutHierarchy(
       2
     ));
 
-    // SVG line: project center → discipline position
+    // SVG line: project VISUAL CENTER → discipline VISUAL CENTER
+    // This ensures lines appear at exactly equal angles
     lines.push({
-      x1: projectCenterX,
-      y1: projectCenterY,
-      x2: discX,
-      y2: discY,
+      x1: projectVisualCenterX,
+      y1: projectVisualCenterY,
+      x2: visualCenterX,
+      y2: visualCenterY,
       color: 'rgba(100, 116, 139, 0.5)', // Subtle slate color
       width: 2,
     });
