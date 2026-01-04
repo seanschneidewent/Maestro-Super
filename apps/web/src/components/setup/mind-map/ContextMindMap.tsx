@@ -108,11 +108,12 @@ function ContextMindMapInner({
     setEdges(layoutEdges);
 
     // Use multiple requestAnimationFrame + setTimeout for reliable fitView after ReactFlow positions nodes
+    // 400ms delay needed for large expansions (31+ page nodes)
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         setTimeout(() => {
-          fitView({ padding: 0.1, duration: 400, minZoom: 0.2, maxZoom: 1.5 });
-        }, 200);
+          fitView({ padding: 0.15, duration: 300, minZoom: 0.1, maxZoom: 1.5 });
+        }, 400);
       });
     });
   }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges, fitView]);
