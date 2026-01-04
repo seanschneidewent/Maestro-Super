@@ -140,11 +140,15 @@ export function layoutHierarchy(
   }
 
   // --- Calculate angular positions for disciplines ---
-  // Use equal angular spacing for disciplines (even distribution around circle)
-  const disciplineCount = hierarchy.disciplines.length;
-  const fullCircle = Math.PI * 2;
-  const anglePerDiscipline = fullCircle / disciplineCount;
-  const startAngle = -Math.PI / 2; // Start from top
+  // Sort disciplines alphabetically for consistent ordering
+  const sortedDisciplines = [...hierarchy.disciplines].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName)
+  );
+
+  // Equal angular spacing: 360° / count
+  const disciplineCount = sortedDisciplines.length;
+  const angleStep = (Math.PI * 2) / disciplineCount;
+  const startAngle = -Math.PI / 2; // Start from top (12 o'clock)
 
   // Discipline node offset for centering
   const discOffset = {
@@ -152,13 +156,14 @@ export function layoutHierarchy(
     y: NODE_DIMENSIONS.discipline.height / 2,
   };
 
-  hierarchy.disciplines.forEach((discipline, discIndex) => {
-    // Equal angular spacing: each discipline at index * (360/count) degrees
-    const discMidAngle = startAngle + (discIndex * anglePerDiscipline);
+  sortedDisciplines.forEach((discipline, discIndex) => {
+    // Calculate angle: start + (index * step)
+    // This places disciplines evenly around the circle
+    const discMidAngle = startAngle + (discIndex * angleStep);
 
     // Allocate angular slice for children (pages/pointers within this discipline)
-    const sliceStartAngle = discMidAngle - anglePerDiscipline / 2;
-    const sliceEndAngle = discMidAngle + anglePerDiscipline / 2;
+    const sliceStartAngle = discMidAngle - angleStep / 2;
+    const sliceEndAngle = discMidAngle + angleStep / 2;
 
     // Calculate discipline CENTER position (for SVG lines)
     const discCenterX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
