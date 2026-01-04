@@ -49,7 +49,7 @@ export function QueryStack({ queries, activeQueryId, onSelectQuery }: QueryStack
   const hasMoreHistory = historyQueries.length > maxCollapsedHistory
 
   return (
-    <div className="absolute bottom-20 left-4 z-30 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
       {/* === UPPER SECTION: Query History === */}
       {historyQueries.length > 0 && (
         <div className="flex flex-col gap-1">

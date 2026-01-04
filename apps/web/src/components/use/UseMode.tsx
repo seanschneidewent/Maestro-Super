@@ -308,25 +308,27 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </button>
         )}
 
-        {/* Query stack - bottom left (shows previous queries in session) */}
-        {/* Always visible when there are queries, even during streaming */}
-        {sessionQueries.length > 0 && (
-          <QueryStack
-            queries={sessionQueries}
-            activeQueryId={activeQueryId}
-            onSelectQuery={handleSelectQuery}
-          />
-        )}
+        {/* Bottom-left stack: QueryStack above, ThinkingBubble below */}
+        {(sessionQueries.length > 0 || isStreaming) && (
+          <div className="absolute bottom-20 left-4 z-30 flex flex-col gap-2">
+            {/* Query stack - shows previous queries and active query bubble */}
+            {sessionQueries.length > 0 && (
+              <QueryStack
+                queries={sessionQueries}
+                activeQueryId={activeQueryId}
+                onSelectQuery={handleSelectQuery}
+              />
+            )}
 
-        {/* Thinking bubble - only shows DURING streaming (thinking indicator) */}
-        {/* QueryStack's active bubble handles displaying completed responses */}
-        {isStreaming && (
-          <ThinkingBubble
-            thinkingText={thinkingText}
-            finalAnswer={finalAnswer}
-            isStreaming={isStreaming}
-            hasQueryStack={sessionQueries.length > 0}
-          />
+            {/* Thinking bubble - only shows DURING streaming, below QueryStack */}
+            {isStreaming && (
+              <ThinkingBubble
+                thinkingText={thinkingText}
+                finalAnswer={finalAnswer}
+                isStreaming={isStreaming}
+              />
+            )}
+          </div>
         )}
 
         {/* Query input bar - bottom center */}
