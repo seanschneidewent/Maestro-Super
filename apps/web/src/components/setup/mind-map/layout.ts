@@ -133,28 +133,51 @@ export function layoutHierarchy(
   }
 
   // --- Calculate angular positions for disciplines ---
-  // Sort disciplines alphabetically for consistent ordering
-  const sortedDisciplines = [...hierarchy.disciplines].sort((a, b) =>
-    a.displayName.localeCompare(b.displayName)
-  );
+  // CRITICAL: Equal angular spacing around the circle
+  // With N disciplines, each gets 360/N degrees of arc
+  const n = hierarchy.disciplines.length;
+  const radius = config.levelRadius[1];
+  const cx = config.centerX;  // Center X (0)
+  const cy = config.centerY;  // Center Y (0)
 
-  // Equal angular spacing: 360° / count
-  const disciplineCount = sortedDisciplines.length;
-  const angleStep = (Math.PI * 2) / disciplineCount;
-  const startAngle = -Math.PI / 2; // Start from top (12 o'clock)
+  // Pre-calculate all positions with EXACT equal angles
+  const disciplinePositions: Array<{
+    discipline: typeof hierarchy.disciplines[0];
+    angle: number;
+    x: number;
+    y: number;
+  }> = [];
 
-  sortedDisciplines.forEach((discipline, discIndex) => {
-    // Calculate angle: start + (index * step)
-    // This places disciplines evenly around the circle
-    const discMidAngle = startAngle + (discIndex * angleStep);
+  for (let i = 0; i < n; i++) {
+    // Angle in radians: start at top (-90°) and go clockwise
+    // -Math.PI/2 = -90° = top of circle
+    // Each step is (2π / n) radians = (360 / n) degrees
+    const angleRad = -Math.PI / 2 + (i * 2 * Math.PI / n);
+
+    // Position on circle: x = cx + r*cos(θ), y = cy + r*sin(θ)
+    const x = cx + radius * Math.cos(angleRad);
+    const y = cy + radius * Math.sin(angleRad);
+
+    disciplinePositions.push({
+      discipline: hierarchy.disciplines[i],
+      angle: angleRad,
+      x,
+      y,
+    });
+  }
+
+  // Now create nodes and lines using the calculated positions
+  disciplinePositions.forEach(({ discipline, angle, x, y }, discIndex) => {
+    const discMidAngle = angle;
+    const angleStep = (2 * Math.PI) / n;
 
     // Allocate angular slice for children (pages/pointers within this discipline)
     const sliceStartAngle = discMidAngle - angleStep / 2;
     const sliceEndAngle = discMidAngle + angleStep / 2;
 
-    // Calculate discipline position on the circle
-    const discX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
-    const discY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
+    // Use pre-calculated position
+    const discX = x;
+    const discY = y;
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
