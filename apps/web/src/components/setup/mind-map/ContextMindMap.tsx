@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect } from 'react';
+import { useCallback, useMemo, useEffect, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -9,13 +9,43 @@ import ReactFlow, {
   ReactFlowProvider,
   useReactFlow,
   ConnectionMode,
+  useViewport,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
 import { ProjectNode, DisciplineNode, PageNode, PointerNode } from './nodes';
-import { layoutHierarchy, getInitialExpandedState } from './layout';
+import { layoutHierarchy, getInitialExpandedState, ConnectionLine } from './layout';
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
 import { MindMapSkeleton } from '../../ui/Skeleton';
+
+// Custom SVG layer for connection lines
+function ConnectionLinesLayer({ lines }: { lines: ConnectionLine[] }) {
+  const { x, y, zoom } = useViewport();
+
+  if (lines.length === 0) return null;
+
+  return (
+    <svg
+      className="absolute inset-0 pointer-events-none"
+      style={{ overflow: 'visible' }}
+    >
+      <g transform={`translate(${x}, ${y}) scale(${zoom})`}>
+        {lines.map((line, i) => (
+          <line
+            key={i}
+            x1={line.x1}
+            y1={line.y1}
+            x2={line.x2}
+            y2={line.y2}
+            stroke={line.color}
+            strokeWidth={line.width / zoom}
+            strokeLinecap="round"
+          />
+        ))}
+      </g>
+    </svg>
+  );
+}
 
 // Register custom node types
 const nodeTypes: NodeTypes = {
@@ -57,6 +87,7 @@ function ContextMindMapInner({
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [lines, setLines] = useState<ConnectionLine[]>([]);
 
   // Fetch hierarchy data
   const { data: hierarchy, isLoading, error, refetch } = useHierarchy(projectId);
@@ -114,7 +145,7 @@ function ContextMindMapInner({
     if (!hierarchy) return;
 
     const expandedSet = new Set(expandedNodes);
-    const { nodes: layoutNodes, edges: layoutEdges } = layoutHierarchy(hierarchy, {
+    const { nodes: layoutNodes, edges: layoutEdges, lines: layoutLines } = layoutHierarchy(hierarchy, {
       expandedNodes: expandedSet,
       activePageId,
       callbacks,
@@ -122,6 +153,7 @@ function ContextMindMapInner({
 
     setNodes(layoutNodes);
     setEdges(layoutEdges);
+    setLines(layoutLines);
 
     // Fit view after layout updates
     setTimeout(() => {
@@ -157,7 +189,7 @@ function ContextMindMapInner({
   }
 
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -178,6 +210,8 @@ function ContextMindMapInner({
         zoomOnScroll
         className="bg-transparent"
       >
+        {/* Custom SVG lines layer - renders behind nodes */}
+        <ConnectionLinesLayer lines={lines} />
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}

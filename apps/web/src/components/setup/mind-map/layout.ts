@@ -1,4 +1,4 @@
-import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG } from './types';
+import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG, NODE_DIMENSIONS } from './types';
 import type { ProjectHierarchy } from '../../../types';
 
 interface LayoutCallbacks {
@@ -16,9 +16,19 @@ interface LayoutOptions {
   callbacks: LayoutCallbacks;
 }
 
+export interface ConnectionLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+}
+
 interface LayoutResult {
   nodes: MindMapNode[];
   edges: MindMapEdge[];
+  lines: ConnectionLine[];  // For custom SVG rendering
 }
 
 /**
@@ -94,15 +104,27 @@ export function layoutHierarchy(
 
   const nodes: MindMapNode[] = [];
   const edges: MindMapEdge[] = [];
+  const lines: ConnectionLine[] = [];
 
   const projectId = `project-${hierarchy.name}`;
   const isProjectExpanded = expandedNodes.has(projectId);
 
-  // --- Project Node (center) ---
+  // Project center position (for SVG lines)
+  const projectCenterX = config.centerX;
+  const projectCenterY = config.centerY;
+
+  // --- Project Node (center) - offset by half dimensions so node is centered ---
+  const projectOffset = {
+    x: NODE_DIMENSIONS.project.width / 2,
+    y: NODE_DIMENSIONS.project.height / 2,
+  };
   nodes.push({
     id: projectId,
     type: 'project',
-    position: { x: config.centerX, y: config.centerY },
+    position: {
+      x: projectCenterX - projectOffset.x,
+      y: projectCenterY - projectOffset.y
+    },
     data: {
       type: 'project',
       id: projectId,
@@ -114,7 +136,7 @@ export function layoutHierarchy(
   });
 
   if (!isProjectExpanded || hierarchy.disciplines.length === 0) {
-    return { nodes, edges };
+    return { nodes, edges, lines };
   }
 
   // --- Calculate angular positions for disciplines ---
@@ -124,6 +146,12 @@ export function layoutHierarchy(
   const anglePerDiscipline = fullCircle / disciplineCount;
   const startAngle = -Math.PI / 2; // Start from top
 
+  // Discipline node offset for centering
+  const discOffset = {
+    x: NODE_DIMENSIONS.discipline.width / 2,
+    y: NODE_DIMENSIONS.discipline.height / 2,
+  };
+
   hierarchy.disciplines.forEach((discipline, discIndex) => {
     // Equal angular spacing: each discipline at index * (360/count) degrees
     const discMidAngle = startAngle + (discIndex * anglePerDiscipline);
@@ -132,18 +160,22 @@ export function layoutHierarchy(
     const sliceStartAngle = discMidAngle - anglePerDiscipline / 2;
     const sliceEndAngle = discMidAngle + anglePerDiscipline / 2;
 
-    // Position discipline node at equal intervals
-    const discX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
-    const discY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
+    // Calculate discipline CENTER position (for SVG lines)
+    const discCenterX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
+    const discCenterY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
     const totalPointers = discipline.pages.reduce((sum, p) => sum + p.pointers.length, 0);
 
+    // Position node offset by half dimensions so center aligns with calculated position
     nodes.push({
       id: disciplineNodeId,
       type: 'discipline',
-      position: { x: discX, y: discY },
+      position: {
+        x: discCenterX - discOffset.x,
+        y: discCenterY - discOffset.y
+      },
       data: {
         type: 'discipline',
         id: discipline.id,
@@ -158,13 +190,23 @@ export function layoutHierarchy(
       },
     });
 
-    // Edge: project → discipline
+    // Edge: project → discipline (for ReactFlow)
     edges.push(createEdge(
       projectId,
       disciplineNodeId,
       discipline.processed ? '#f59e0b' : '#475569',
       2
     ));
+
+    // SVG line: project center → discipline center
+    lines.push({
+      x1: projectCenterX,
+      y1: projectCenterY,
+      x2: discCenterX,
+      y2: discCenterY,
+      color: discipline.processed ? 'rgba(245, 158, 11, 0.3)' : 'rgba(71, 85, 105, 0.3)',
+      width: 2,
+    });
 
     // --- Pages within discipline ---
     if (isDisciplineExpanded && discipline.pages.length > 0) {
@@ -258,7 +300,7 @@ export function layoutHierarchy(
     }
   });
 
-  return { nodes, edges };
+  return { nodes, edges, lines };
 }
 
 /**
