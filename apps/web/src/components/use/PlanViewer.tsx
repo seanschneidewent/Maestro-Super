@@ -30,6 +30,59 @@ interface PlanViewerProps {
 // Cache for rendered page images
 const pageImageCache = new Map<string, PageImage>();
 
+// Track in-flight loads to avoid duplicate fetches
+const loadingPromises = new Map<string, Promise<PageImage | null>>();
+
+// Reusable function to load a page image (used by both prefetch and current-page loading)
+async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
+  // Check cache first
+  const cached = pageImageCache.get(page.pageId);
+  if (cached) return cached;
+
+  // Check if already loading
+  const existing = loadingPromises.get(page.pageId);
+  if (existing) return existing;
+
+  // Start loading
+  const promise = (async () => {
+    try {
+      const blob = await downloadFile(page.filePath);
+      const arrayBuffer = await blob.arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      const pdfPage = await pdf.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d')!;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await pdfPage.render({
+        canvasContext: context,
+        viewport: viewport,
+      }).promise;
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const pageImage: PageImage = {
+        dataUrl,
+        width: viewport.width / RENDER_SCALE,
+        height: viewport.height / RENDER_SCALE,
+      };
+
+      pageImageCache.set(page.pageId, pageImage);
+      return pageImage;
+    } catch (err) {
+      console.error('Failed to load page:', page.pageId, err);
+      return null;
+    } finally {
+      loadingPromises.delete(page.pageId);
+    }
+  })();
+
+  loadingPromises.set(page.pageId, promise);
+  return promise;
+}
+
 export const PlanViewer: React.FC<PlanViewerProps> = ({
   pageId,
   onPointerClick,
@@ -128,56 +181,39 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   const [agentPageImage, setAgentPageImage] = useState<PageImage | null>(null);
   const [isLoadingAgentPage, setIsLoadingAgentPage] = useState(false);
 
-  // Load agent page image when currentAgentPage changes
+  // Prefetch ALL pages when selectedPages changes (eager loading)
+  useEffect(() => {
+    if (selectedPages.length === 0) return;
+
+    // Load all pages in parallel
+    const pagesToLoad = selectedPages.filter(p => !pageImageCache.has(p.pageId));
+    if (pagesToLoad.length > 0) {
+      Promise.all(pagesToLoad.map(page => loadPageImage(page)));
+    }
+  }, [selectedPages]);
+
+  // Load current agent page image when it changes (shows immediately from cache or loads)
   useEffect(() => {
     if (!currentAgentPage) {
       setAgentPageImage(null);
       return;
     }
 
-    // Check cache first
+    // Check cache first (may already be prefetched)
     const cached = pageImageCache.get(currentAgentPage.pageId);
     if (cached) {
       setAgentPageImage(cached);
       return;
     }
 
-    const loadPage = async () => {
-      setIsLoadingAgentPage(true);
-      try {
-        const blob = await downloadFile(currentAgentPage.filePath);
-        const arrayBuffer = await blob.arrayBuffer();
-        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-        const pdfPage = await pdf.getPage(1);
-        const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
-
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d')!;
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        await pdfPage.render({
-          canvasContext: context,
-          viewport: viewport,
-        }).promise;
-
-        const dataUrl = canvas.toDataURL('image/png');
-        const pageImage: PageImage = {
-          dataUrl,
-          width: viewport.width / RENDER_SCALE,
-          height: viewport.height / RENDER_SCALE,
-        };
-
-        pageImageCache.set(currentAgentPage.pageId, pageImage);
+    // Load the current page (will also be picked up by prefetch, but we track loading state here)
+    setIsLoadingAgentPage(true);
+    loadPageImage(currentAgentPage).then(pageImage => {
+      if (pageImage) {
         setAgentPageImage(pageImage);
-      } catch (err) {
-        console.error('Failed to load agent page:', currentAgentPage.pageId, err);
-      } finally {
-        setIsLoadingAgentPage(false);
       }
-    };
-
-    loadPage();
+      setIsLoadingAgentPage(false);
+    });
   }, [currentAgentPage?.pageId, currentAgentPage?.filePath]);
 
   // Measure container size
