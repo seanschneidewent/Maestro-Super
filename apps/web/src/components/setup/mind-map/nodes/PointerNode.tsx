@@ -23,7 +23,7 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
                    bg-slate-700 border border-violet-400/30
                    hover:border-violet-400/60 hover:bg-slate-700/80
                    shadow-sm shadow-violet-900/10
-                   transition-all duration-200 cursor-pointer max-w-[140px]"
+                   transition-all duration-200 cursor-pointer pointer-events-auto max-w-[140px]"
         onClick={onClick}
       >
         <Crosshair size={10} className="text-violet-400 shrink-0" />

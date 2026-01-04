@@ -23,7 +23,7 @@ function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
                    bg-slate-800 border-2 border-cyan-400/60
                    shadow-lg shadow-cyan-900/30
                    hover:border-cyan-400 hover:shadow-cyan-400/20
-                   transition-all duration-200 cursor-pointer"
+                   transition-all duration-200 cursor-pointer pointer-events-auto"
         onClick={onExpand}
       >
         <div className="p-2 rounded-lg bg-cyan-400/10">

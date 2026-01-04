@@ -172,9 +172,9 @@ function ContextMindMapInner({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        panOnScroll
-        panOnDrag={[1, 2]}
-        zoomOnScroll
+        panOnScroll={false}
+        panOnDrag={true}
+        zoomOnScroll={true}
         className="bg-transparent"
       >
         <Background

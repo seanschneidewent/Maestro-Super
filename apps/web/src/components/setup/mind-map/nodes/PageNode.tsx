@@ -46,7 +46,7 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
       <div
         className={`relative flex items-center gap-2 px-3 py-2 rounded-lg
                    bg-slate-800 border shadow-md
-                   transition-all duration-200 cursor-pointer
+                   transition-all duration-200 cursor-pointer pointer-events-auto
                    ${isActive
                      ? 'border-cyan-400 shadow-cyan-900/30'
                      : 'border-slate-600/50 hover:border-slate-500 shadow-slate-900/20'
