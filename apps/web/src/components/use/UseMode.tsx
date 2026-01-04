@@ -7,7 +7,7 @@ import { ModeToggle } from '../ModeToggle';
 import { api, PointerResponse } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import {
-  ThinkingBubble,
+  ActiveQueryBubble,
   QueryInput,
   SessionControls,
   useFieldStream,
@@ -308,8 +308,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </button>
         )}
 
-        {/* Query stack - positioned independently, always at same spot */}
-        {sessionQueries.length > 0 && (
+        {/* Query history stack - shows previous queries (not the active one) */}
+        {sessionQueries.length > 1 && (
           <div className="absolute bottom-32 left-4 z-30">
             <QueryStack
               queries={sessionQueries}
@@ -319,13 +319,19 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </div>
         )}
 
-        {/* Thinking bubble - fixed position below QueryStack, doesn't affect its layout */}
-        {isStreaming && (
+        {/* Active query bubble - shows streaming state, then transforms into completed response */}
+        {(isStreaming || sessionQueries.length > 0) && (
           <div className="absolute bottom-20 left-4 z-30">
-            <ThinkingBubble
-              thinkingText={thinkingText}
-              finalAnswer={finalAnswer}
+            <ActiveQueryBubble
               isStreaming={isStreaming}
+              thinkingText={thinkingText}
+              displayTitle={displayTitle}
+              finalAnswer={finalAnswer}
+              activeQuery={
+                activeQueryId
+                  ? sessionQueries.find(q => q.id === activeQueryId) ?? null
+                  : sessionQueries[sessionQueries.length - 1] ?? null
+              }
             />
           </div>
         )}
