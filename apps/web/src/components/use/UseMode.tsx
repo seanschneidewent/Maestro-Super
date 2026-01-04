@@ -308,26 +308,25 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </button>
         )}
 
-        {/* Bottom-left stack: QueryStack above, ThinkingBubble below */}
-        {(sessionQueries.length > 0 || isStreaming) && (
-          <div className="absolute bottom-20 left-4 z-30 flex flex-col gap-2">
-            {/* Query stack - shows previous queries and active query bubble */}
-            {sessionQueries.length > 0 && (
-              <QueryStack
-                queries={sessionQueries}
-                activeQueryId={activeQueryId}
-                onSelectQuery={handleSelectQuery}
-              />
-            )}
+        {/* Query stack - positioned independently, always at same spot */}
+        {sessionQueries.length > 0 && (
+          <div className="absolute bottom-32 left-4 z-30">
+            <QueryStack
+              queries={sessionQueries}
+              activeQueryId={activeQueryId}
+              onSelectQuery={handleSelectQuery}
+            />
+          </div>
+        )}
 
-            {/* Thinking bubble - only shows DURING streaming, below QueryStack */}
-            {isStreaming && (
-              <ThinkingBubble
-                thinkingText={thinkingText}
-                finalAnswer={finalAnswer}
-                isStreaming={isStreaming}
-              />
-            )}
+        {/* Thinking bubble - fixed position below QueryStack, doesn't affect its layout */}
+        {isStreaming && (
+          <div className="absolute bottom-20 left-4 z-30">
+            <ThinkingBubble
+              thinkingText={thinkingText}
+              finalAnswer={finalAnswer}
+              isStreaming={isStreaming}
+            />
           </div>
         )}
 
