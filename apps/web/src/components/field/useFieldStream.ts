@@ -289,15 +289,43 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             }
 
             if (result?.pages && Array.isArray(result.pages)) {
-              const newPages: AgentSelectedPage[] = result.pages
-                .filter((p) => p.page_id && p.file_path)
-                .map((p) => ({
-                  pageId: p.page_id,
-                  pageName: p.page_name || 'Unknown',
-                  filePath: p.file_path,
-                  disciplineId: p.discipline_id || '',
-                  pointers: [], // No pointers for select_pages
-                }))
+              // Find the corresponding tool_call to get the agent's intended page order
+              // (the result.pages order is scrambled by the SQL .in_() query)
+              let orderedPageIds: string[] | null = null
+              for (let i = agentMessage.trace.length - 1; i >= 0; i--) {
+                const step = agentMessage.trace[i]
+                if (step.type === 'tool_call' && step.tool === 'select_pages') {
+                  const input = step.input as { page_ids?: string[] }
+                  if (input?.page_ids) {
+                    orderedPageIds = input.page_ids
+                  }
+                  break
+                }
+              }
+
+              // Build a map of page_id -> page data for quick lookup
+              const pageDataMap = new Map<string, typeof result.pages[0]>()
+              for (const p of result.pages) {
+                if (p.page_id && p.file_path) {
+                  pageDataMap.set(p.page_id, p)
+                }
+              }
+
+              // Build pages in the agent's intended order
+              const newPages: AgentSelectedPage[] = []
+              const pageOrder = orderedPageIds || result.pages.map(p => p.page_id)
+              for (const pageId of pageOrder) {
+                const p = pageDataMap.get(pageId)
+                if (p) {
+                  newPages.push({
+                    pageId: p.page_id,
+                    pageName: p.page_name || 'Unknown',
+                    filePath: p.file_path,
+                    disciplineId: p.discipline_id || '',
+                    pointers: [], // No pointers for select_pages
+                  })
+                }
+              }
 
               // Merge with existing (avoid duplicates)
               const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
@@ -328,11 +356,35 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             }
 
             if (result?.pointers && Array.isArray(result.pointers)) {
-              // Group pointers by page
-              const pageMap = new Map<string, AgentSelectedPage>()
+              // Find the corresponding tool_call to get the agent's intended pointer order
+              let orderedPointerIds: string[] | null = null
+              for (let i = agentMessage.trace.length - 1; i >= 0; i--) {
+                const step = agentMessage.trace[i]
+                if (step.type === 'tool_call' && step.tool === 'select_pointers') {
+                  const input = step.input as { pointer_ids?: string[] }
+                  if (input?.pointer_ids) {
+                    orderedPointerIds = input.pointer_ids
+                  }
+                  break
+                }
+              }
 
+              // Build a map of pointer_id -> pointer data for quick lookup
+              const pointerDataMap = new Map<string, typeof result.pointers[0]>()
               for (const p of result.pointers) {
-                if (!p.page_id || !p.file_path) continue
+                if (p.pointer_id) {
+                  pointerDataMap.set(p.pointer_id, p)
+                }
+              }
+
+              // Group pointers by page, preserving the order from tool_call input
+              const pageMap = new Map<string, AgentSelectedPage>()
+              const pageOrder: string[] = []  // Track order pages are first encountered
+
+              const pointerOrder = orderedPointerIds || result.pointers.map(p => p.pointer_id)
+              for (const pointerId of pointerOrder) {
+                const p = pointerDataMap.get(pointerId)
+                if (!p || !p.page_id || !p.file_path) continue
 
                 let page = pageMap.get(p.page_id)
                 if (!page) {
@@ -344,6 +396,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                     pointers: [],
                   }
                   pageMap.set(p.page_id, page)
+                  pageOrder.push(p.page_id)
                 }
 
                 page.pointers.push({
@@ -356,10 +409,11 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 })
               }
 
-              // Merge with existing selected pages (avoid duplicates)
+              // Merge with existing selected pages (avoid duplicates), preserving order
               const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
-              const newPages = Array.from(pageMap.values()).filter(
-                (p) => !existingPageIds.has(p.pageId)
+              const newPages = pageOrder
+                .map(pageId => pageMap.get(pageId)!)
+                .filter((p) => !existingPageIds.has(p.pageId)
               )
 
               if (newPages.length > 0) {
