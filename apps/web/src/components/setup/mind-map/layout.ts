@@ -193,8 +193,8 @@ export function layoutHierarchy(
       y1: projectCenterY,
       x2: discX,
       y2: discY,
-      color: 'rgba(34, 211, 238, 0.6)', // Bright cyan for all lines
-      width: 3,
+      color: 'rgba(100, 116, 139, 0.5)', // Subtle slate color
+      width: 2,
     });
 
     // --- Pages within discipline ---
