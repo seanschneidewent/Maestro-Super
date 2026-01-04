@@ -210,6 +210,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
+    setSelectedPageId(null);  // Reset viewer to empty state
   };
 
   // Handle selecting a query from the QueryStack
