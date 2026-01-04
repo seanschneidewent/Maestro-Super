@@ -28,103 +28,14 @@ export interface ConnectionLine {
 interface LayoutResult {
   nodes: MindMapNode[];
   edges: MindMapEdge[];
-  lines: ConnectionLine[];  // For custom SVG rendering
+  lines: ConnectionLine[];
 }
 
 /**
- * Distributes items radially around a center point within an angular range.
- */
-function distributeRadially(
-  count: number,
-  centerX: number,
-  centerY: number,
-  radius: number,
-  startAngle: number,
-  endAngle: number
-): { x: number; y: number; angle: number }[] {
-  if (count === 0) return [];
-  if (count === 1) {
-    const midAngle = (startAngle + endAngle) / 2;
-    return [{
-      x: centerX + radius * Math.cos(midAngle),
-      y: centerY + radius * Math.sin(midAngle),
-      angle: midAngle,
-    }];
-  }
-
-  const positions: { x: number; y: number; angle: number }[] = [];
-  const angleStep = (endAngle - startAngle) / (count - 1);
-
-  for (let i = 0; i < count; i++) {
-    const angle = startAngle + i * angleStep;
-    positions.push({
-      x: centerX + radius * Math.cos(angle),
-      y: centerY + radius * Math.sin(angle),
-      angle,
-    });
-  }
-
-  return positions;
-}
-
-
-/**
- * Creates a straight line edge for radial connections
- */
-function createEdge(
-  sourceId: string,
-  targetId: string,
-  color: string,
-  width: number = 2
-): MindMapEdge {
-  return {
-    id: `e-${sourceId}-${targetId}`,
-    source: sourceId,
-    target: targetId,
-    type: 'straight',
-    style: {
-      stroke: color,
-      strokeWidth: width,
-      opacity: 0.4,
-    },
-    zIndex: 0, // Ensure edges render behind nodes
-  };
-}
-
-/**
- * Calculates the intersection point where a line from center at angle θ
- * crosses the boundary of a rectangle.
- */
-function getRectEdgePoint(
-  centerX: number,
-  centerY: number,
-  halfWidth: number,
-  halfHeight: number,
-  angle: number
-): { x: number; y: number } {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  // Avoid division by zero
-  const absCos = Math.abs(cos) < 0.0001 ? 0.0001 : Math.abs(cos);
-  const absSin = Math.abs(sin) < 0.0001 ? 0.0001 : Math.abs(sin);
-
-  // Distance to edge in each direction
-  const rX = halfWidth / absCos;
-  const rY = halfHeight / absSin;
-
-  // Take the minimum (whichever edge is hit first)
-  const r = Math.min(rX, rY);
-
-  return {
-    x: centerX + r * cos,
-    y: centerY + r * sin,
-  };
-}
-
-/**
- * Converts hierarchy data to positioned ReactFlow nodes and edges.
- * Uses radial layout with project at center and floating bezier edges.
+ * Simple radial layout:
+ * - Project center at origin (0, 0)
+ * - Discipline centers at radius R, equal angles
+ * - Lines from center to center, all same length
  */
 export function layoutHierarchy(
   hierarchy: ProjectHierarchy,
@@ -140,19 +51,25 @@ export function layoutHierarchy(
   const projectId = `project-${hierarchy.name}`;
   const isProjectExpanded = expandedNodes.has(projectId);
 
-  // Project node position (top-left corner at origin)
-  const projectPosX = config.centerX;
-  const projectPosY = config.centerY;
+  // ===========================================
+  // ORIGIN: The center of our radial layout
+  // ===========================================
+  const ORIGIN_X = 0;
+  const ORIGIN_Y = 0;
 
-  // Project VISUAL CENTER (for SVG lines) - offset by half dimensions
-  const projectVisualCenterX = projectPosX + NODE_DIMENSIONS.project.width / 2;
-  const projectVisualCenterY = projectPosY + NODE_DIMENSIONS.project.height / 2;
+  // ===========================================
+  // PROJECT NODE
+  // Position so its CENTER is at origin
+  // ===========================================
+  const projectWidth = NODE_DIMENSIONS.project.width;
+  const projectHeight = NODE_DIMENSIONS.project.height;
+  const projectNodeX = ORIGIN_X - projectWidth / 2;
+  const projectNodeY = ORIGIN_Y - projectHeight / 2;
 
-  // --- Project Node (center) ---
   nodes.push({
     id: projectId,
     type: 'project',
-    position: { x: projectPosX, y: projectPosY },
+    position: { x: projectNodeX, y: projectNodeY },
     data: {
       type: 'project',
       id: projectId,
@@ -167,76 +84,36 @@ export function layoutHierarchy(
     return { nodes, edges, lines };
   }
 
-  // --- Calculate angular positions for disciplines ---
-  // CRITICAL: Equal angular spacing around the circle
-  // With N disciplines, each gets 360/N degrees of arc
+  // ===========================================
+  // DISCIPLINE NODES
+  // All centers at radius R from origin
+  // Equal angles: i * (2π / n), starting at top
+  // ===========================================
   const n = hierarchy.disciplines.length;
   const radius = config.levelRadius[1];
+  const discWidth = NODE_DIMENSIONS.discipline.width;
+  const discHeight = NODE_DIMENSIONS.discipline.height;
 
-  // The center point for the radial layout is the PROJECT'S VISUAL CENTER
-  const cx = projectVisualCenterX;
-  const cy = projectVisualCenterY;
+  hierarchy.disciplines.forEach((discipline, i) => {
+    // Angle: start at top (-π/2), equal spacing
+    const angle = -Math.PI / 2 + (i * 2 * Math.PI / n);
 
-  // Discipline node half-dimensions for centering
-  const discHalfW = NODE_DIMENSIONS.discipline.width / 2;
-  const discHalfH = NODE_DIMENSIONS.discipline.height / 2;
+    // Discipline CENTER position (on the circle)
+    const discCenterX = ORIGIN_X + radius * Math.cos(angle);
+    const discCenterY = ORIGIN_Y + radius * Math.sin(angle);
 
-  // Pre-calculate all positions with EXACT equal angles
-  const disciplinePositions: Array<{
-    discipline: typeof hierarchy.disciplines[0];
-    angle: number;
-    visualCenterX: number;  // Where the line should END (discipline visual center)
-    visualCenterY: number;
-    nodeX: number;  // Where to place the node (top-left)
-    nodeY: number;
-  }> = [];
-
-  for (let i = 0; i < n; i++) {
-    // Angle in radians: start at top (-90°) and go clockwise
-    // -Math.PI/2 = -90° = top of circle
-    // Each step is (2π / n) radians = (360 / n) degrees
-    const angleRad = -Math.PI / 2 + (i * 2 * Math.PI / n);
-
-    // Visual center on circle: this is where the MIDDLE of the discipline node should be
-    const visualCenterX = cx + radius * Math.cos(angleRad);
-    const visualCenterY = cy + radius * Math.sin(angleRad);
-
-    // Node position is offset so that visual center aligns with circle
-    const nodeX = visualCenterX - discHalfW;
-    const nodeY = visualCenterY - discHalfH;
-
-    disciplinePositions.push({
-      discipline: hierarchy.disciplines[i],
-      angle: angleRad,
-      visualCenterX,
-      visualCenterY,
-      nodeX,
-      nodeY,
-    });
-  }
-
-  // Now create nodes and lines using the calculated positions
-  disciplinePositions.forEach(({ discipline, angle, visualCenterX, visualCenterY, nodeX, nodeY }, discIndex) => {
-    const discMidAngle = angle;
-    const angleStep = (2 * Math.PI) / n;
-
-    // Allocate angular slice for children (pages/pointers within this discipline)
-    const sliceStartAngle = discMidAngle - angleStep / 2;
-    const sliceEndAngle = discMidAngle + angleStep / 2;
-
-    // Position for the node (top-left corner)
-    const discX = nodeX;
-    const discY = nodeY;
+    // Node position (top-left, offset from center)
+    const discNodeX = discCenterX - discWidth / 2;
+    const discNodeY = discCenterY - discHeight / 2;
 
     const disciplineNodeId = discipline.id;
     const isDisciplineExpanded = expandedNodes.has(disciplineNodeId);
     const totalPointers = discipline.pages.reduce((sum, p) => sum + p.pointers.length, 0);
 
-    // Position node at calculated position (ReactFlow positions by top-left)
     nodes.push({
       id: disciplineNodeId,
       type: 'discipline',
-      position: { x: discX, y: discY },
+      position: { x: discNodeX, y: discNodeY },
       data: {
         type: 'discipline',
         id: discipline.id,
@@ -251,64 +128,59 @@ export function layoutHierarchy(
       },
     });
 
-    // Edge: project → discipline (for ReactFlow)
-    edges.push(createEdge(
-      projectId,
-      disciplineNodeId,
-      discipline.processed ? '#f59e0b' : '#475569',
-      2
-    ));
+    // ReactFlow edge (for interaction/selection if needed)
+    edges.push({
+      id: `e-${projectId}-${disciplineNodeId}`,
+      source: projectId,
+      target: disciplineNodeId,
+      type: 'straight',
+      style: {
+        stroke: discipline.processed ? '#f59e0b' : '#475569',
+        strokeWidth: 2,
+        opacity: 0.4,
+      },
+      zIndex: 0,
+    });
 
-    // SVG line: project EDGE → discipline EDGE (edge-to-edge connection)
-    // This ensures equal visible gap between node boundaries
-    const projectHalfW = NODE_DIMENSIONS.project.width / 2;
-    const projectHalfH = NODE_DIMENSIONS.project.height / 2;
-
-    // Project edge point (where line exits project node boundary)
-    const projectEdge = getRectEdgePoint(
-      projectVisualCenterX,
-      projectVisualCenterY,
-      projectHalfW,
-      projectHalfH,
-      angle // angle from project center to discipline
-    );
-
-    // Discipline edge point (where line enters discipline node boundary)
-    // Angle is reversed (π + angle) since we're coming FROM the project
-    const disciplineEdge = getRectEdgePoint(
-      visualCenterX,
-      visualCenterY,
-      discHalfW,
-      discHalfH,
-      angle + Math.PI // opposite direction
-    );
-
+    // SVG line: center-to-center (origin to discipline center)
+    // All lines have the same length (radius)
     lines.push({
-      x1: projectEdge.x,
-      y1: projectEdge.y,
-      x2: disciplineEdge.x,
-      y2: disciplineEdge.y,
-      color: 'rgba(100, 116, 139, 0.5)', // Subtle slate color
+      x1: ORIGIN_X,
+      y1: ORIGIN_Y,
+      x2: discCenterX,
+      y2: discCenterY,
+      color: 'rgba(100, 116, 139, 0.5)',
       width: 2,
     });
 
-    // --- Pages within discipline ---
+    // ===========================================
+    // PAGES (when discipline is expanded)
+    // ===========================================
     if (isDisciplineExpanded && discipline.pages.length > 0) {
-      const pageWeights = discipline.pages.map(page =>
-        expandedNodes.has(page.id) ? 1 + page.pointers.length : 1
-      );
-      const pageTotalWeight = pageWeights.reduce((a, b) => a + b, 0);
-      const sliceAngle = sliceEndAngle - sliceStartAngle;
+      const pageRadius = config.levelRadius[2];
+      const pageWidth = NODE_DIMENSIONS.page.width;
+      const pageHeight = NODE_DIMENSIONS.page.height;
 
-      let pageCurrentAngle = sliceStartAngle;
+      // Angular slice for this discipline's children
+      const angleStep = (2 * Math.PI) / n;
+      const sliceStart = angle - angleStep / 2;
+      const sliceEnd = angle + angleStep / 2;
 
+      // Distribute pages within slice
+      const pageCount = discipline.pages.length;
       discipline.pages.forEach((page, pageIndex) => {
-        const pageWeight = pageWeights[pageIndex];
-        const pageAllocatedAngle = (pageWeight / pageTotalWeight) * sliceAngle;
-        const pageMidAngle = pageCurrentAngle + pageAllocatedAngle / 2;
+        // Page angle within slice
+        const pageAngle = pageCount === 1
+          ? angle
+          : sliceStart + ((pageIndex + 0.5) / pageCount) * (sliceEnd - sliceStart);
 
-        const pageX = config.centerX + config.levelRadius[2] * Math.cos(pageMidAngle);
-        const pageY = config.centerY + config.levelRadius[2] * Math.sin(pageMidAngle);
+        // Page CENTER position
+        const pageCenterX = ORIGIN_X + pageRadius * Math.cos(pageAngle);
+        const pageCenterY = ORIGIN_Y + pageRadius * Math.sin(pageAngle);
+
+        // Node position (top-left)
+        const pageNodeX = pageCenterX - pageWidth / 2;
+        const pageNodeY = pageCenterY - pageHeight / 2;
 
         const pageNodeId = page.id;
         const isPageExpanded = expandedNodes.has(pageNodeId);
@@ -316,7 +188,7 @@ export function layoutHierarchy(
         nodes.push({
           id: pageNodeId,
           type: 'page',
-          position: { x: pageX, y: pageY },
+          position: { x: pageNodeX, y: pageNodeY },
           data: {
             type: 'page',
             id: page.id,
@@ -333,32 +205,49 @@ export function layoutHierarchy(
         });
 
         // Edge: discipline → page
-        edges.push(createEdge(
-          disciplineNodeId,
-          pageNodeId,
-          '#475569',
-          1.5
-        ));
+        edges.push({
+          id: `e-${disciplineNodeId}-${pageNodeId}`,
+          source: disciplineNodeId,
+          target: pageNodeId,
+          type: 'straight',
+          style: {
+            stroke: '#475569',
+            strokeWidth: 1.5,
+            opacity: 0.4,
+          },
+          zIndex: 0,
+        });
 
-        // --- Pointers within page ---
+        // ===========================================
+        // POINTERS (when page is expanded)
+        // ===========================================
         if (isPageExpanded && page.pointers.length > 0) {
-          const pointerPositions = distributeRadially(
-            page.pointers.length,
-            config.centerX,
-            config.centerY,
-            config.levelRadius[3],
-            pageCurrentAngle,
-            pageCurrentAngle + pageAllocatedAngle
-          );
+          const pointerRadius = config.levelRadius[3];
+          const pointerWidth = NODE_DIMENSIONS.pointer.width;
+          const pointerHeight = NODE_DIMENSIONS.pointer.height;
+
+          // Distribute pointers around the page's angle
+          const pointerCount = page.pointers.length;
+          const pointerSliceStart = pageAngle - angleStep / (2 * pageCount);
+          const pointerSliceEnd = pageAngle + angleStep / (2 * pageCount);
 
           page.pointers.forEach((pointer, ptrIndex) => {
-            const pos = pointerPositions[ptrIndex];
+            const pointerAngle = pointerCount === 1
+              ? pageAngle
+              : pointerSliceStart + ((ptrIndex + 0.5) / pointerCount) * (pointerSliceEnd - pointerSliceStart);
+
+            const pointerCenterX = ORIGIN_X + pointerRadius * Math.cos(pointerAngle);
+            const pointerCenterY = ORIGIN_Y + pointerRadius * Math.sin(pointerAngle);
+
+            const pointerNodeX = pointerCenterX - pointerWidth / 2;
+            const pointerNodeY = pointerCenterY - pointerHeight / 2;
+
             const pointerNodeId = pointer.id;
 
             nodes.push({
               id: pointerNodeId,
               type: 'pointer',
-              position: { x: pos.x, y: pos.y },
+              position: { x: pointerNodeX, y: pointerNodeY },
               data: {
                 type: 'pointer',
                 id: pointer.id,
@@ -370,16 +259,20 @@ export function layoutHierarchy(
             });
 
             // Edge: page → pointer
-            edges.push(createEdge(
-              pageNodeId,
-              pointerNodeId,
-              '#8b5cf6',
-              1
-            ));
+            edges.push({
+              id: `e-${pageNodeId}-${pointerNodeId}`,
+              source: pageNodeId,
+              target: pointerNodeId,
+              type: 'straight',
+              style: {
+                stroke: '#8b5cf6',
+                strokeWidth: 1,
+                opacity: 0.4,
+              },
+              zIndex: 0,
+            });
           });
         }
-
-        pageCurrentAngle += pageAllocatedAngle;
       });
     }
   });
@@ -388,7 +281,7 @@ export function layoutHierarchy(
 }
 
 /**
- * Generates initial expanded state (project expanded, disciplines visible)
+ * Initial expanded state: project expanded so disciplines are visible
  */
 export function getInitialExpandedState(hierarchy: ProjectHierarchy): string[] {
   const projectId = `project-${hierarchy.name}`;
