@@ -4,7 +4,7 @@ import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
-import { api, PointerResponse } from '../../lib/api';
+import { api } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import {
   ActiveQueryBubble,
@@ -40,9 +40,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
   // Hierarchy data
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
-
-  // Selected pointers from agent response (for PlanViewer highlighting)
-  const [selectedPointerIds, setSelectedPointerIds] = useState<string[]>([]);
 
   // Caches for field stream
   const [renderedPages] = useState<Map<string, string>>(new Map());
@@ -198,16 +195,47 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   }, [projectId]);
 
   // Handle page selection from PlansPanel
-  const handlePageSelect = (pageId: string, disciplineId: string, _pageName: string) => {
+  // Resets to fresh session state and loads page into agent viewer
+  const handlePageSelect = async (pageId: string, disciplineId: string, _pageName: string) => {
+    // Reset session state (like handleNewSession but skip clearSession API call)
+    resetStream();
+    setQueryInput('');
+    setSubmittedQuery(null);
+    setIsQueryExpanded(false);
+    setSessionQueries([]);
+    setActiveQueryId(null);
+    queryPagesCache.clear();
+
+    // Set sidebar highlighting
     setSelectedPageId(pageId);
     setSelectedDisciplineId(disciplineId);
-  };
 
-  // Handle pointer click from PlanViewer
-  const handlePointerClick = (pointer: PointerResponse) => {
-    console.log('Pointer clicked:', pointer.title, pointer.id);
-  };
+    // Fetch page data and pointers
+    try {
+      const [pageData, pointersData] = await Promise.all([
+        api.pages.get(pageId),
+        api.pointers.list(pageId),
+      ]);
 
+      // Load into agent viewer via loadPages
+      loadPages([{
+        pageId,
+        pageName: pageData.pageName,
+        filePath: pageData.filePath,
+        disciplineId,
+        pointers: pointersData.map(p => ({
+          pointerId: p.id,
+          title: p.title ?? '',
+          bboxX: p.bboxX,
+          bboxY: p.bboxY,
+          bboxWidth: p.bboxWidth,
+          bboxHeight: p.bboxHeight,
+        })),
+      }]);
+    } catch (err) {
+      console.error('Failed to load page for viewer:', err);
+    }
+  };
 
   // Handle starting a new session (clears query stack)
   const handleNewSession = async () => {
@@ -284,9 +312,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       <div className="flex-1 relative flex flex-col overflow-hidden">
         {/* PlanViewer - handles PDF rendering */}
         <PlanViewer
-          pageId={selectedPageId}
-          onPointerClick={handlePointerClick}
-          selectedPointerIds={selectedPointerIds}
           selectedPages={selectedPages}
           onVisiblePageChange={handleVisiblePageChange}
         />
