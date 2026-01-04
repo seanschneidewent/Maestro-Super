@@ -1,5 +1,5 @@
 import { MindMapNode, MindMapEdge, DEFAULT_LAYOUT_CONFIG } from './types';
-import type { ProjectHierarchy, DisciplineInHierarchy } from '../../../types';
+import type { ProjectHierarchy } from '../../../types';
 
 interface LayoutCallbacks {
   onProjectExpand: () => void;
@@ -57,29 +57,9 @@ function distributeRadially(
   return positions;
 }
 
-/**
- * Counts total visible descendants for a discipline (for angular allocation)
- */
-function countDisciplineWeight(
-  discipline: DisciplineInHierarchy,
-  expandedNodes: Set<string>
-): number {
-  if (!expandedNodes.has(discipline.id)) {
-    return 1;
-  }
-
-  let weight = 1;
-  for (const page of discipline.pages) {
-    weight += 1;
-    if (expandedNodes.has(page.id)) {
-      weight += page.pointers.length;
-    }
-  }
-  return weight;
-}
 
 /**
- * Creates a floating bezier edge style
+ * Creates a straight line edge for radial connections
  */
 function createEdge(
   sourceId: string,
@@ -91,12 +71,13 @@ function createEdge(
     id: `e-${sourceId}-${targetId}`,
     source: sourceId,
     target: targetId,
-    type: 'default',
+    type: 'straight',
     style: {
       stroke: color,
       strokeWidth: width,
-      opacity: 0.6,
+      opacity: 0.4,
     },
+    zIndex: 0, // Ensure edges render behind nodes
   };
 }
 
@@ -136,25 +117,22 @@ export function layoutHierarchy(
     return { nodes, edges };
   }
 
-  // --- Calculate angular allocation for disciplines ---
-  const disciplineWeights = hierarchy.disciplines.map(d =>
-    countDisciplineWeight(d, expandedNodes)
-  );
-  const totalWeight = disciplineWeights.reduce((a, b) => a + b, 0);
-
-  // Full circle with gaps between disciplines
+  // --- Calculate angular positions for disciplines ---
+  // Use equal angular spacing for disciplines (even distribution around circle)
+  const disciplineCount = hierarchy.disciplines.length;
   const fullCircle = Math.PI * 2;
-  const gapAngle = 0.15; // Gap between discipline clusters
-  const availableAngle = fullCircle - (gapAngle * hierarchy.disciplines.length);
-
-  let currentAngle = -Math.PI / 2; // Start from top
+  const anglePerDiscipline = fullCircle / disciplineCount;
+  const startAngle = -Math.PI / 2; // Start from top
 
   hierarchy.disciplines.forEach((discipline, discIndex) => {
-    const weight = disciplineWeights[discIndex];
-    const allocatedAngle = (weight / totalWeight) * availableAngle;
-    const discMidAngle = currentAngle + allocatedAngle / 2;
+    // Equal angular spacing: each discipline at index * (360/count) degrees
+    const discMidAngle = startAngle + (discIndex * anglePerDiscipline);
 
-    // Position discipline node
+    // Allocate angular slice for children (pages/pointers within this discipline)
+    const sliceStartAngle = discMidAngle - anglePerDiscipline / 2;
+    const sliceEndAngle = discMidAngle + anglePerDiscipline / 2;
+
+    // Position discipline node at equal intervals
     const discX = config.centerX + config.levelRadius[1] * Math.cos(discMidAngle);
     const discY = config.centerY + config.levelRadius[1] * Math.sin(discMidAngle);
 
@@ -194,12 +172,13 @@ export function layoutHierarchy(
         expandedNodes.has(page.id) ? 1 + page.pointers.length : 1
       );
       const pageTotalWeight = pageWeights.reduce((a, b) => a + b, 0);
+      const sliceAngle = sliceEndAngle - sliceStartAngle;
 
-      let pageCurrentAngle = currentAngle;
+      let pageCurrentAngle = sliceStartAngle;
 
       discipline.pages.forEach((page, pageIndex) => {
         const pageWeight = pageWeights[pageIndex];
-        const pageAllocatedAngle = (pageWeight / pageTotalWeight) * allocatedAngle;
+        const pageAllocatedAngle = (pageWeight / pageTotalWeight) * sliceAngle;
         const pageMidAngle = pageCurrentAngle + pageAllocatedAngle / 2;
 
         const pageX = config.centerX + config.levelRadius[2] * Math.cos(pageMidAngle);
@@ -277,8 +256,6 @@ export function layoutHierarchy(
         pageCurrentAngle += pageAllocatedAngle;
       });
     }
-
-    currentAngle += allocatedAngle + gapAngle;
   });
 
   return { nodes, edges };
