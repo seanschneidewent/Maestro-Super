@@ -10,6 +10,8 @@ from .page import Page
 from .pointer import Pointer
 from .pointer_reference import PointerReference
 from .query import Query
+from .query_page import QueryPage
+from .session import Session
 from .usage_event import UsageEvent
 from .user_usage import UserUsage
 
@@ -26,6 +28,8 @@ __all__ = [
     "Pointer",
     "PointerReference",
     "Query",
+    "QueryPage",
+    "Session",
     "UsageEvent",
     "UserUsage",
 ]

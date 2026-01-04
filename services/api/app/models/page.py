@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.pointer import Pointer
     from app.models.pointer_reference import PointerReference
+    from app.models.query_page import QueryPage
 
 
 class Page(Base):
@@ -59,4 +60,11 @@ class Page(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         foreign_keys="PointerReference.target_page_id",
+    )
+    # Queries that displayed this page
+    query_pages: Mapped[list["QueryPage"]] = relationship(
+        "QueryPage",
+        back_populates="page",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

@@ -10,6 +10,7 @@ from app.database.base import Base, created_at_column, updated_at_column
 if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.query import Query
+    from app.models.session import Session
 
 
 class Project(Base):
@@ -38,6 +39,12 @@ class Project(Base):
     )
     queries: Mapped[list["Query"]] = relationship(
         "Query",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    sessions: Mapped[list["Session"]] = relationship(
+        "Session",
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,

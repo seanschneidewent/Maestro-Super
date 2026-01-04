@@ -13,6 +13,8 @@ from app.database.session import get_db
 from app.dependencies.rate_limit import check_rate_limit
 from app.models.project import Project
 from app.models.query import Query
+from app.models.query_page import QueryPage
+from app.models.session import Session as SessionModel
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
 from app.services.usage import UsageService
@@ -20,6 +22,62 @@ from app.services.usage import UsageService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["queries"])
+
+
+def extract_pages_from_trace(trace: list[dict]) -> list[dict]:
+    """
+    Extract ordered page sequence from agent trace.
+
+    Looks for select_pages and select_pointers tool results to build
+    an ordered list of pages with their associated pointers.
+
+    Returns:
+        List of dicts: [{"page_id": str, "pointers": [{"pointer_id": str}, ...]}]
+    """
+    # Track pages in order they appear, with their pointers
+    pages_seen: dict[str, list[dict]] = {}  # page_id -> list of pointer dicts
+    page_order: list[str] = []  # Maintains insertion order
+
+    for step in trace:
+        if step.get("type") != "tool_result":
+            continue
+
+        tool = step.get("tool")
+        result = step.get("result", {})
+
+        if not isinstance(result, dict):
+            continue
+
+        if tool == "select_pages":
+            # select_pages returns {"pages": [{"page_id": ..., ...}]}
+            for page in result.get("pages", []):
+                page_id = page.get("page_id")
+                if page_id and page_id not in pages_seen:
+                    pages_seen[page_id] = []
+                    page_order.append(page_id)
+
+        elif tool == "select_pointers":
+            # select_pointers returns {"selected_pointer_ids": [...], "pointers": [...]}
+            # Each pointer has page_id, so we group pointers by page
+            for pointer in result.get("pointers", []):
+                page_id = pointer.get("page_id")
+                pointer_id = pointer.get("pointer_id")
+                if not page_id or not pointer_id:
+                    continue
+
+                if page_id not in pages_seen:
+                    pages_seen[page_id] = []
+                    page_order.append(page_id)
+
+                # Add pointer to page's list (avoid duplicates)
+                if not any(p.get("pointer_id") == pointer_id for p in pages_seen[page_id]):
+                    pages_seen[page_id].append({"pointer_id": pointer_id})
+
+    # Build final ordered list
+    return [
+        {"page_id": page_id, "pointers": pages_seen[page_id]}
+        for page_id in page_order
+    ]
 
 
 def verify_project_exists(project_id: str, db: Session) -> Project:
@@ -138,17 +196,43 @@ async def stream_query(
     - data: {"type": "text", "content": "..."} - Claude's reasoning
     - data: {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
-    - data: {"type": "done", "trace": [...], "usage": {...}} - Final event
+    - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "..."} - Final event
     - data: {"type": "error", "message": "..."} - Error event
     """
     verify_project_exists(project_id, db)
     logger.info(f"Starting query stream for user {user.id} on project {project_id}")
+
+    # Validate session if provided
+    session_id = data.session_id
+    sequence_order = None
+    if session_id:
+        session = (
+            db.query(SessionModel)
+            .filter(SessionModel.id == session_id)
+            .filter(SessionModel.user_id == user.id)
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.project_id != project_id:
+            raise HTTPException(status_code=400, detail="Session belongs to a different project")
+
+        # Calculate sequence_order as count of existing queries in session + 1
+        existing_count = (
+            db.query(Query)
+            .filter(Query.session_id == session_id)
+            .count()
+        )
+        sequence_order = existing_count + 1
+        logger.info(f"Query will be #{sequence_order} in session {session_id}")
 
     # Create query record in database
     query_record = Query(
         user_id=user.id,
         project_id=project_id,
         query_text=data.query,
+        session_id=session_id,
+        sequence_order=sequence_order,
     )
     db.add(query_record)
     db.commit()
@@ -162,6 +246,7 @@ async def stream_query(
     async def event_generator():
         total_tokens = 0
         response_text = ""
+        display_title = None
         referenced_pointers = []
         stored_trace = []
         try:
@@ -170,6 +255,8 @@ async def stream_query(
                 if event.get("type") == "done":
                     usage = event.get("usage", {})
                     total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
+                    # Extract display_title if provided by agent
+                    display_title = event.get("displayTitle")
                     # Extract the final response from trace
                     trace = event.get("trace", [])
                     stored_trace = trace  # Save for storage
@@ -194,16 +281,34 @@ async def stream_query(
 
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
-            # Update query record with response and trace
+            # Update query record with response, trace, and display_title
             try:
                 query_record.response_text = response_text or None
+                query_record.display_title = display_title
                 query_record.tokens_used = total_tokens
                 query_record.referenced_pointers = referenced_pointers if referenced_pointers else None
                 query_record.trace = stored_trace if stored_trace else None
                 db.commit()
-                logger.info(f"Updated query {query_id} with response ({total_tokens} tokens)")
+                logger.info(f"Updated query {query_id} with response ({total_tokens} tokens), title: {display_title}")
             except Exception as e:
                 logger.warning(f"Failed to update query record: {e}")
+
+            # Create QueryPage records for the page sequence
+            try:
+                pages_data = extract_pages_from_trace(stored_trace)
+                for order, page_data in enumerate(pages_data, start=1):
+                    query_page = QueryPage(
+                        query_id=query_id,
+                        page_id=page_data["page_id"],
+                        page_order=order,
+                        pointers_shown=page_data["pointers"] if page_data["pointers"] else None,
+                    )
+                    db.add(query_page)
+                if pages_data:
+                    db.commit()
+                    logger.info(f"Created {len(pages_data)} QueryPage records for query {query_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create QueryPage records: {e}")
 
             # Track token usage
             if total_tokens > 0:

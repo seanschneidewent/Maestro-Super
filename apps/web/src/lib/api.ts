@@ -324,16 +324,44 @@ export interface QueryTraceStep {
   result?: Record<string, unknown>;
 }
 
+export interface QueryPageResponse {
+  id: string;
+  pageId: string;
+  pageOrder: number;
+  pointersShown?: Array<{ pointerId: string }>;
+  // Page details
+  pageName?: string;
+  filePath?: string;
+  disciplineId?: string;
+}
+
 export interface QueryResponse {
   id: string;
   userId: string;
   projectId?: string;
+  sessionId?: string;
   queryText: string;
   responseText?: string;
+  displayTitle?: string;
+  sequenceOrder?: number;
   referencedPointers?: Array<{ pointerId: string }>;
   trace?: QueryTraceStep[];
   tokensUsed?: number;
+  pages?: QueryPageResponse[];
   createdAt: string;
+}
+
+// Session types (matching backend schema)
+export interface SessionResponse {
+  id: string;
+  userId: string;
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionWithQueriesResponse extends SessionResponse {
+  queries: QueryResponse[];
 }
 
 // API functions
@@ -451,6 +479,15 @@ export const api = {
       request<QueryResponse[]>(`/projects/${projectId}/queries`),
     get: (queryId: string) => request<QueryResponse>(`/queries/${queryId}`),
     hide: (queryId: string) => request<void>(`/queries/${queryId}/hide`, { method: 'PATCH' }),
+  },
+
+  sessions: {
+    list: (projectId: string) =>
+      request<SessionResponse[]>(`/projects/${projectId}/sessions`),
+    create: (projectId: string) =>
+      request<SessionResponse>(`/projects/${projectId}/sessions`, { method: 'POST' }),
+    get: (sessionId: string) =>
+      request<SessionWithQueriesResponse>(`/sessions/${sessionId}`),
   },
 };
 

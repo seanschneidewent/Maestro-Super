@@ -79,10 +79,38 @@ export interface ChatMessage {
   }[];
 }
 
+// Session types for query grouping
 export interface Session {
   id: string;
-  title: string;
-  date: Date;
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QueryPage {
+  id: string;
+  pageId: string;
+  pageOrder: number;
+  pointersShown: { pointerId: string }[] | null;
+  // Page details from join
+  pageName?: string;
+  filePath?: string;
+  disciplineId?: string;
+}
+
+export interface QueryWithPages {
+  id: string;
+  sessionId: string | null;
+  displayTitle: string | null;
+  sequenceOrder: number | null;
+  queryText: string;
+  responseText: string | null;
+  pages: QueryPage[];
+  createdAt: string;
+}
+
+export interface SessionWithQueries extends Session {
+  queries: QueryWithPages[];
 }
 
 // Hierarchy types for mind map visualization
@@ -143,7 +171,8 @@ export interface AgentTraceStep {
 export interface AgentDoneEvent {
   type: 'done';
   trace: AgentTraceStep[];
-  usage: { input_tokens: number; output_tokens: number };
+  usage: { inputTokens: number; outputTokens: number };
+  displayTitle: string | null;
 }
 
 export interface AgentErrorEvent {
@@ -181,6 +210,7 @@ export interface AgentMessage {
   reasoning?: string[];
   toolCalls?: ToolCallState[];
   finalAnswer?: string;
+  displayTitle?: string | null;
   trace?: AgentTraceStep[];
   pagesVisited?: PageVisit[];
   isComplete: boolean;
@@ -218,5 +248,6 @@ export interface FieldResponse {
   id: string
   query: string
   summary: string
+  displayTitle: string | null
   pages: FieldPage[]
 }

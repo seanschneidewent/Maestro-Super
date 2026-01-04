@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
-import { X, Trash2, MessageSquare } from 'lucide-react'
-import { api, QueryResponse } from '../../lib/api'
-import { AgentTraceStep } from '../../types'
+import { X, ChevronRight, MessageSquare, FileText, Layers } from 'lucide-react'
+import { api, SessionResponse, SessionWithQueriesResponse, QueryResponse } from '../../lib/api'
 
 interface QueryHistoryPanelProps {
   projectId: string
   isOpen: boolean
   onClose: () => void
-  onRestoreSession: (query: QueryResponse, trace: AgentTraceStep[], finalAnswer: string) => void
+  onRestoreSession: (
+    sessionId: string,
+    queries: QueryResponse[],
+    selectedQueryId: string
+  ) => void
 }
 
 function formatTimeAgo(dateString: string): string {
@@ -30,70 +33,91 @@ function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + '...'
 }
 
+function getSessionTitle(session: SessionWithQueriesResponse): string {
+  // Use the first query's display title or query text
+  if (session.queries.length > 0) {
+    const firstQuery = session.queries[0]
+    return firstQuery.displayTitle || truncateText(firstQuery.queryText, 30)
+  }
+  return 'Empty session'
+}
+
 export function QueryHistoryPanel({
   projectId,
   isOpen,
   onClose,
   onRestoreSession,
 }: QueryHistoryPanelProps) {
-  const [queries, setQueries] = useState<QueryResponse[]>([])
+  const [sessions, setSessions] = useState<SessionResponse[]>([])
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null)
+  const [expandedSessionData, setExpandedSessionData] = useState<SessionWithQueriesResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load queries when panel opens
+  // Load sessions when panel opens
   useEffect(() => {
     if (!isOpen) return
 
-    const loadQueries = async () => {
+    const loadSessions = async () => {
       setIsLoading(true)
       setError(null)
       try {
-        const data = await api.queries.list(projectId)
-        setQueries(data)
+        const data = await api.sessions.list(projectId)
+        setSessions(data)
       } catch (err) {
-        console.error('Failed to load query history:', err)
+        console.error('Failed to load sessions:', err)
         setError('Failed to load history')
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadQueries()
+    loadSessions()
   }, [isOpen, projectId])
 
-  // Hide a query (soft delete)
-  const handleHide = async (queryId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  // Load session details when expanded
+  const handleExpandSession = async (sessionId: string) => {
+    if (expandedSessionId === sessionId) {
+      // Collapse if already expanded
+      setExpandedSessionId(null)
+      setExpandedSessionData(null)
+      return
+    }
+
+    setExpandedSessionId(sessionId)
+    setIsLoadingSession(true)
+
     try {
-      await api.queries.hide(queryId)
-      setQueries((prev) => prev.filter((q) => q.id !== queryId))
+      const data = await api.sessions.get(sessionId)
+      setExpandedSessionData(data)
     } catch (err) {
-      console.error('Failed to hide query:', err)
+      console.error('Failed to load session details:', err)
+      setExpandedSessionData(null)
+    } finally {
+      setIsLoadingSession(false)
     }
   }
 
-  // Restore a previous session
-  const handleRestore = (query: QueryResponse) => {
-    // Convert API trace format to AgentTraceStep format
-    const trace: AgentTraceStep[] = (query.trace || []).map((step) => ({
-      type: step.type,
-      content: step.content,
-      tool: step.tool,
-      input: step.input,
-      result: step.result,
-    }))
+  // Restore a session with a specific query selected
+  const handleRestoreQuery = (query: QueryResponse) => {
+    if (!expandedSessionData) return
 
-    onRestoreSession(query, trace, query.responseText || '')
+    onRestoreSession(
+      expandedSessionData.id,
+      expandedSessionData.queries,
+      query.id
+    )
     onClose()
   }
 
   if (!isOpen) return null
 
   return (
-    <div className="w-80 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 flex flex-col z-20 shadow-lg">
+    <div className="w-96 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 flex flex-col z-20 shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50">
-        <h2 className="text-lg font-medium text-slate-800">Query History</h2>
+        <h2 className="text-lg font-medium text-slate-800">Session History</h2>
         <button
           onClick={onClose}
           className="p-1 rounded-lg hover:bg-slate-100 transition-colors"
@@ -106,7 +130,7 @@ export function QueryHistoryPanel({
       <div className="flex-1 overflow-y-auto">
         {isLoading && (
           <div className="p-4 text-center text-slate-500 text-sm">
-            Loading history...
+            Loading sessions...
           </div>
         )}
 
@@ -114,52 +138,116 @@ export function QueryHistoryPanel({
           <div className="p-4 text-center text-red-500 text-sm">{error}</div>
         )}
 
-        {!isLoading && !error && queries.length === 0 && (
+        {!isLoading && !error && sessions.length === 0 && (
           <div className="p-4 text-center text-slate-400 text-sm">
-            No queries yet. Ask a question to get started!
+            No sessions yet. Start a conversation!
           </div>
         )}
 
-        {!isLoading && !error && queries.length > 0 && (
+        {!isLoading && !error && sessions.length > 0 && (
           <div className="divide-y divide-slate-100">
-            {queries.map((query) => (
-              <button
-                key={query.id}
-                onClick={() => handleRestore(query)}
-                className="w-full p-4 text-left hover:bg-slate-50 transition-colors group"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex-shrink-0 mt-0.5">
-                    <MessageSquare size={16} className="text-cyan-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-800 font-medium leading-snug">
-                      {truncateText(query.queryText, 80)}
-                    </p>
-                    {query.responseText && (
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                        {truncateText(query.responseText, 100)}
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-400 mt-2">
-                      {formatTimeAgo(query.createdAt)}
-                      {query.tokensUsed && (
-                        <span className="ml-2 text-slate-300">
-                          {query.tokensUsed.toLocaleString()} tokens
-                        </span>
-                      )}
-                    </p>
-                  </div>
+            {sessions.map((session) => {
+              const isExpanded = expandedSessionId === session.id
+
+              return (
+                <div key={session.id}>
+                  {/* Session header */}
                   <button
-                    onClick={(e) => handleHide(query.id, e)}
-                    className="flex-shrink-0 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-all"
-                    title="Remove from history"
+                    onClick={() => handleExpandSession(session.id)}
+                    className={`
+                      w-full px-4 py-3 text-left transition-colors
+                      ${isExpanded ? 'bg-cyan-50' : 'hover:bg-slate-50'}
+                    `}
                   >
-                    <Trash2 size={14} className="text-red-400" />
+                    <div className="flex items-center gap-3">
+                      <ChevronRight
+                        size={16}
+                        className={`
+                          text-slate-400 transition-transform
+                          ${isExpanded ? 'rotate-90' : ''}
+                        `}
+                      />
+                      <Layers size={16} className="text-cyan-500" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-700 truncate">
+                          {isExpanded && expandedSessionData
+                            ? getSessionTitle(expandedSessionData)
+                            : 'Session'}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {formatTimeAgo(session.createdAt)}
+                        </p>
+                      </div>
+                    </div>
                   </button>
+
+                  {/* Expanded session content */}
+                  {isExpanded && (
+                    <div className="bg-slate-50/50 border-t border-slate-100">
+                      {isLoadingSession ? (
+                        <div className="p-4 text-center text-slate-400 text-sm">
+                          Loading queries...
+                        </div>
+                      ) : expandedSessionData ? (
+                        <div className="divide-y divide-slate-100">
+                          {expandedSessionData.queries.length === 0 ? (
+                            <div className="p-4 text-center text-slate-400 text-sm">
+                              No queries in this session
+                            </div>
+                          ) : (
+                            expandedSessionData.queries.map((query, idx) => (
+                              <button
+                                key={query.id}
+                                onClick={() => handleRestoreQuery(query)}
+                                className="w-full px-4 py-3 text-left hover:bg-white transition-colors group"
+                              >
+                                <div className="flex items-start gap-3 pl-6">
+                                  <div className="flex-shrink-0 mt-0.5">
+                                    <div className="w-5 h-5 rounded-full bg-cyan-100 flex items-center justify-center">
+                                      <span className="text-xs font-medium text-cyan-600">
+                                        {idx + 1}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-slate-700 leading-snug">
+                                      {query.displayTitle || truncateText(query.queryText, 50)}
+                                    </p>
+                                    {query.responseText && (
+                                      <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+                                        {truncateText(query.responseText, 80)}
+                                      </p>
+                                    )}
+
+                                    {/* Page sequence */}
+                                    {query.pages && query.pages.length > 0 && (
+                                      <div className="flex items-center gap-1 mt-2">
+                                        <FileText size={12} className="text-slate-400" />
+                                        <span className="text-xs text-slate-400">
+                                          {query.pages.length} page{query.pages.length !== 1 ? 's' : ''}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <MessageSquare
+                                    size={14}
+                                    className="text-slate-300 group-hover:text-cyan-500 transition-colors mt-1"
+                                  />
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-4 text-center text-red-400 text-sm">
+                          Failed to load session
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </button>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

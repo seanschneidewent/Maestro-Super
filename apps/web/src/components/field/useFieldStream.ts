@@ -24,18 +24,29 @@ export interface AgentSelectedPage {
   pointers: AgentSelectedPointer[]
 }
 
+export interface CompletedQuery {
+  queryId: string
+  queryText: string
+  displayTitle: string | null
+  pages: AgentSelectedPage[]
+  finalAnswer: string
+}
+
 interface UseFieldStreamOptions {
   projectId: string
   renderedPages: Map<string, string>
   pageMetadata: Map<string, { title: string; pageNumber: number }>
   contextPointers: Map<string, ContextPointer[]>
+  onQueryComplete?: (query: CompletedQuery) => void
 }
 
 interface UseFieldStreamReturn {
-  submitQuery: (query: string) => Promise<void>
+  submitQuery: (query: string, sessionId?: string) => Promise<void>
   isStreaming: boolean
   thinkingText: string
   finalAnswer: string
+  displayTitle: string | null
+  currentQueryId: string | null
   trace: AgentTraceStep[]
   selectedPages: AgentSelectedPage[]
   response: FieldResponse | null
@@ -43,6 +54,7 @@ interface UseFieldStreamReturn {
   reset: () => void
   abort: () => void
   restore: (trace: AgentTraceStep[], finalAnswer: string, pages?: AgentSelectedPage[]) => void
+  loadPages: (pages: AgentSelectedPage[]) => void
 }
 
 interface AgentMessageAccumulator {
@@ -55,17 +67,20 @@ interface AgentMessageAccumulator {
 }
 
 export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamReturn {
-  const { projectId, renderedPages, pageMetadata, contextPointers } = options
+  const { projectId, renderedPages, pageMetadata, contextPointers, onQueryComplete } = options
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [thinkingText, setThinkingText] = useState('')
   const [finalAnswer, setFinalAnswer] = useState('')
+  const [displayTitle, setDisplayTitle] = useState<string | null>(null)
+  const [currentQueryId, setCurrentQueryId] = useState<string | null>(null)
   const [trace, setTrace] = useState<AgentTraceStep[]>([])
   const [selectedPages, setSelectedPages] = useState<AgentSelectedPage[]>([])
   const [response, setResponse] = useState<FieldResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const selectedPagesRef = useRef<AgentSelectedPage[]>([])
+  const currentQueryRef = useRef<{ id: string; text: string } | null>(null)
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {
@@ -76,7 +91,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   }, [])
 
   const submitQuery = useCallback(
-    async (query: string) => {
+    async (query: string, sessionId?: string) => {
       // Abort any existing stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -85,9 +100,12 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       setIsStreaming(true)
       setThinkingText('')
       setFinalAnswer('')
+      setDisplayTitle(null)
+      setCurrentQueryId(null)
       setTrace([])
       setSelectedPages([])
       selectedPagesRef.current = []
+      currentQueryRef.current = { id: '', text: query }
       setResponse(null)
       setError(null)
 
@@ -117,7 +135,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
               Authorization: `Bearer ${session.access_token}`,
             }),
           },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, sessionId }),
           signal: abortControllerRef.current.signal,
         })
 
@@ -358,6 +376,10 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'done':
         agentMessage.isComplete = true
 
+        // Extract displayTitle from done event
+        const eventDisplayTitle = typeof data.displayTitle === 'string' ? data.displayTitle : null
+        setDisplayTitle(eventDisplayTitle)
+
         // Extract final answer from trace (reasoning after last tool result)
         const traceSteps = agentMessage.trace
         let extractedAnswer = ''
@@ -388,6 +410,13 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         agentMessage.finalAnswer = extractedAnswer
         setFinalAnswer(extractedAnswer)
 
+        // Generate a query ID for tracking
+        const queryId = `query-${agentMessage.timestamp.getTime()}`
+        setCurrentQueryId(queryId)
+        if (currentQueryRef.current) {
+          currentQueryRef.current.id = queryId
+        }
+
         // Transform to FieldResponse
         const fieldResponse = transformAgentResponse(
           {
@@ -396,6 +425,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             timestamp: agentMessage.timestamp,
             reasoning: agentMessage.reasoning,
             finalAnswer: agentMessage.finalAnswer,
+            displayTitle: eventDisplayTitle,
             trace: agentMessage.trace,
             pagesVisited: agentMessage.pagesVisited,
             isComplete: true,
@@ -407,6 +437,17 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         )
         setResponse(fieldResponse)
         setIsStreaming(false)
+
+        // Notify parent of completed query
+        if (onQueryComplete && currentQueryRef.current) {
+          onQueryComplete({
+            queryId,
+            queryText: currentQueryRef.current.text,
+            displayTitle: eventDisplayTitle,
+            pages: [...selectedPagesRef.current],
+            finalAnswer: extractedAnswer,
+          })
+        }
         break
 
       case 'error':
@@ -425,9 +466,12 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setIsStreaming(false)
     setThinkingText('')
     setFinalAnswer('')
+    setDisplayTitle(null)
+    setCurrentQueryId(null)
     setTrace([])
     setSelectedPages([])
     selectedPagesRef.current = []
+    currentQueryRef.current = null
     setResponse(null)
     setError(null)
   }, [abort])
@@ -444,5 +488,26 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setError(null)
   }, [abort])
 
-  return { submitQuery, isStreaming, thinkingText, finalAnswer, trace, selectedPages, response, error, reset, abort, restore }
+  // Load pages directly (for restoring from QueryStack selection)
+  const loadPages = useCallback((pages: AgentSelectedPage[]) => {
+    setSelectedPages(pages)
+    selectedPagesRef.current = pages
+  }, [])
+
+  return {
+    submitQuery,
+    isStreaming,
+    thinkingText,
+    finalAnswer,
+    displayTitle,
+    currentQueryId,
+    trace,
+    selectedPages,
+    response,
+    error,
+    reset,
+    abort,
+    restore,
+    loadPages,
+  }
 }

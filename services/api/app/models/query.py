@@ -9,6 +9,8 @@ from app.database.base import Base, JSONVariant, created_at_column
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.query_page import QueryPage
+    from app.models.session import Session
 
 
 class Query(Base):
@@ -36,10 +38,22 @@ class Query(Base):
         index=True,
         nullable=True,
     )
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
 
     # Query content
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
     response_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Display title for UI (e.g., "Electrical panel locations")
+    display_title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Order within session (1, 2, 3, ...)
+    sequence_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Context used for response
     referenced_pointers: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
@@ -65,4 +79,15 @@ class Query(Base):
     project: Mapped[Optional["Project"]] = relationship(
         "Project",
         back_populates="queries",
+    )
+    session: Mapped[Optional["Session"]] = relationship(
+        "Session",
+        back_populates="queries",
+    )
+    query_pages: Mapped[list["QueryPage"]] = relationship(
+        "QueryPage",
+        back_populates="query",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QueryPage.page_order",
     )

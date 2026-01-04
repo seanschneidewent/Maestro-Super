@@ -22,7 +22,13 @@ from app.schemas.pointer_reference import (
     PointerReferenceResponse,
 )
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
-from app.schemas.query import QueryCreate, QueryResponse, QueryUpdate
+from app.schemas.query import (
+    QueryCreate,
+    QueryPageResponse,
+    QueryResponse,
+    QueryUpdate,
+)
+from app.schemas.session import SessionCreate, SessionResponse, SessionWithQueries
 from app.schemas.upload import (
     BulkUploadRequest,
     BulkUploadResponse,
@@ -58,8 +64,13 @@ __all__ = [
     "PointerReferenceResponse",
     # Query
     "QueryCreate",
-    "QueryUpdate",
+    "QueryPageResponse",
     "QueryResponse",
+    "QueryUpdate",
+    # Session
+    "SessionCreate",
+    "SessionResponse",
+    "SessionWithQueries",
     # UsageEvent
     "UsageEventCreate",
     "UsageEventResponse",

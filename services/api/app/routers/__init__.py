@@ -8,6 +8,7 @@ from app.routers import (
     processing,
     projects,
     queries,
+    sessions,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "pointers",
     "processing",
     "queries",
+    "sessions",
 ]

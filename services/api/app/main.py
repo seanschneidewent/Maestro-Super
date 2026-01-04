@@ -20,6 +20,7 @@ from app.routers import (
     processing,
     projects,
     queries,
+    sessions,
 )
 
 settings = get_settings()
@@ -61,6 +62,7 @@ app.include_router(disciplines.router)
 app.include_router(pages.router)
 app.include_router(pointers.router)
 app.include_router(queries.router)
+app.include_router(sessions.router)
 app.include_router(processing.router)
 
 

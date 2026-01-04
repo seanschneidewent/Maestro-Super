@@ -113,6 +113,20 @@ TOOL_DEFINITIONS = [
             "required": ["pointer_ids"],
         },
     },
+    {
+        "name": "set_display_title",
+        "description": "Set a short title summarizing what the user asked about. Call this ONCE before your final answer. The title should be a 2-4 word noun phrase describing the topic (e.g., 'Electrical Panels', 'Kitchen Equipment', 'Fire Sprinkler Layout').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "A 2-4 word noun phrase summarizing the query topic",
+                }
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 AGENT_SYSTEM_PROMPT = """You are a construction plan analysis agent. You help superintendents find information across construction documents by navigating a graph of pages and details (pointers).
@@ -126,6 +140,7 @@ You have access to these tools:
 - get_references_to_page: Find what points TO a specific page (reverse lookup)
 - select_pages: Display specific pages in the plan viewer for the user to see
 - select_pointers: Highlight specific pointers on pages to show the user relevant areas
+- set_display_title: Set a short title for this query (REQUIRED before final answer)
 
 STRATEGY:
 1. Start by searching for relevant pointers or identifying which discipline likely contains the answer
@@ -140,6 +155,11 @@ DISPLAYING RESULTS:
 - Use select_pages when you want to show the user specific plan sheets without highlighting
 - Use select_pointers when you want to highlight specific details/areas on the plans
 - Always call one of these before your final answer so the user can see the relevant plans
+
+BEFORE YOUR FINAL ANSWER:
+- Call set_display_title with a 2-4 word noun phrase summarizing the topic
+- Examples: "Electrical Panel Location", "Kitchen Equipment", "Grease Trap Details", "Fire Sprinkler Layout"
+- This title describes WHAT the user asked about, not what you found
 
 RESPONSE STYLE:
 - Keep final answers to 2 sentences maximum
@@ -197,7 +217,7 @@ async def run_agent_query(
     - {"type": "text", "content": "..."} - Claude's reasoning
     - {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
-    - {"type": "done", "trace": [...], "usage": {...}} - Final event
+    - {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "..."} - Final event
 
     Args:
         db: Database session
@@ -215,6 +235,7 @@ async def run_agent_query(
     trace: list[dict] = []
     total_input_tokens = 0
     total_output_tokens = 0
+    display_title: str | None = None
 
     try:
         while True:
@@ -263,7 +284,15 @@ async def run_agent_query(
             # Execute tools and build tool results
             tool_results = []
             for block in tool_uses:
-                result = await execute_tool(db, project_id, block.name, block.input)
+                # Handle set_display_title specially - no DB access needed
+                if block.name == "set_display_title":
+                    title = block.input.get("title", "")
+                    # Truncate to 100 chars to match DB field
+                    display_title = title[:100] if title else None
+                    result = {"success": True, "title": display_title}
+                    logger.info(f"Display title set to: {display_title}")
+                else:
+                    result = await execute_tool(db, project_id, block.name, block.input)
 
                 # Tool result content must be a JSON string
                 result_json = json.dumps(result)
@@ -294,14 +323,15 @@ async def run_agent_query(
             )
             messages.append({"role": "user", "content": tool_results})
 
-        # Final response with trace and usage
+        # Final response with trace, usage, and display title
         yield {
             "type": "done",
             "trace": trace,
             "usage": {
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
+                "inputTokens": total_input_tokens,
+                "outputTokens": total_output_tokens,
             },
+            "displayTitle": display_title,
         }
 
     except anthropic.APIError as e:

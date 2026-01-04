@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { AppMode, DisciplineInHierarchy, ContextPointer } from '../../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages } from '../../types';
 import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
@@ -13,9 +13,12 @@ import {
   useFieldStream,
   QueryHistoryPanel,
   AgentSelectedPage,
+  NewSessionButton,
+  QueryStack,
+  CompletedQuery,
 } from '../field';
-import { QueryResponse } from '../../lib/api';
-import { AgentTraceStep } from '../../types';
+import { QueryResponse, QueryPageResponse } from '../../lib/api';
+import { useSession } from '../../hooks/useSession';
 
 interface UseModeProps {
   mode: AppMode;
@@ -44,28 +47,125 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   const [pageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
   const [contextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
 
+  // Session management
+  const { currentSession, clearSession, isCreating: isCreatingSession } = useSession(projectId);
+
+  // Track completed queries in the current session for QueryStack
+  const [sessionQueries, setSessionQueries] = useState<QueryWithPages[]>([]);
+  const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
+  // Store full page data for each query so we can restore it
+  const [queryPagesCache] = useState<Map<string, AgentSelectedPage[]>>(new Map());
+
+  // Callback when a query completes
+  const handleQueryComplete = useCallback((query: CompletedQuery) => {
+    const newQuery: QueryWithPages = {
+      id: query.queryId,
+      sessionId: currentSession?.id ?? null,
+      displayTitle: query.displayTitle,
+      sequenceOrder: sessionQueries.length + 1,
+      queryText: query.queryText,
+      responseText: query.finalAnswer,
+      pages: query.pages.map((p, idx) => ({
+        id: `${query.queryId}-page-${idx}`,
+        pageId: p.pageId,
+        pageOrder: idx + 1,
+        pointersShown: p.pointers.map((ptr) => ({ pointerId: ptr.pointerId })),
+      })),
+      createdAt: new Date().toISOString(),
+    };
+
+    // Cache the full page data for restoration
+    queryPagesCache.set(query.queryId, query.pages);
+
+    setSessionQueries((prev) => [...prev, newQuery]);
+    setActiveQueryId(query.queryId);
+  }, [currentSession?.id, sessionQueries.length, queryPagesCache]);
+
   // Field stream hook
   const {
     submitQuery,
     isStreaming,
     thinkingText,
     finalAnswer,
+    displayTitle,
+    currentQueryId,
     trace,
     selectedPages,
     error,
     reset: resetStream,
     restore,
+    loadPages,
   } = useFieldStream({
     projectId,
     renderedPages,
     pageMetadata,
     contextPointers,
+    onQueryComplete: handleQueryComplete,
   });
 
   // Handle restoring a previous session from history
-  const handleRestoreSession = (query: QueryResponse, restoredTrace: AgentTraceStep[], restoredFinalAnswer: string) => {
-    // TODO: Extract selectedPages from restored trace if needed
-    restore(restoredTrace, restoredFinalAnswer);
+  const handleRestoreSession = (
+    sessionId: string,
+    queries: QueryResponse[],
+    selectedQueryId: string
+  ) => {
+    // Convert QueryResponse[] to QueryWithPages[] for the QueryStack
+    const restoredQueries: QueryWithPages[] = queries.map((q, idx) => ({
+      id: q.id,
+      sessionId: q.sessionId ?? null,
+      displayTitle: q.displayTitle ?? null,
+      sequenceOrder: q.sequenceOrder ?? idx + 1,
+      queryText: q.queryText,
+      responseText: q.responseText ?? null,
+      pages: (q.pages || []).map((p: QueryPageResponse, pIdx: number) => ({
+        id: `${q.id}-page-${pIdx}`,
+        pageId: p.pageId,
+        pageOrder: p.pageOrder,
+        pointersShown: p.pointersShown || [],
+        pageName: p.pageName,
+        filePath: p.filePath,
+        disciplineId: p.disciplineId,
+      })),
+      createdAt: q.createdAt,
+    }));
+
+    // Cache pages for all queries in the session
+    queryPagesCache.clear();
+    for (const q of queries) {
+      if (q.pages && q.pages.length > 0) {
+        const queryPages: AgentSelectedPage[] = q.pages
+          .sort((a, b) => a.pageOrder - b.pageOrder)
+          .map((p) => ({
+            pageId: p.pageId,
+            pageName: p.pageName || '',
+            filePath: p.filePath || '',
+            disciplineId: p.disciplineId || '',
+            pointers: (p.pointersShown || []).map((ptr) => ({
+              pointerId: ptr.pointerId,
+              title: '',
+              bboxX: 0,
+              bboxY: 0,
+              bboxWidth: 0,
+              bboxHeight: 0,
+            })),
+          }));
+        queryPagesCache.set(q.id, queryPages);
+      }
+    }
+
+    // Update state
+    setSessionQueries(restoredQueries);
+    setActiveQueryId(selectedQueryId);
+
+    // Load pages for the selected query from cache
+    const cachedPages = queryPagesCache.get(selectedQueryId);
+    if (cachedPages) {
+      loadPages(cachedPages);
+    }
+
+    // Reset stream state
+    resetStream();
+    setQueryInput('');
     setShowHistory(false);
   };
 
@@ -106,6 +206,30 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     // TODO: Send to transcription API, then submit query
     console.log('Recording complete:', audioBlob.size, 'bytes');
   };
+
+  // Handle starting a new session (clears query stack)
+  const handleNewSession = async () => {
+    await clearSession();
+    resetStream();
+    setQueryInput('');
+    setSessionQueries([]);
+    setActiveQueryId(null);
+    queryPagesCache.clear();
+  };
+
+  // Handle selecting a query from the QueryStack
+  const handleSelectQuery = useCallback((queryId: string) => {
+    const query = sessionQueries.find((q) => q.id === queryId);
+    if (!query) return;
+
+    setActiveQueryId(queryId);
+
+    // Restore pages from cache
+    const cachedPages = queryPagesCache.get(queryId);
+    if (cachedPages) {
+      loadPages(cachedPages);
+    }
+  }, [sessionQueries, queryPagesCache, loadPages]);
 
 
   // Handle navigation from thinking section
@@ -184,27 +308,47 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </button>
         )}
 
+        {/* Query stack - bottom left (shows previous queries in session) */}
+        {!isStreaming && sessionQueries.length > 0 && (
+          <QueryStack
+            queries={sessionQueries}
+            activeQueryId={activeQueryId}
+            onSelectQuery={handleSelectQuery}
+          />
+        )}
+
         {/* Thinking bubble - bottom left (thinking during stream, full answer after) */}
-        <ThinkingBubble
-          thinkingText={thinkingText}
-          finalAnswer={finalAnswer}
-          isStreaming={isStreaming}
-        />
+        {/* Only show while streaming or if there's a current answer but no session queries yet */}
+        {(isStreaming || (finalAnswer && sessionQueries.length === 0)) && (
+          <ThinkingBubble
+            thinkingText={thinkingText}
+            finalAnswer={finalAnswer}
+            isStreaming={isStreaming}
+          />
+        )}
 
         {/* Query input bar - bottom center */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
-          <QueryInput
-            value={queryInput}
-            onChange={setQueryInput}
-            onSubmit={() => {
-              if (queryInput.trim() && !isStreaming) {
-                submitQuery(queryInput.trim());
-                setQueryInput('');
-              }
-            }}
-            onRecordingComplete={handleRecordingComplete}
-            isProcessing={isStreaming}
-          />
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <QueryInput
+                value={queryInput}
+                onChange={setQueryInput}
+                onSubmit={() => {
+                  if (queryInput.trim() && !isStreaming) {
+                    submitQuery(queryInput.trim(), currentSession?.id);
+                    setQueryInput('');
+                  }
+                }}
+                onRecordingComplete={handleRecordingComplete}
+                isProcessing={isStreaming}
+              />
+            </div>
+            <NewSessionButton
+              onClick={handleNewSession}
+              disabled={isStreaming || isCreatingSession}
+            />
+          </div>
         </div>
 
         {/* Floating controls */}
