@@ -107,11 +107,13 @@ function ContextMindMapInner({
     setNodes(layoutNodes);
     setEdges(layoutEdges);
 
-    // Use requestAnimationFrame + setTimeout for reliable fitView after render
+    // Use multiple requestAnimationFrame + setTimeout for reliable fitView after ReactFlow positions nodes
     requestAnimationFrame(() => {
-      setTimeout(() => {
-        fitView({ padding: 0.15, duration: 300, minZoom: 0.3, maxZoom: 1.5 });
-      }, 100);
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          fitView({ padding: 0.1, duration: 400, minZoom: 0.2, maxZoom: 1.5 });
+        }, 200);
+      });
     });
   }, [hierarchy, expandedNodes, activePageId, callbacks, setNodes, setEdges, fitView]);
 
