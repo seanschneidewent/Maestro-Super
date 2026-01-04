@@ -117,14 +117,11 @@ function ContextMindMapInner({
     if (nodes.length !== prevNodeCountRef.current) {
       prevNodeCountRef.current = nodes.length;
 
-      // Use double requestAnimationFrame + setTimeout for reliable fitView
-      // First RAF: React commits, Second RAF: browser paints, then 200ms for ReactFlow layout
+      // Single RAF to wait for React commit, then short delay for ReactFlow layout
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTimeout(() => {
-            fitView({ padding: 0.15, duration: 300, minZoom: 0.1, maxZoom: 1.5 });
-          }, 200);
-        });
+        setTimeout(() => {
+          fitView({ padding: 0.15, duration: 200, minZoom: 0.1, maxZoom: 1.5 });
+        }, 50);
       });
     }
   }, [nodes.length, fitView]);
