@@ -457,12 +457,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   draggable={false}
                 />
 
-                {/* Annotation overlays */}
+                {/* Annotation overlays - simplified for iOS Safari compatibility */}
                 {currentPagePointers.map(p => (
                   <div
                     key={p.id}
                     onClick={() => setSelectedPointerId(p.id)}
-                    className={`absolute pointer-box cursor-pointer group animate-scale-in ${selectedPointerId === p.id ? 'selected' : ''} ${p.isGenerating ? 'generating' : ''}`}
+                    className={`absolute border-2 cursor-pointer group ${
+                      selectedPointerId === p.id
+                        ? 'border-cyan-400 bg-cyan-400/25'
+                        : 'border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20'
+                    } ${p.isGenerating ? 'animate-pulse' : ''}`}
                     style={{
                       left: `${p.bboxX * 100}%`,
                       top: `${p.bboxY * 100}%`,
@@ -471,12 +475,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                     }}
                   >
                     {p.isGenerating ? (
-                      <div className="absolute inset-0 flex items-center justify-center bg-cyan-500/10">
+                      <div className="absolute inset-0 flex items-center justify-center">
                         <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
                       </div>
                     ) : (
-                      <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 glass px-3 py-1.5 rounded-lg whitespace-nowrap z-10 pointer-events-none transition-opacity duration-200">
-                        <span className="text-xs text-white font-medium">{p.title}</span>
+                      <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none transition-opacity">
+                        {p.title}
                       </div>
                     )}
                   </div>
