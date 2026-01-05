@@ -98,7 +98,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       setIsConverting(true);
       setPageImages([]);
       setPageNumber(1);
-      setZoom(1);
+      transformRef.current?.resetTransform();
 
       try {
         const arrayBuffer = await file.arrayBuffer();
