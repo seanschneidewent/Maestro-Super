@@ -81,6 +81,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const loadPointersAbortRef = useRef<AbortController | null>(null);
   const createPointerRequestIdRef = useRef(0);
   const activeCreatesRef = useRef<Set<string>>(new Set()); // Track temp pointer IDs during creation
+  const currentPageIdRef = useRef<string | null>(null); // Track current page for stale request detection
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
   // Convert discipline hierarchy to ProjectFile format for tree display
@@ -237,6 +238,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     // Capture values at effect start - these won't change during await
     const pageId = selectedFile.id;
     const pageName = selectedFile.name;
+
+    // Update the current page ref for stale request detection in handlePointerCreate
+    currentPageIdRef.current = pageId;
 
     // Clear stale pointers but preserve any that are currently being created
     // This prevents race conditions where a pointer disappears during Gemini analysis
@@ -498,9 +502,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         bboxHeight: data.bounds.hNorm,
       });
 
-      // Check if this request is stale (user switched pages during API call)
-      if (requestId !== createPointerRequestIdRef.current) {
-        console.warn(`[Pointer Create #${requestId}] Stale response, discarding (current: #${createPointerRequestIdRef.current})`);
+      // Check if user switched to a different page during API call
+      // We compare the captured pageId to the current page ref (which updates when page changes)
+      if (currentPageIdRef.current !== pageId) {
+        console.warn(`[Pointer Create #${requestId}] Page changed during API call, discarding`);
+        console.warn(`  Started on: ${pageId} (${pageName})`);
+        console.warn(`  Current page: ${currentPageIdRef.current}`);
         // Remove temp pointer but don't add the real one to wrong page
         activeCreatesRef.current.delete(tempId);
         setPointers(prev => prev.filter(p => p.id !== tempId));
