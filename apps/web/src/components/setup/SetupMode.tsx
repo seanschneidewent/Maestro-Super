@@ -242,9 +242,14 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     // Update the current page ref for stale request detection in handlePointerCreate
     currentPageIdRef.current = pageId;
 
-    // Clear stale pointers but preserve any that are currently being created
+    // Clear stale pointers but preserve generating pointers for THIS page only
     // This prevents race conditions where a pointer disappears during Gemini analysis
-    setPointers(prev => prev.filter(p => p.isGenerating && activeCreatesRef.current.has(p.id)));
+    // but also ensures old page's generating pointers don't leak into new page
+    setPointers(prev => prev.filter(p =>
+      p.isGenerating &&
+      activeCreatesRef.current.has(p.id) &&
+      p.pageId === pageId
+    ));
 
     async function loadPointers() {
       try {
@@ -278,11 +283,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         }));
 
         setPointers(prev => {
-          // Keep generating pointers that aren't in the loaded list
+          // Keep generating pointers for THIS page that aren't in the loaded list
           const loadedIds = new Set(loadedPointers.map(p => p.id));
           const generatingPointers = prev.filter(p =>
             p.isGenerating &&
             activeCreatesRef.current.has(p.id) &&
+            p.pageId === pageId &&
             !loadedIds.has(p.id)
           );
           return [...loadedPointers, ...generatingPointers];
