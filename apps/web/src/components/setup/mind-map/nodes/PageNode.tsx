@@ -26,9 +26,16 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
   useEffect(() => {
     // Only restart animation when animationKey changes, not on initial mount
     if (divRef.current && prevAnimationKey.current !== animationKey) {
-      divRef.current.style.animation = 'none';
-      divRef.current.offsetHeight; // Trigger reflow
-      divRef.current.style.animation = '';
+      // Delay animation restart to let ReactFlow update positions first
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (divRef.current) {
+            divRef.current.style.animation = 'none';
+            divRef.current.offsetHeight; // Trigger reflow
+            divRef.current.style.animation = '';
+          }
+        });
+      });
     }
     prevAnimationKey.current = animationKey;
   }, [animationKey]);
