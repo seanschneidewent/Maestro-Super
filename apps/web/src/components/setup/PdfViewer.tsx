@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
@@ -135,7 +135,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
-  const cachedRectRef = useRef<DOMRect | null>(null);
 
   // Measure container size
   useEffect(() => {
@@ -217,11 +216,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     transformRef.current?.resetTransform();
   }, [pageNumber]);
 
-  // Invalidate cached rect when user pans/zooms (for Apple Pencil drawing accuracy)
-  const handleTransformed = useCallback(() => {
-    cachedRectRef.current = null;
-  }, []);
-
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
   const goToNextPage = () => setPageNumber(prev => Math.min(prev + 1, numPages));
@@ -229,11 +223,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Drawing handlers (Pointer Events for mouse, touch, and Apple Pencil support)
   const getNormalizedCoords = (e: React.PointerEvent) => {
     if (!imageRef.current) return { x: 0, y: 0 };
-    // Use cached rect to avoid layout thrashing on high-frequency Apple Pencil events
-    if (!cachedRectRef.current) {
-      cachedRectRef.current = imageRef.current.getBoundingClientRect();
-    }
-    const rect = cachedRectRef.current;
+    const rect = imageRef.current.getBoundingClientRect();
     return {
       x: (e.clientX - rect.left) / rect.width,
       y: (e.clientY - rect.top) / rect.height
@@ -245,10 +235,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     if (!isDrawingEnabled || e.pointerType === 'touch') return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    // Get fresh rect measurement at start of drawing
-    if (imageRef.current) {
-      cachedRectRef.current = imageRef.current.getBoundingClientRect();
-    }
     const coords = getNormalizedCoords(e);
     setStartPos(coords);
     setIsDrawing(true);
@@ -268,8 +254,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   const handlePointerUp = async (e: React.PointerEvent) => {
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    // Clear cached rect when drawing ends
-    cachedRectRef.current = null;
     if (!isDrawing || !tempRect) {
       setIsDrawing(false);
       return;
@@ -439,7 +423,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             doubleClick={{ mode: 'reset' }}
             panning={{ disabled: isDrawingEnabled, velocityDisabled: true }}
             pinch={{ disabled: isDrawingEnabled }}
-            onTransformed={handleTransformed}
           >
             <TransformComponent
               wrapperStyle={{
