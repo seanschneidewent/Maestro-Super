@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as pdfjs from 'pdfjs-dist';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { ContextPointer } from '../../types';
 
@@ -54,7 +55,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Viewer state
   const [pageNumber, setPageNumber] = useState(1);
-  const [zoom, setZoom] = useState(1);
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -67,6 +67,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef>(null);
 
   // Measure container size
   useEffect(() => {
@@ -147,48 +148,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     convertPdfToImages();
   }, [file]);
 
-  // Store center point for zoom operations
-  const zoomCenterRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Capture current viewport center as fraction of content
-  const captureCenter = () => {
-    if (!containerRef.current) return;
-    const container = containerRef.current;
-    zoomCenterRef.current = {
-      x: (container.scrollLeft + container.clientWidth / 2) / container.scrollWidth,
-      y: (container.scrollTop + container.clientHeight / 2) / container.scrollHeight,
-    };
-  };
-
-  // Zoom handlers
+  // Zoom handlers using transform API
   const handleZoomIn = () => {
-    captureCenter();
-    setZoom(prev => Math.min(prev + 0.25, 4));
+    transformRef.current?.zoomIn(0.5);
   };
   const handleZoomOut = () => {
-    captureCenter();
-    setZoom(prev => Math.max(prev - 0.25, 0.5));
+    transformRef.current?.zoomOut(0.5);
   };
   const handleZoomReset = () => {
-    zoomCenterRef.current = null; // Reset to default centering
-    setZoom(1);
+    transformRef.current?.resetTransform();
   };
 
-  // Restore center position after zoom changes
+  // Reset transform when page changes
   useEffect(() => {
-    if (!containerRef.current || !zoomCenterRef.current) return;
-
-    // Use requestAnimationFrame to ensure layout is complete
-    requestAnimationFrame(() => {
-      const container = containerRef.current;
-      if (!container || !zoomCenterRef.current) return;
-
-      const { x, y } = zoomCenterRef.current;
-      container.scrollLeft = x * container.scrollWidth - container.clientWidth / 2;
-      container.scrollTop = y * container.scrollHeight - container.clientHeight / 2;
-      zoomCenterRef.current = null;
-    });
-  }, [zoom]);
+    transformRef.current?.resetTransform();
+  }, [pageNumber]);
 
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
@@ -268,25 +242,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Current page data
   const currentImage = pageImages[pageNumber - 1];
   const currentPagePointers = pointers.filter(p => p.pageId === fileId);
-
-  // Center scroll position when page changes or images load
-  useEffect(() => {
-    if (!containerRef.current || !currentImage) return;
-
-    // Use setTimeout to ensure layout is complete after render
-    const timer = setTimeout(() => {
-      const container = containerRef.current;
-      if (!container) return;
-
-      // Scroll to center the content
-      const scrollLeft = Math.max(0, (container.scrollWidth - container.clientWidth) / 2);
-      const scrollTop = Math.max(0, (container.scrollHeight - container.clientHeight) / 2);
-      container.scrollLeft = scrollLeft;
-      container.scrollTop = scrollTop;
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [pageNumber, currentImage, pageImages.length]);
 
   // Calculate display dimensions to fit container at zoom=1
   const displayDimensions = currentImage ? (() => {
@@ -369,16 +324,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         <div className="flex flex-col gap-1 border-b border-white/10 pb-2 mb-1">
           <button
             onClick={handleZoomIn}
-            disabled={zoom >= 4}
-            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
             title="Zoom In"
           >
             <ZoomIn size={18} />
           </button>
           <button
             onClick={handleZoomOut}
-            disabled={zoom <= 0.5}
-            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
             title="Zoom Out"
           >
             <ZoomOut size={18} />
@@ -390,9 +343,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           >
             <Maximize size={18} />
           </button>
-          <div className="text-[10px] text-slate-400 text-center py-1 border-t border-white/10 mt-1">
-            {Math.round(zoom * 100)}%
-          </div>
         </div>
         <div className="flex flex-col gap-1">
           <button
@@ -433,23 +383,30 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         </div>
       )}
 
-      {/* Canvas Area - scrollable surface */}
+      {/* Canvas Area - pinch-to-zoom enabled */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto canvas-grid"
+        className="flex-1 canvas-grid"
         style={{ position: 'relative' }}
       >
-        {currentImage && (() => {
-          const contentWidth = displayDimensions.width * zoom;
-          const contentHeight = displayDimensions.height * zoom;
-
-          return (
-            <div
-              style={{
-                minWidth: '100%',
-                minHeight: '100%',
-                width: contentWidth + 64,
-                height: contentHeight + 64,
+        {currentImage && (
+          <TransformWrapper
+            ref={transformRef}
+            initialScale={1}
+            minScale={0.5}
+            maxScale={5}
+            centerOnInit={true}
+            doubleClick={{ mode: 'reset' }}
+            panning={{ disabled: activeTool === 'rect', velocityDisabled: true }}
+          >
+            <TransformComponent
+              wrapperStyle={{
+                width: '100%',
+                height: '100%',
+              }}
+              contentStyle={{
+                width: '100%',
+                height: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -460,8 +417,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 className="relative shadow-2xl select-none"
                 style={{
                   cursor: activeTool === 'rect' ? 'crosshair' : 'default',
-                  width: contentWidth,
-                  height: contentHeight,
+                  width: displayDimensions.width,
+                  height: displayDimensions.height,
                 }}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
@@ -475,55 +432,55 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   draggable={false}
                 />
 
-              {/* Annotation overlays */}
-              {currentPagePointers.map(p => (
-                <div
-                  key={p.id}
-                  onClick={() => setSelectedPointerId(p.id)}
-                  className={`absolute pointer-box cursor-pointer group animate-scale-in ${selectedPointerId === p.id ? 'selected' : ''}`}
-                  style={{
-                    left: `${p.bboxX * 100}%`,
-                    top: `${p.bboxY * 100}%`,
-                    width: `${p.bboxWidth * 100}%`,
-                    height: `${p.bboxHeight * 100}%`,
-                  }}
-                >
-                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 glass px-3 py-1.5 rounded-lg whitespace-nowrap z-10 pointer-events-none transition-opacity duration-200">
-                    <span className="text-xs text-white font-medium">{p.title}</span>
+                {/* Annotation overlays */}
+                {currentPagePointers.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => setSelectedPointerId(p.id)}
+                    className={`absolute pointer-box cursor-pointer group animate-scale-in ${selectedPointerId === p.id ? 'selected' : ''}`}
+                    style={{
+                      left: `${p.bboxX * 100}%`,
+                      top: `${p.bboxY * 100}%`,
+                      width: `${p.bboxWidth * 100}%`,
+                      height: `${p.bboxHeight * 100}%`,
+                    }}
+                  >
+                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 glass px-3 py-1.5 rounded-lg whitespace-nowrap z-10 pointer-events-none transition-opacity duration-200">
+                      <span className="text-xs text-white font-medium">{p.title}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
 
-              {/* Highlighted pointer (from context panel) */}
-              {highlightedBounds && (
-                <div
-                  className="absolute border-2 border-orange-400 bg-orange-400/20 rounded-sm
-                             shadow-[0_0_20px_rgba(249,115,22,0.5)] animate-pulse pointer-events-none z-20"
-                  style={{
-                    left: `${highlightedBounds.x * 100}%`,
-                    top: `${highlightedBounds.y * 100}%`,
-                    width: `${highlightedBounds.w * 100}%`,
-                    height: `${highlightedBounds.h * 100}%`,
-                  }}
-                />
-              )}
+                {/* Highlighted pointer (from context panel) */}
+                {highlightedBounds && (
+                  <div
+                    className="absolute border-2 border-orange-400 bg-orange-400/20 rounded-sm
+                               shadow-[0_0_20px_rgba(249,115,22,0.5)] animate-pulse pointer-events-none z-20"
+                    style={{
+                      left: `${highlightedBounds.x * 100}%`,
+                      top: `${highlightedBounds.y * 100}%`,
+                      width: `${highlightedBounds.w * 100}%`,
+                      height: `${highlightedBounds.h * 100}%`,
+                    }}
+                  />
+                )}
 
-              {/* Temp drawing rect */}
-              {tempRect && (
-                <div
-                  className="absolute border-2 border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan animate-pulse"
-                  style={{
-                    left: `${tempRect.x * 100}%`,
-                    top: `${tempRect.y * 100}%`,
-                    width: `${tempRect.w * 100}%`,
-                    height: `${tempRect.h * 100}%`,
-                  }}
-                />
-              )}
+                {/* Temp drawing rect */}
+                {tempRect && (
+                  <div
+                    className="absolute border-2 border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan animate-pulse"
+                    style={{
+                      left: `${tempRect.x * 100}%`,
+                      top: `${tempRect.y * 100}%`,
+                      width: `${tempRect.w * 100}%`,
+                      height: `${tempRect.h * 100}%`,
+                    }}
+                  />
+                )}
               </div>
-            </div>
-          );
-        })()}
+            </TransformComponent>
+          </TransformWrapper>
+        )}
       </div>
     </div>
   );
