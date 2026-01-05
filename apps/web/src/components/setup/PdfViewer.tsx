@@ -157,8 +157,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
   const goToNextPage = () => setPageNumber(prev => Math.min(prev + 1, pageImages.length));
 
-  // Drawing handlers
-  const getNormalizedCoords = (e: React.MouseEvent) => {
+  // Drawing handlers (Pointer Events for mouse, touch, and Apple Pencil support)
+  const getNormalizedCoords = (e: React.PointerEvent) => {
     if (!imageRef.current) return { x: 0, y: 0 };
     const rect = imageRef.current.getBoundingClientRect();
     return {
@@ -167,14 +167,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handlePointerDown = (e: React.PointerEvent) => {
     if (!isDrawingEnabled) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const coords = getNormalizedCoords(e);
     setStartPos(coords);
     setIsDrawing(true);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     if (!isDrawing || !isDrawingEnabled) return;
     const coords = getNormalizedCoords(e);
 
@@ -186,7 +188,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     });
   };
 
-  const handleMouseUp = async () => {
+  const handlePointerUp = async (e: React.PointerEvent) => {
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     if (!isDrawing || !tempRect) {
       setIsDrawing(false);
       return;
@@ -379,10 +382,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   cursor: isDrawingEnabled ? 'crosshair' : 'default',
                   width: displayDimensions.width,
                   height: displayDimensions.height,
+                  touchAction: isDrawingEnabled ? 'none' : 'auto',
                 }}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
               >
                 {/* The actual page image */}
                 <img
