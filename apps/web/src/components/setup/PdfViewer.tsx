@@ -484,7 +484,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   <div
                     key={p.id}
                     onClick={() => setSelectedPointerId(p.id)}
-                    className={`absolute border-2 cursor-pointer group ${
+                    className={`absolute border cursor-pointer group ${
                       selectedPointerId === p.id
                         ? 'border-cyan-400 bg-cyan-400/25'
                         : 'border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20'
@@ -505,7 +505,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 {/* Highlighted pointer (from context panel) */}
                 {highlightedBounds && (
                   <div
-                    className="absolute border-2 border-orange-400 bg-orange-400/20 rounded-sm
+                    className="absolute border border-orange-400 bg-orange-400/20 rounded-sm
                                shadow-[0_0_20px_rgba(249,115,22,0.5)] animate-pulse pointer-events-none z-20"
                     style={{
                       left: `${highlightedBounds.x * 100}%`,
@@ -519,7 +519,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 {/* Temp drawing rect */}
                 {tempRect && (
                   <div
-                    className="absolute border-2 border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan animate-pulse"
+                    className="absolute border border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan animate-pulse"
                     style={{
                       left: `${tempRect.x * 100}%`,
                       top: `${tempRect.y * 100}%`,
