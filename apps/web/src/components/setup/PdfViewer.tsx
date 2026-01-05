@@ -438,6 +438,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             centerOnInit={true}
             doubleClick={{ mode: 'reset' }}
             panning={{ disabled: isDrawingEnabled, velocityDisabled: true }}
+            pinch={{ disabled: isDrawingEnabled }}
             onTransformed={handleTransformed}
           >
             <TransformComponent
