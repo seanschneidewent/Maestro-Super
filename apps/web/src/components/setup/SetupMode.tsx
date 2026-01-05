@@ -374,15 +374,33 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   }, [selectedPointerId]);
 
-  // Create pointer via API (with AI analysis)
+  // Create pointer via API (with AI analysis) - uses optimistic UI
   const handlePointerCreate = useCallback(async (data: {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
   }): Promise<ContextPointer | null> => {
     if (!selectedFile) return null;
 
+    // Create temp pointer immediately (optimistic UI)
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const tempPointer: ContextPointer = {
+      id: tempId,
+      pageId: selectedFile.id,
+      title: 'Generating...',
+      description: '',
+      bboxX: data.bounds.xNorm,
+      bboxY: data.bounds.yNorm,
+      bboxWidth: data.bounds.wNorm,
+      bboxHeight: data.bounds.hNorm,
+      isGenerating: true,
+    };
+
+    // Show box immediately
+    setPointers(prev => [...prev, tempPointer]);
+    setSelectedPointerId(tempId);
+
     try {
-      // Only send bounding box - AI will generate title/description
+      // API call runs in background while user sees the box
       const created = await api.pointers.create(selectedFile.id, {
         bboxX: data.bounds.xNorm,
         bboxY: data.bounds.yNorm,
@@ -405,8 +423,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         hasEmbedding: created.hasEmbedding,
       };
 
-      // Update state directly in SetupMode (where pointers state lives)
-      setPointers(prev => [...prev, newPointer]);
+      // Replace temp pointer with real one
+      setPointers(prev => prev.map(p => p.id === tempId ? newPointer : p));
       setSelectedPointerId(created.id);
 
       // Trigger hierarchy refresh
@@ -414,6 +432,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
       return newPointer;
     } catch (err) {
+      // Remove temp pointer on failure
+      setPointers(prev => prev.filter(p => p.id !== tempId));
+      setSelectedPointerId(null);
       console.error('Failed to create pointer:', err);
       return null;
     }

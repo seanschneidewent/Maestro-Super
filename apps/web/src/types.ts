@@ -65,6 +65,7 @@ export interface ContextPointer {
   pngPath?: string;
   hasEmbedding?: boolean;
   references?: PointerReference[];
+  isGenerating?: boolean;  // True while waiting for AI analysis
 }
 
 export interface ChatMessage {
