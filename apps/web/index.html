@@ -184,12 +184,21 @@
         background: radial-gradient(ellipse at top, #162032 0%, #0f172a 50%, #080d19 100%);
       }
 
-      /* Canvas grid background for PDF viewer */
+      /* Canvas grid background for PDF viewer (dark - setup mode) */
       .canvas-grid {
         background:
           linear-gradient(rgba(100, 116, 139, 0.07) 1px, transparent 1px),
           linear-gradient(90deg, rgba(100, 116, 139, 0.07) 1px, transparent 1px),
           radial-gradient(ellipse at top, #162032 0%, #0f172a 50%, #080d19 100%);
+        background-size: 24px 24px, 24px 24px, 100% 100%;
+      }
+
+      /* Light blueprint grid background (use mode) */
+      .blueprint-grid {
+        background:
+          linear-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(59, 130, 246, 0.08) 1px, transparent 1px),
+          #f8fafc;
         background-size: 24px 24px, 24px 24px, 100% 100%;
       }
 

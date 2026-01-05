@@ -270,7 +270,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
         {/* Canvas Area - pinch-to-zoom enabled */}
         <div
           ref={containerRef}
-          className="flex-1 bg-slate-100"
+          className="flex-1 blueprint-grid"
           style={{ position: 'relative' }}
         >
           {/* Loading overlay - shown on top of viewer when loading */}
