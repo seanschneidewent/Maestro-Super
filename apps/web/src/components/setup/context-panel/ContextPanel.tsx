@@ -19,6 +19,7 @@ interface ContextPanelProps {
   refreshTrigger?: number;
   onNavigateToPage: (pageId: string) => void;
   onHighlightPointer?: (pointerId: string) => void;
+  onPointerDelete?: (pointerId: string) => void;
   expandedNodes: string[];
   setExpandedNodes: (updater: string[] | ((prev: string[]) => string[])) => void;
   focusNodeId?: string | null;
@@ -34,6 +35,7 @@ export function ContextPanel({
   refreshTrigger,
   onNavigateToPage,
   onHighlightPointer,
+  onPointerDelete,
   expandedNodes,
   setExpandedNodes,
   focusNodeId,
@@ -98,6 +100,7 @@ export function ContextPanel({
           onNavigateToPage(pageId);
           onHighlightPointer?.(pointerId);
         }}
+        onPointerDelete={onPointerDelete}
       />
     );
   }

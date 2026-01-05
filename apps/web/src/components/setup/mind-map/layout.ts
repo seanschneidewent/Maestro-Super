@@ -9,6 +9,7 @@ interface LayoutCallbacks {
   onPageClick: (id: string, disciplineId: string) => void;
   onPageExpand: (id: string) => void;
   onPointerClick: (id: string, pageId: string, disciplineId: string) => void;
+  onPointerDelete: (id: string) => void;
 }
 
 interface LayoutOptions {
@@ -197,6 +198,7 @@ export function layoutHierarchy(
                 pageId: page.id,
                 disciplineId: discipline.id,
                 onClick: () => callbacks.onPointerClick(pointer.id, page.id, discipline.id),
+                onDelete: () => callbacks.onPointerDelete(pointer.id),
                 animationKey: `${pointerNodeId}-${isPageExpanded}`,
               },
             });

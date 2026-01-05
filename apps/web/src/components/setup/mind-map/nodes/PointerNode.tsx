@@ -1,10 +1,10 @@
 import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
-import { Crosshair } from 'lucide-react';
+import { Crosshair, X } from 'lucide-react';
 import type { PointerNodeData } from '../types';
 
 function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
-  const { title, onClick, animationKey } = data;
+  const { title, onClick, onDelete, animationKey } = data;
   const divRef = useRef<HTMLDivElement>(null);
   const prevAnimationKey = useRef(animationKey);
 
@@ -47,7 +47,20 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
       >
         <Crosshair size={10} className="text-violet-400 shrink-0" />
 
-        <p className="text-[11px] text-slate-300 truncate">{title}</p>
+        <p className="text-[11px] text-slate-300 truncate flex-1">{title}</p>
+
+        {/* Delete button - appears on hover */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20
+                     text-slate-500 hover:text-red-400 transition-all shrink-0"
+          title="Delete pointer"
+        >
+          <X size={12} />
+        </button>
       </div>
     </div>
   );

@@ -29,6 +29,7 @@ interface ContextMindMapProps {
   activePageId?: string;
   onPageClick?: (pageId: string, disciplineId: string) => void;
   onPointerClick?: (pointerId: string, pageId: string, disciplineId: string) => void;
+  onPointerDelete?: (pointerId: string) => void;
   onDisciplineClick?: (disciplineId: string) => void;
   refreshTrigger?: number;
   expandedNodes: string[];
@@ -42,6 +43,7 @@ function ContextMindMapInner({
   activePageId,
   onPageClick,
   onPointerClick,
+  onPointerDelete,
   onDisciplineClick,
   refreshTrigger,
   expandedNodes,
@@ -99,7 +101,10 @@ function ContextMindMapInner({
     onPointerClick: (id: string, pageId: string, disciplineId: string) => {
       onPointerClick?.(id, pageId, disciplineId);
     },
-  }), [hierarchy, toggleExpanded, onDisciplineClick, onPageClick, onPointerClick]);
+    onPointerDelete: (id: string) => {
+      onPointerDelete?.(id);
+    },
+  }), [hierarchy, toggleExpanded, onDisciplineClick, onPageClick, onPointerClick, onPointerDelete]);
 
   useEffect(() => {
     if (!hierarchy) return;

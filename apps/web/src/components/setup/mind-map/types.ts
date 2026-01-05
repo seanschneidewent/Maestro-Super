@@ -47,6 +47,7 @@ export interface PointerNodeData {
   pageId: string;
   disciplineId: string;
   onClick: () => void;
+  onDelete: () => void;
   animationKey?: string;
 }
 

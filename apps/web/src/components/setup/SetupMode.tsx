@@ -890,6 +890,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 refreshTrigger={hierarchyRefresh}
                 onNavigateToPage={handleNavigateToPage}
                 onHighlightPointer={handleHighlightPointer}
+                onPointerDelete={deletePointer}
                 expandedNodes={expandedNodes}
                 setExpandedNodes={setExpandedNodes}
                 focusNodeId={focusPointerId}
