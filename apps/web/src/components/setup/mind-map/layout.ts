@@ -172,12 +172,15 @@ export function layoutHierarchy(
         ));
 
         if (isPageExpanded && page.pointers.length > 0) {
+          // Add extra height padding for pointer nodes to improve vertical spacing
+          const POINTER_DAGRE_HEIGHT_PADDING = 16;
+
           page.pointers.forEach((pointer) => {
             const pointerNodeId = pointer.id;
 
             g.setNode(pointerNodeId, {
               width: NODE_DIMENSIONS.pointer.width,
-              height: NODE_DIMENSIONS.pointer.height,
+              height: NODE_DIMENSIONS.pointer.height + POINTER_DAGRE_HEIGHT_PADDING,
             });
 
             g.setEdge(pageNodeId, pointerNodeId);

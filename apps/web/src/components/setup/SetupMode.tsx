@@ -72,6 +72,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [highlightedPointer, setHighlightedPointer] = useState<{
     bounds: { x: number; y: number; w: number; h: number };
   } | null>(null);
+  const [focusPointerId, setFocusPointerId] = useState<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
@@ -120,6 +121,22 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
     return null;
   };
+
+  // Helper to find discipline ID for a given page ID
+  const findDisciplineIdForPage = useCallback((pageId: string): string | null => {
+    if (!hierarchy) return null;
+    for (const disc of hierarchy.disciplines) {
+      if (disc.pages.some(p => p.id === pageId)) {
+        return disc.id;
+      }
+    }
+    return null;
+  }, [hierarchy]);
+
+  // Clear focus pointer ID after scroll completes
+  const handleFocusComplete = useCallback(() => {
+    setFocusPointerId(null);
+  }, []);
 
   // Sync selectedFileId to parent when selection changes
   const handleFileSelect = (file: ProjectFile) => {
@@ -427,6 +444,22 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       setPointers(prev => prev.map(p => p.id === tempId ? newPointer : p));
       setSelectedPointerId(created.id);
 
+      // Auto-expand path to new pointer in mind map
+      const disciplineId = findDisciplineIdForPage(selectedFile.id);
+      if (disciplineId && hierarchy) {
+        const projectNodeId = `project-${hierarchy.name}`;
+        setExpandedNodes(prev => {
+          const newSet = new Set(prev);
+          newSet.add(projectNodeId);
+          newSet.add(disciplineId);
+          newSet.add(selectedFile.id);
+          return Array.from(newSet);
+        });
+      }
+
+      // Signal to scroll/center on the new pointer after hierarchy refreshes
+      setFocusPointerId(created.id);
+
       // Trigger hierarchy refresh
       setHierarchyRefresh(prev => prev + 1);
 
@@ -438,7 +471,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       console.error('Failed to create pointer:', err);
       return null;
     }
-  }, [selectedFile?.id]);
+  }, [selectedFile?.id, hierarchy, findDisciplineIdForPage, setExpandedNodes]);
 
   const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -859,6 +892,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 onHighlightPointer={handleHighlightPointer}
                 expandedNodes={expandedNodes}
                 setExpandedNodes={setExpandedNodes}
+                focusNodeId={focusPointerId}
+                onFocusComplete={handleFocusComplete}
               />
            </div>
         </div>

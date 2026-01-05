@@ -21,6 +21,8 @@ interface ContextPanelProps {
   onHighlightPointer?: (pointerId: string) => void;
   expandedNodes: string[];
   setExpandedNodes: (updater: string[] | ((prev: string[]) => string[])) => void;
+  focusNodeId?: string | null;
+  onFocusComplete?: () => void;
 }
 
 export function ContextPanel({
@@ -34,6 +36,8 @@ export function ContextPanel({
   onHighlightPointer,
   expandedNodes,
   setExpandedNodes,
+  focusNodeId,
+  onFocusComplete,
 }: ContextPanelProps) {
   // Get data for current view from hierarchy
   const getDiscipline = (id: string): DisciplineInHierarchy | undefined => {
@@ -75,6 +79,8 @@ export function ContextPanel({
         refreshTrigger={refreshTrigger}
         expandedNodes={expandedNodes}
         setExpandedNodes={setExpandedNodes}
+        focusNodeId={focusNodeId}
+        onFocusComplete={onFocusComplete}
         onDisciplineClick={(disciplineId) => {
           setPanelView({ type: 'discipline', disciplineId });
         }}

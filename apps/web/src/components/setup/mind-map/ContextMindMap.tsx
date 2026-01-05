@@ -13,6 +13,7 @@ import 'reactflow/dist/style.css';
 
 import { ProjectNode, DisciplineNode, PageNode, PointerNode } from './nodes';
 import { layoutHierarchy, getInitialExpandedState } from './layout';
+import { NODE_DIMENSIONS } from './types';
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
 import { MindMapSkeleton } from '../../ui/Skeleton';
 
@@ -32,6 +33,8 @@ interface ContextMindMapProps {
   refreshTrigger?: number;
   expandedNodes: string[];
   setExpandedNodes: (updater: string[] | ((prev: string[]) => string[])) => void;
+  focusNodeId?: string | null;
+  onFocusComplete?: () => void;
 }
 
 function ContextMindMapInner({
@@ -43,11 +46,14 @@ function ContextMindMapInner({
   refreshTrigger,
   expandedNodes,
   setExpandedNodes,
+  focusNodeId,
+  onFocusComplete,
 }: ContextMindMapProps) {
-  const { fitView } = useReactFlow();
+  const { fitView, getNode, setCenter } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const prevNodeCountRef = useRef(0);
+  const prevFocusNodeIdRef = useRef<string | null>(null);
 
   const { data: hierarchy, isLoading, error, refetch } = useHierarchy(projectId);
   const invalidateHierarchy = useInvalidateHierarchy();
@@ -128,6 +134,28 @@ function ContextMindMapInner({
       });
     }
   }, [nodes.length, fitView]);
+
+  // Scroll to focused node (e.g., after creating a new pointer)
+  useEffect(() => {
+    if (!focusNodeId || focusNodeId === prevFocusNodeIdRef.current || nodes.length === 0) return;
+
+    // Wait for Dagre layout to complete before scrolling
+    const timeoutId = setTimeout(() => {
+      const node = getNode(focusNodeId);
+      if (node) {
+        const dims = NODE_DIMENSIONS.pointer;
+        setCenter(
+          node.position.x + dims.width / 2,
+          node.position.y + dims.height / 2,
+          { zoom: 1.2, duration: 400 }
+        );
+        prevFocusNodeIdRef.current = focusNodeId;
+        onFocusComplete?.();
+      }
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [focusNodeId, nodes, getNode, setCenter, onFocusComplete]);
 
   if (isLoading) {
     return <MindMapSkeleton />;
