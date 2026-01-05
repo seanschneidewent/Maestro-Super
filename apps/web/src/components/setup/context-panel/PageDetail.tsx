@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
 import { ArrowLeft, Eye, Crosshair } from 'lucide-react';
-import { api, PageResponse, PointerResponse } from '../../../lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { api, PageResponse } from '../../../lib/api';
+import { usePagePointers } from '../../../hooks/usePointers';
 
 interface PageDetailProps {
   pageId: string;
@@ -17,31 +18,17 @@ export function PageDetail({
   onPointerClick,
   onViewPage,
 }: PageDetailProps) {
-  const [page, setPage] = useState<PageResponse | null>(null);
-  const [pointers, setPointers] = useState<PointerResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use React Query for page data
+  const { data: page, isLoading: pageLoading, error: pageError } = useQuery<PageResponse>({
+    queryKey: ['page', pageId],
+    queryFn: () => api.pages.get(pageId),
+    staleTime: 60_000,  // 1 minute
+  });
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [pageData, pointersData] = await Promise.all([
-          api.pages.get(pageId),
-          api.pointers.list(pageId),
-        ]);
-        setPage(pageData);
-        setPointers(pointersData);
-      } catch (err) {
-        console.error('Failed to load page:', err);
-        setError('Failed to load page details');
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-  }, [pageId]);
+  // Use shared pointer cache (same data as SetupMode sees)
+  const { data: pointers = [], isLoading: pointersLoading } = usePagePointers(pageId);
+
+  const loading = pageLoading || pointersLoading;
 
   if (loading) {
     return (
@@ -51,10 +38,10 @@ export function PageDetail({
     );
   }
 
-  if (error || !page) {
+  if (pageError || !page) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-red-400 gap-2">
-        <p>{error || 'Page not found'}</p>
+        <p>{pageError ? 'Failed to load page details' : 'Page not found'}</p>
         <button
           onClick={onBack}
           className="text-sm text-slate-400 hover:text-slate-300 flex items-center gap-1"

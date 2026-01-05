@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback, startTransition } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { ContextPanel, PanelView } from './context-panel';
@@ -6,10 +7,10 @@ import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, DisciplineWithPagesResponse, isNotFoundError } from '../../lib/api';
+import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
-import { useOptimisticDeletePointer } from '../../hooks/useHierarchy';
+import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -36,8 +37,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   setupState,
   setSetupState,
 }) => {
+  const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
-  const [pointers, setPointers] = useState<ContextPointer[]>([]);
 
   // Use lifted state from props (but keep local versions for smooth updates)
   const selectedPointerId = setupState.selectedPointerId;
@@ -60,7 +61,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
-  const [isLoadingPointers, setIsLoadingPointers] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -68,7 +68,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
-  const optimisticDeletePointer = useOptimisticDeletePointer();
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
   const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
   const [highlightedPointer, setHighlightedPointer] = useState<{
@@ -77,12 +76,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [focusPointerId, setFocusPointerId] = useState<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
-  // Race condition prevention refs
-  const loadPointersAbortRef = useRef<AbortController | null>(null);
-  const createPointerRequestIdRef = useRef(0);
-  const activeCreatesRef = useRef<Set<string>>(new Set()); // Track temp pointer IDs during creation
-  const currentPageIdRef = useRef<string | null>(null); // Track current page for stale request detection
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
+
+  // Get pointers from React Query cache (single source of truth)
+  const pageId = selectedFile?.type !== FileType.FOLDER ? selectedFile?.id ?? null : null;
+  const { data: pointers = [], isLoading: isLoadingPointers } = usePagePointersAsContext(pageId);
+
+  // Mutations for creating/deleting pointers
+  const createPointerMutation = useCreatePointer(projectId);
+  const deletePointerMutation = useDeletePointer(projectId);
 
   // Convert discipline hierarchy to ProjectFile format for tree display
   const convertDisciplinesToProjectFiles = (
@@ -220,100 +222,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     loadFiles();
   }, [projectId]);
 
-  // Load pointers when page is selected (with race condition prevention)
-  useEffect(() => {
-    if (!selectedFile || selectedFile.type === FileType.FOLDER) {
-      setPointers([]);
-      return;
-    }
-
-    // Cancel any in-flight request to prevent race conditions
-    if (loadPointersAbortRef.current) {
-      loadPointersAbortRef.current.abort();
-    }
-
-    const abortController = new AbortController();
-    loadPointersAbortRef.current = abortController;
-
-    // Capture values at effect start - these won't change during await
-    const pageId = selectedFile.id;
-    const pageName = selectedFile.name;
-
-    // Update the current page ref for stale request detection in handlePointerCreate
-    currentPageIdRef.current = pageId;
-
-    // Clear stale pointers but preserve generating pointers for THIS page only
-    // This prevents race conditions where a pointer disappears during Gemini analysis
-    // but also ensures old page's generating pointers don't leak into new page
-    setPointers(prev => prev.filter(p =>
-      p.isGenerating &&
-      activeCreatesRef.current.has(p.id) &&
-      p.pageId === pageId
-    ));
-
-    async function loadPointers() {
-      try {
-        setIsLoadingPointers(true);
-        console.log(`[Pointers] Loading for page: ${pageName} (${pageId})`);
-
-        const pointerList = await api.pointers.list(pageId, abortController.signal);
-
-        // Check if this request was aborted (user switched pages)
-        if (abortController.signal.aborted) {
-          console.log(`[Pointers] Request aborted for: ${pageName}`);
-          return;
-        }
-
-        console.log(`[Pointers] Loaded ${pointerList.length} pointers for: ${pageName}`);
-
-        // Merge loaded pointers with any that are still being created
-        // This prevents losing pointers that are in the middle of Gemini analysis
-        const loadedPointers = pointerList.map(p => ({
-          id: p.id,
-          pageId: p.pageId,
-          title: p.title,
-          description: p.description,
-          textSpans: p.textSpans,
-          bboxX: p.bboxX,
-          bboxY: p.bboxY,
-          bboxWidth: p.bboxWidth,
-          bboxHeight: p.bboxHeight,
-          pngPath: p.pngPath,
-          hasEmbedding: p.hasEmbedding,
-        }));
-
-        setPointers(prev => {
-          // Keep generating pointers for THIS page that aren't in the loaded list
-          const loadedIds = new Set(loadedPointers.map(p => p.id));
-          const generatingPointers = prev.filter(p =>
-            p.isGenerating &&
-            activeCreatesRef.current.has(p.id) &&
-            p.pageId === pageId &&
-            !loadedIds.has(p.id)
-          );
-          return [...loadedPointers, ...generatingPointers];
-        });
-      } catch (err: unknown) {
-        // Ignore AbortError - it's expected when switching pages
-        if (err instanceof Error && err.name === 'AbortError') {
-          return;
-        }
-        console.error('Failed to load pointers:', err);
-        setPointers([]);
-      } finally {
-        if (!abortController.signal.aborted) {
-          setIsLoadingPointers(false);
-        }
-      }
-    }
-    loadPointers();
-
-    // Cleanup: abort on unmount or when selectedFile changes
-    return () => {
-      abortController.abort();
-    };
-  }, [selectedFile?.id, selectedFile?.name]);
-
   // Fetch file from storage when page is selected
   useEffect(() => {
     if (!selectedFile || selectedFile.file || selectedFile.type === FileType.FOLDER) {
@@ -385,26 +293,25 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Update pointer with debounced API call
   const updatePointer = useCallback((id: string, updates: Partial<ContextPointer>) => {
-    // Update local state immediately
-    setPointers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
-
     // Clear existing timeout for this pointer
     if (updateTimeoutRef.current[id]) {
       clearTimeout(updateTimeoutRef.current[id]);
     }
 
-    // Debounce API call
+    // Debounce API call - React Query will handle cache invalidation
     updateTimeoutRef.current[id] = setTimeout(async () => {
       try {
         await api.pointers.update(id, {
           title: updates.title,
           description: updates.description,
         });
+        // Invalidate cache to refresh the pointer data
+        queryClient.invalidateQueries({ queryKey: ['pointers', pageId] });
       } catch (err) {
         console.error('Failed to update pointer:', err);
       }
     }, 300);
-  }, []);
+  }, [pageId, queryClient]);
 
   // Handle highlighting a pointer (from context panel)
   const handleHighlightPointer = useCallback(async (pointerId: string) => {
@@ -440,146 +347,67 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   }, [uploadedFiles]);
 
-  // Delete pointer with API call - uses optimistic update for instant UI
-  const deletePointer = useCallback(async (id: string) => {
-    // Update local pointers state immediately
-    setPointers(prev => prev.filter(p => p.id !== id));
+  // Delete pointer - uses mutation with optimistic update
+  const deletePointer = useCallback((id: string) => {
     if (selectedPointerId === id) {
       setSelectedPointerId(null);
     }
 
-    // Optimistically update hierarchy cache (instant mind map update)
-    const rollback = optimisticDeletePointer(projectId, id);
+    // Use the mutation - it handles optimistic updates and cache invalidation
+    deletePointerMutation.mutate({
+      pointerId: id,
+      pageId: pageId!,
+    });
+  }, [selectedPointerId, deletePointerMutation, pageId]);
 
-    // Call API in background
-    try {
-      await api.pointers.delete(id);
-    } catch (err: unknown) {
-      // 404 means pointer was already deleted (e.g., stale cache) - that's fine
-      if (!isNotFoundError(err)) {
-        console.error('Failed to delete pointer:', err);
-        // Rollback optimistic update on real errors
-        rollback();
-      }
-    }
-  }, [selectedPointerId, optimisticDeletePointer, projectId]);
-
-  // Create pointer via API (with AI analysis) - uses optimistic UI and race condition prevention
+  // Create pointer via API (with AI analysis) - uses mutation with optimistic UI
   const handlePointerCreate = useCallback(async (data: {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
   }): Promise<ContextPointer | null> => {
-    if (!selectedFile) return null;
+    if (!selectedFile || !pageId) return null;
 
-    // Capture values at start - these won't change during await
-    const pageId = selectedFile.id;
-    const pageName = selectedFile.name;
-    const requestId = ++createPointerRequestIdRef.current;
-
-    console.log(`[Pointer Create #${requestId}] Starting on page: ${pageName} (${pageId})`);
-
-    // Create temp pointer immediately (optimistic UI)
     const tempId = `temp-${crypto.randomUUID()}`;
-    const tempPointer: ContextPointer = {
-      id: tempId,
-      pageId: pageId,  // Use captured value
-      title: 'Generating...',
-      description: '',
-      bboxX: data.bounds.xNorm,
-      bboxY: data.bounds.yNorm,
-      bboxWidth: data.bounds.wNorm,
-      bboxHeight: data.bounds.hNorm,
-      isGenerating: true,
-    };
-
-    // Track this temp pointer ID so it survives effect re-runs
-    activeCreatesRef.current.add(tempId);
-
-    // Show box immediately
-    setPointers(prev => [...prev, tempPointer]);
-    setSelectedPointerId(tempId);
 
     try {
-      // API call runs in background while user sees the box
-      const created = await api.pointers.create(pageId, {  // Use captured value
-        bboxX: data.bounds.xNorm,
-        bboxY: data.bounds.yNorm,
-        bboxWidth: data.bounds.wNorm,
-        bboxHeight: data.bounds.hNorm,
+      const result = await createPointerMutation.mutateAsync({
+        pageId,
+        bounds: {
+          bboxX: data.bounds.xNorm,
+          bboxY: data.bounds.yNorm,
+          bboxWidth: data.bounds.wNorm,
+          bboxHeight: data.bounds.hNorm,
+        },
+        tempId,
+        onCreated: (created) => {
+          // Select the new pointer
+          setSelectedPointerId(created.id);
+
+          // Auto-expand path to new pointer in mind map
+          const disciplineId = findDisciplineIdForPage(pageId);
+          if (disciplineId && hierarchy) {
+            const projectNodeId = `project-${hierarchy.name}`;
+            setExpandedNodes(prev => {
+              const newSet = new Set(prev);
+              newSet.add(projectNodeId);
+              newSet.add(disciplineId);
+              newSet.add(pageId);
+              return Array.from(newSet);
+            });
+          }
+
+          // Signal to scroll/center on the new pointer
+          setFocusPointerId(created.id);
+        },
       });
 
-      // Check if user switched to a different page during API call
-      // We compare the captured pageId to the current page ref (which updates when page changes)
-      if (currentPageIdRef.current !== pageId) {
-        console.warn(`[Pointer Create #${requestId}] Page changed during API call, discarding`);
-        console.warn(`  Started on: ${pageId} (${pageName})`);
-        console.warn(`  Current page: ${currentPageIdRef.current}`);
-        // Remove temp pointer but don't add the real one to wrong page
-        activeCreatesRef.current.delete(tempId);
-        setPointers(prev => prev.filter(p => p.id !== tempId));
-        return null;
-      }
-
-      // Verify the response pageId matches what we expect (detect backend bugs)
-      if (created.pageId !== pageId) {
-        console.error(`[Pointer Create #${requestId}] PAGE ID MISMATCH!`);
-        console.error(`  Expected: ${pageId} (${pageName})`);
-        console.error(`  Received: ${created.pageId}`);
-      }
-
-      console.log(`[Pointer Create #${requestId}] Success on page: ${pageName}`);
-
-      const newPointer: ContextPointer = {
-        id: created.id,
-        pageId: created.pageId,
-        title: created.title,
-        description: created.description,
-        textSpans: created.textSpans,
-        ocrData: created.ocrData,
-        bboxX: created.bboxX,
-        bboxY: created.bboxY,
-        bboxWidth: created.bboxWidth,
-        bboxHeight: created.bboxHeight,
-        pngPath: created.pngPath,
-        hasEmbedding: created.hasEmbedding,
-      };
-
-      // Replace temp pointer with real one
-      activeCreatesRef.current.delete(tempId);
-      setPointers(prev => prev.map(p => p.id === tempId ? newPointer : p));
-      setSelectedPointerId(created.id);
-
-      // Auto-expand path to new pointer in mind map
-      const disciplineId = findDisciplineIdForPage(pageId);  // Use captured value
-      if (disciplineId && hierarchy) {
-        const projectNodeId = `project-${hierarchy.name}`;
-        setExpandedNodes(prev => {
-          const newSet = new Set(prev);
-          newSet.add(projectNodeId);
-          newSet.add(disciplineId);
-          newSet.add(pageId);  // Use captured value
-          return Array.from(newSet);
-        });
-      }
-
-      // Signal to scroll/center on the new pointer after hierarchy refreshes
-      setFocusPointerId(created.id);
-
-      // Trigger hierarchy refresh (use startTransition for non-urgent update)
-      startTransition(() => {
-        setHierarchyRefresh(prev => prev + 1);
-      });
-
-      return newPointer;
+      // Convert API response to ContextPointer
+      return toContextPointer(result);
     } catch (err) {
-      console.error(`[Pointer Create #${requestId}] Failed:`, err);
-      // Remove temp pointer on failure
-      activeCreatesRef.current.delete(tempId);
-      setPointers(prev => prev.filter(p => p.id !== tempId));
-      setSelectedPointerId(null);
+      console.error('Failed to create pointer:', err);
       return null;
     }
-  }, [selectedFile?.id, selectedFile?.name, hierarchy, findDisciplineIdForPage, setExpandedNodes]);
+  }, [selectedFile, pageId, hierarchy, findDisciplineIdForPage, setExpandedNodes, createPointerMutation]);
 
   const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -718,7 +546,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Clear selected file if it was deleted
       if (selectedFile && selectedForDeletion.has(selectedFile.id)) {
         setSelectedFile(null);
-        setPointers([]);
+        // Pointers will be cleared automatically since pageId becomes null
       }
 
       // Reload disciplines and pages
@@ -949,7 +777,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     file={selectedFile.file}
                     fileId={selectedFile.id}
                     pointers={pointers}
-                    setPointers={setPointers}
                     selectedPointerId={selectedPointerId}
                     setSelectedPointerId={setSelectedPointerId}
                     isDrawingEnabled={isDrawingEnabled}

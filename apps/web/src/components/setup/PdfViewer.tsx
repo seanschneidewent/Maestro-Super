@@ -83,7 +83,7 @@ interface PdfViewerProps {
   file?: File;
   fileId?: string;
   pointers: ContextPointer[];
-  setPointers: React.Dispatch<React.SetStateAction<ContextPointer[]>>;
+  setPointers?: React.Dispatch<React.SetStateAction<ContextPointer[]>>;  // Optional - only used as fallback
   selectedPointerId: string | null;
   setSelectedPointerId: (id: string | null) => void;
   isDrawingEnabled: boolean;
@@ -280,19 +280,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
 
     // Fallback to local-only pointer creation (should not normally reach here)
-    const newPointer: ContextPointer = {
-      id: crypto.randomUUID(),
-      pageId: fileId || '',
-      title: 'New Context',
-      description: 'Add description...',
-      bboxX: bounds.xNorm,
-      bboxY: bounds.yNorm,
-      bboxWidth: bounds.wNorm,
-      bboxHeight: bounds.hNorm,
-    };
+    if (setPointers) {
+      const newPointer: ContextPointer = {
+        id: crypto.randomUUID(),
+        pageId: fileId || '',
+        title: 'New Context',
+        description: 'Add description...',
+        bboxX: bounds.xNorm,
+        bboxY: bounds.yNorm,
+        bboxWidth: bounds.wNorm,
+        bboxHeight: bounds.hNorm,
+      };
 
-    setPointers(prev => [...prev, newPointer]);
-    setSelectedPointerId(newPointer.id);
+      setPointers(prev => [...prev, newPointer]);
+      setSelectedPointerId(newPointer.id);
+    }
   };
 
   // Current page data - memoized to prevent unnecessary re-renders
