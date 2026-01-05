@@ -21,13 +21,16 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
     animationKey
   } = data;
   const divRef = useRef<HTMLDivElement>(null);
+  const prevAnimationKey = useRef(animationKey);
 
   useEffect(() => {
-    if (divRef.current) {
+    // Only restart animation when animationKey changes, not on initial mount
+    if (divRef.current && prevAnimationKey.current !== animationKey) {
       divRef.current.style.animation = 'none';
       divRef.current.offsetHeight; // Trigger reflow
       divRef.current.style.animation = '';
     }
+    prevAnimationKey.current = animationKey;
   }, [animationKey]);
 
   const statusIcon = getStatusIcon(pointerCount, processedPass2);

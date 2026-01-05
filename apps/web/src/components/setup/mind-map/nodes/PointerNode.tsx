@@ -6,13 +6,16 @@ import type { PointerNodeData } from '../types';
 function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
   const { title, onClick, animationKey } = data;
   const divRef = useRef<HTMLDivElement>(null);
+  const prevAnimationKey = useRef(animationKey);
 
   useEffect(() => {
-    if (divRef.current) {
+    // Only restart animation when animationKey changes, not on initial mount
+    if (divRef.current && prevAnimationKey.current !== animationKey) {
       divRef.current.style.animation = 'none';
       divRef.current.offsetHeight; // Trigger reflow
       divRef.current.style.animation = '';
     }
+    prevAnimationKey.current = animationKey;
   }, [animationKey]);
 
   return (
