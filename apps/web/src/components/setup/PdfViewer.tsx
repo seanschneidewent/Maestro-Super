@@ -7,8 +7,8 @@ import { ContextPointer } from '../../types';
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// Render scale for PNG conversion (2 = retina quality)
-const RENDER_SCALE = 2;
+// Render scale for PNG conversion (4 = crisp at 4x zoom)
+const RENDER_SCALE = 4;
 
 interface PageImage {
   dataUrl: string;
@@ -168,7 +168,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isDrawingEnabled) return;
+    // Only pen (Apple Pencil) and mouse can draw - finger touch passes through to pan/zoom
+    if (!isDrawingEnabled || e.pointerType === 'touch') return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const coords = getNormalizedCoords(e);
@@ -382,7 +383,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   cursor: isDrawingEnabled ? 'crosshair' : 'default',
                   width: displayDimensions.width,
                   height: displayDimensions.height,
-                  touchAction: isDrawingEnabled ? 'none' : 'auto',
                 }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
