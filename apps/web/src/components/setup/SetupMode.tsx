@@ -9,6 +9,7 @@ import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } fr
 import { api, DisciplineWithPagesResponse, isNotFoundError } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
+import { useOptimisticDeletePointer } from '../../hooks/useHierarchy';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -67,6 +68,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
+  const optimisticDeletePointer = useOptimisticDeletePointer();
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
   const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
   const [highlightedPointer, setHighlightedPointer] = useState<{
@@ -413,26 +415,29 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   }, [uploadedFiles]);
 
-  // Delete pointer with API call
+  // Delete pointer with API call - uses optimistic update for instant UI
   const deletePointer = useCallback(async (id: string) => {
-    // Update local state immediately
+    // Update local pointers state immediately
     setPointers(prev => prev.filter(p => p.id !== id));
     if (selectedPointerId === id) {
       setSelectedPointerId(null);
     }
 
-    // Call API
+    // Optimistically update hierarchy cache (instant mind map update)
+    const rollback = optimisticDeletePointer(projectId, id);
+
+    // Call API in background
     try {
       await api.pointers.delete(id);
     } catch (err: unknown) {
       // 404 means pointer was already deleted (e.g., stale cache) - that's fine
       if (!isNotFoundError(err)) {
         console.error('Failed to delete pointer:', err);
+        // Rollback optimistic update on real errors
+        rollback();
       }
     }
-    // Always refresh hierarchy to sync UI with database state
-    setHierarchyRefresh(prev => prev + 1);
-  }, [selectedPointerId]);
+  }, [selectedPointerId, optimisticDeletePointer, projectId]);
 
   // Create pointer via API (with AI analysis) - uses optimistic UI and race condition prevention
   const handlePointerCreate = useCallback(async (data: {
