@@ -4,10 +4,10 @@ import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import type { DisciplineNodeData } from '../types';
 
 function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
-  const { displayName, processed, pageCount, pointerCount, onExpand, onClick, isExpanded } = data;
+  const { displayName, processed, pageCount, pointerCount, onExpand, onClick, isExpanded, animationKey } = data;
 
   return (
-    <div className="relative group animate-scale-in">
+    <div key={animationKey} className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"

@@ -22,6 +22,7 @@ export interface DisciplineNodeData {
   onExpand: () => void;
   onClick: () => void;
   isExpanded: boolean;
+  animationKey?: string;
 }
 
 export interface PageNodeData {
@@ -36,6 +37,7 @@ export interface PageNodeData {
   onClick: () => void;
   isExpanded: boolean;
   isActive: boolean;
+  animationKey?: string;
 }
 
 export interface PointerNodeData {
@@ -45,6 +47,7 @@ export interface PointerNodeData {
   pageId: string;
   disciplineId: string;
   onClick: () => void;
+  animationKey?: string;
 }
 
 export type MindMapNodeData =
@@ -53,7 +56,7 @@ export type MindMapNodeData =
   | PageNodeData
   | PointerNodeData;
 
-export type MindMapNode = Node<MindMapNodeData>;
+export type MindMapNode = Node<MindMapNodeData> & { key?: string };
 export type MindMapEdge = Edge;
 
 export interface LayoutConfig {

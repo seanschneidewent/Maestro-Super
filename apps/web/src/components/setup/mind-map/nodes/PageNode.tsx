@@ -17,14 +17,15 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
     onExpand,
     onClick,
     isExpanded,
-    isActive
+    isActive,
+    animationKey
   } = data;
 
   const statusIcon = getStatusIcon(pointerCount, processedPass2);
   const hasPointers = pointerCount > 0;
 
   return (
-    <div className="relative group animate-scale-in">
+    <div key={animationKey} className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"

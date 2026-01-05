@@ -106,6 +106,7 @@ export function layoutHierarchy(
 
     nodes.push({
       id: disciplineNodeId,
+      key: `${disciplineNodeId}-${isProjectExpanded}`,
       type: 'discipline',
       position: { x: 0, y: 0 },
       data: {
@@ -119,6 +120,7 @@ export function layoutHierarchy(
         onExpand: () => callbacks.onDisciplineExpand(discipline.id),
         onClick: () => callbacks.onDisciplineClick(discipline.id),
         isExpanded: isDisciplineExpanded,
+        animationKey: `${disciplineNodeId}-${isProjectExpanded}`,
       },
     });
 
@@ -143,6 +145,7 @@ export function layoutHierarchy(
 
         nodes.push({
           id: pageNodeId,
+          key: `${pageNodeId}-${isDisciplineExpanded}`,
           type: 'page',
           position: { x: 0, y: 0 },
           data: {
@@ -157,6 +160,7 @@ export function layoutHierarchy(
             onClick: () => callbacks.onPageClick(page.id, discipline.id),
             isExpanded: isPageExpanded,
             isActive: page.id === activePageId,
+            animationKey: `${pageNodeId}-${isDisciplineExpanded}`,
           },
         });
 
@@ -180,6 +184,7 @@ export function layoutHierarchy(
 
             nodes.push({
               id: pointerNodeId,
+              key: `${pointerNodeId}-${isPageExpanded}`,
               type: 'pointer',
               position: { x: 0, y: 0 },
               data: {
@@ -189,6 +194,7 @@ export function layoutHierarchy(
                 pageId: page.id,
                 disciplineId: discipline.id,
                 onClick: () => callbacks.onPointerClick(pointer.id, page.id, discipline.id),
+                animationKey: `${pointerNodeId}-${isPageExpanded}`,
               },
             });
 

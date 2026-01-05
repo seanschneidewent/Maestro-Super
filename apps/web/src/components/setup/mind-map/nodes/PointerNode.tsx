@@ -4,10 +4,10 @@ import { Crosshair } from 'lucide-react';
 import type { PointerNodeData } from '../types';
 
 function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
-  const { title, onClick } = data;
+  const { title, onClick, animationKey } = data;
 
   return (
-    <div className="relative group animate-scale-in">
+    <div key={animationKey} className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"
