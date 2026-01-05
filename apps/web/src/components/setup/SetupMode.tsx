@@ -14,7 +14,7 @@ import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifie
 interface SetupState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
-  activeTool: 'select' | 'rect' | 'text';
+  isDrawingEnabled: boolean;
   expandedNodes: string[];  // Mind map expanded state
 }
 
@@ -40,13 +40,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Use lifted state from props (but keep local versions for smooth updates)
   const selectedPointerId = setupState.selectedPointerId;
-  const activeTool = setupState.activeTool;
+  const isDrawingEnabled = setupState.isDrawingEnabled;
 
   const setSelectedPointerId = (id: string | null) => {
     setSetupState(prev => ({ ...prev, selectedPointerId: id }));
   };
-  const setActiveTool = (tool: 'select' | 'rect' | 'text') => {
-    setSetupState(prev => ({ ...prev, activeTool: tool }));
+  const setIsDrawingEnabled = (enabled: boolean) => {
+    setSetupState(prev => ({ ...prev, isDrawingEnabled: enabled }));
   };
   const expandedNodes = setupState.expandedNodes;
   const setExpandedNodes = (updater: string[] | ((prev: string[]) => string[])) => {
@@ -784,8 +784,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     setPointers={setPointers}
                     selectedPointerId={selectedPointerId}
                     setSelectedPointerId={setSelectedPointerId}
-                    activeTool={activeTool}
-                    setActiveTool={setActiveTool}
+                    isDrawingEnabled={isDrawingEnabled}
+                    setIsDrawingEnabled={setIsDrawingEnabled}
                     onPointerCreate={handlePointerCreate}
                     isLoadingFile={isLoadingFile}
                     fileLoadError={fileLoadError}

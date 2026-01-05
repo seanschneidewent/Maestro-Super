@@ -15,7 +15,7 @@ import { supabase } from './lib/supabase';
 interface SetupState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
-  activeTool: 'select' | 'rect' | 'text';
+  isDrawingEnabled: boolean;
   expandedNodes: string[];
 }
 
@@ -35,7 +35,7 @@ const App: React.FC = () => {
   const [setupState, setSetupState] = useState<SetupState>({
     selectedFileId: null,
     selectedPointerId: null,
-    activeTool: 'select',
+    isDrawingEnabled: false,
     expandedNodes: [],
   });
 

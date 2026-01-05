@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
+import { Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { ContextPointer } from '../../types';
 
 // Set up PDF.js worker
@@ -23,8 +23,8 @@ interface PdfViewerProps {
   setPointers: React.Dispatch<React.SetStateAction<ContextPointer[]>>;
   selectedPointerId: string | null;
   setSelectedPointerId: (id: string | null) => void;
-  activeTool: 'select' | 'rect' | 'text';
-  setActiveTool: (tool: 'select' | 'rect' | 'text') => void;
+  isDrawingEnabled: boolean;
+  setIsDrawingEnabled: (enabled: boolean) => void;
   onPointerCreate?: (data: {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
@@ -41,8 +41,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   setPointers,
   selectedPointerId,
   setSelectedPointerId,
-  activeTool,
-  setActiveTool,
+  isDrawingEnabled,
+  setIsDrawingEnabled,
   onPointerCreate,
   isLoadingFile,
   fileLoadError,
@@ -148,17 +148,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     convertPdfToImages();
   }, [file]);
 
-  // Zoom handlers using transform API
-  const handleZoomIn = () => {
-    transformRef.current?.zoomIn(0.5);
-  };
-  const handleZoomOut = () => {
-    transformRef.current?.zoomOut(0.5);
-  };
-  const handleZoomReset = () => {
-    transformRef.current?.resetTransform();
-  };
-
   // Reset transform when page changes
   useEffect(() => {
     transformRef.current?.resetTransform();
@@ -179,14 +168,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (activeTool !== 'rect') return;
+    if (!isDrawingEnabled) return;
     const coords = getNormalizedCoords(e);
     setStartPos(coords);
     setIsDrawing(true);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || activeTool !== 'rect') return;
+    if (!isDrawing || !isDrawingEnabled) return;
     const coords = getNormalizedCoords(e);
 
     setTempRect({
@@ -319,45 +308,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full relative overflow-hidden">
-      {/* Toolbar */}
-      <div className="absolute top-4 right-4 z-20 flex flex-col gap-1 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
-        <div className="flex flex-col gap-1 border-b border-white/10 pb-2 mb-1">
-          <button
-            onClick={handleZoomIn}
-            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
-            title="Zoom In"
-          >
-            <ZoomIn size={18} />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
-            title="Zoom Out"
-          >
-            <ZoomOut size={18} />
-          </button>
-          <button
-            onClick={handleZoomReset}
-            className="p-2.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all"
-            title="Reset Zoom"
-          >
-            <Maximize size={18} />
-          </button>
-        </div>
-        <div className="flex flex-col gap-1">
-          <button
-            onClick={() => setActiveTool('select')}
-            className={`p-2.5 rounded-lg transition-all ${activeTool === 'select' ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-          >
-            <MousePointer2 size={18} />
-          </button>
-          <button
-            onClick={() => setActiveTool('rect')}
-            className={`p-2.5 rounded-lg transition-all ${activeTool === 'rect' ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-          >
-            <Square size={18} />
-          </button>
-        </div>
+      {/* Toolbar - Single rectangle toggle button */}
+      <div className="absolute top-4 right-4 z-20 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
+        <button
+          onClick={() => setIsDrawingEnabled(!isDrawingEnabled)}
+          className={`p-2.5 rounded-lg transition-all ${
+            isDrawingEnabled
+              ? 'bg-cyan-500/20 text-cyan-400 shadow-glow-cyan-sm'
+              : 'text-slate-400 hover:bg-white/10 hover:text-white'
+          }`}
+          title={isDrawingEnabled ? 'Drawing enabled - click to disable' : 'Click to enable drawing'}
+        >
+          <Square size={18} />
+        </button>
       </div>
 
       {/* Page Navigation */}
@@ -397,7 +360,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             maxScale={5}
             centerOnInit={true}
             doubleClick={{ mode: 'reset' }}
-            panning={{ disabled: activeTool === 'rect', velocityDisabled: true }}
+            panning={{ disabled: isDrawingEnabled, velocityDisabled: true }}
           >
             <TransformComponent
               wrapperStyle={{
@@ -416,7 +379,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 ref={imageRef}
                 className="relative shadow-2xl select-none"
                 style={{
-                  cursor: activeTool === 'rect' ? 'crosshair' : 'default',
+                  cursor: isDrawingEnabled ? 'crosshair' : 'default',
                   width: displayDimensions.width,
                   height: displayDimensions.height,
                 }}
