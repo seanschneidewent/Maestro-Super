@@ -75,6 +75,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [focusPointerId, setFocusPointerId] = useState<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+  // Race condition prevention refs
+  const loadPointersAbortRef = useRef<AbortController | null>(null);
+  const createPointerRequestIdRef = useRef(0);
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
   // Convert discipline hierarchy to ProjectFile format for tree display
@@ -213,17 +216,39 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     loadFiles();
   }, [projectId]);
 
-  // Load pointers when page is selected
+  // Load pointers when page is selected (with race condition prevention)
   useEffect(() => {
     if (!selectedFile || selectedFile.type === FileType.FOLDER) {
       setPointers([]);
       return;
     }
 
+    // Cancel any in-flight request to prevent race conditions
+    if (loadPointersAbortRef.current) {
+      loadPointersAbortRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    loadPointersAbortRef.current = abortController;
+
+    // Capture values at effect start - these won't change during await
+    const pageId = selectedFile.id;
+    const pageName = selectedFile.name;
+
     async function loadPointers() {
       try {
         setIsLoadingPointers(true);
-        const pointerList = await api.pointers.list(selectedFile.id);
+        console.log(`[Pointers] Loading for page: ${pageName} (${pageId})`);
+
+        const pointerList = await api.pointers.list(pageId, abortController.signal);
+
+        // Check if this request was aborted (user switched pages)
+        if (abortController.signal.aborted) {
+          console.log(`[Pointers] Request aborted for: ${pageName}`);
+          return;
+        }
+
+        console.log(`[Pointers] Loaded ${pointerList.length} pointers for: ${pageName}`);
         setPointers(pointerList.map(p => ({
           id: p.id,
           pageId: p.pageId,
@@ -237,15 +262,26 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           pngPath: p.pngPath,
           hasEmbedding: p.hasEmbedding,
         })));
-      } catch (err) {
+      } catch (err: unknown) {
+        // Ignore AbortError - it's expected when switching pages
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
         console.error('Failed to load pointers:', err);
         setPointers([]);
       } finally {
-        setIsLoadingPointers(false);
+        if (!abortController.signal.aborted) {
+          setIsLoadingPointers(false);
+        }
       }
     }
     loadPointers();
-  }, [selectedFile?.id]);
+
+    // Cleanup: abort on unmount or when selectedFile changes
+    return () => {
+      abortController.abort();
+    };
+  }, [selectedFile?.id, selectedFile?.name]);
 
   // Fetch file from storage when page is selected
   useEffect(() => {
@@ -391,18 +427,25 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   }, [selectedPointerId]);
 
-  // Create pointer via API (with AI analysis) - uses optimistic UI
+  // Create pointer via API (with AI analysis) - uses optimistic UI and race condition prevention
   const handlePointerCreate = useCallback(async (data: {
     pageNumber: number;
     bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
   }): Promise<ContextPointer | null> => {
     if (!selectedFile) return null;
 
+    // Capture values at start - these won't change during await
+    const pageId = selectedFile.id;
+    const pageName = selectedFile.name;
+    const requestId = ++createPointerRequestIdRef.current;
+
+    console.log(`[Pointer Create #${requestId}] Starting on page: ${pageName} (${pageId})`);
+
     // Create temp pointer immediately (optimistic UI)
     const tempId = `temp-${crypto.randomUUID()}`;
     const tempPointer: ContextPointer = {
       id: tempId,
-      pageId: selectedFile.id,
+      pageId: pageId,  // Use captured value
       title: 'Generating...',
       description: '',
       bboxX: data.bounds.xNorm,
@@ -418,12 +461,29 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
     try {
       // API call runs in background while user sees the box
-      const created = await api.pointers.create(selectedFile.id, {
+      const created = await api.pointers.create(pageId, {  // Use captured value
         bboxX: data.bounds.xNorm,
         bboxY: data.bounds.yNorm,
         bboxWidth: data.bounds.wNorm,
         bboxHeight: data.bounds.hNorm,
       });
+
+      // Check if this request is stale (user switched pages during API call)
+      if (requestId !== createPointerRequestIdRef.current) {
+        console.warn(`[Pointer Create #${requestId}] Stale response, discarding (current: #${createPointerRequestIdRef.current})`);
+        // Remove temp pointer but don't add the real one to wrong page
+        setPointers(prev => prev.filter(p => p.id !== tempId));
+        return null;
+      }
+
+      // Verify the response pageId matches what we expect (detect backend bugs)
+      if (created.pageId !== pageId) {
+        console.error(`[Pointer Create #${requestId}] PAGE ID MISMATCH!`);
+        console.error(`  Expected: ${pageId} (${pageName})`);
+        console.error(`  Received: ${created.pageId}`);
+      }
+
+      console.log(`[Pointer Create #${requestId}] Success on page: ${pageName}`);
 
       const newPointer: ContextPointer = {
         id: created.id,
@@ -445,14 +505,14 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       setSelectedPointerId(created.id);
 
       // Auto-expand path to new pointer in mind map
-      const disciplineId = findDisciplineIdForPage(selectedFile.id);
+      const disciplineId = findDisciplineIdForPage(pageId);  // Use captured value
       if (disciplineId && hierarchy) {
         const projectNodeId = `project-${hierarchy.name}`;
         setExpandedNodes(prev => {
           const newSet = new Set(prev);
           newSet.add(projectNodeId);
           newSet.add(disciplineId);
-          newSet.add(selectedFile.id);
+          newSet.add(pageId);  // Use captured value
           return Array.from(newSet);
         });
       }
@@ -465,13 +525,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
       return newPointer;
     } catch (err) {
+      console.error(`[Pointer Create #${requestId}] Failed:`, err);
       // Remove temp pointer on failure
       setPointers(prev => prev.filter(p => p.id !== tempId));
       setSelectedPointerId(null);
-      console.error('Failed to create pointer:', err);
       return null;
     }
-  }, [selectedFile?.id, hierarchy, findDisciplineIdForPage, setExpandedNodes]);
+  }, [selectedFile?.id, selectedFile?.name, hierarchy, findDisciplineIdForPage, setExpandedNodes]);
 
   const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();

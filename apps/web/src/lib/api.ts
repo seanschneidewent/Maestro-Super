@@ -6,6 +6,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 interface RequestOptions {
   method?: string;
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 // Error types from backend
@@ -96,7 +97,7 @@ export function getRateLimitInfo(error: ApiError): {
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body } = options;
+  const { method = 'GET', body, signal } = options;
 
   // Get auth token if user is logged in
   const { data: { session } } = await supabase.auth.getSession();
@@ -113,6 +114,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   if (!response.ok) {
@@ -442,8 +444,8 @@ export const api = {
   },
 
   pointers: {
-    list: (pageId: string) => {
-      return request<PointerResponse[]>(`/pages/${pageId}/pointers`);
+    list: (pageId: string, signal?: AbortSignal) => {
+      return request<PointerResponse[]>(`/pages/${pageId}/pointers`, { signal });
     },
     // Create pointer with AI analysis - just send bounding box
     create: (pageId: string, data: {

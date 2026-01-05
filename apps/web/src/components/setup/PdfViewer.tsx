@@ -298,6 +298,23 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Current page data
   const currentPagePointers = pointers.filter(p => p.pageId === fileId);
 
+  // Diagnostic logging for pointer-page mismatches
+  useEffect(() => {
+    if (pointers.length > 0) {
+      const matching = currentPagePointers.length;
+      const nonMatching = pointers.length - matching;
+      if (nonMatching > 0) {
+        console.warn(`[PdfViewer] ${nonMatching} pointers don't match current page!`);
+        console.warn(`  Current page: ${fileId}`);
+        console.warn(`  Non-matching pointers:`, pointers.filter(p => p.pageId !== fileId).map(p => ({
+          id: p.id,
+          pageId: p.pageId,
+          title: p.title,
+        })));
+      }
+    }
+  }, [pointers, fileId, currentPagePointers.length]);
+
   // Calculate display dimensions to fit container at zoom=1
   const displayDimensions = currentPageImage ? (() => {
     const imgWidth = currentPageImage.width;
