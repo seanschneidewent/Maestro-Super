@@ -234,6 +234,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     // Only pen (Apple Pencil) and mouse can draw - finger touch passes through to pan/zoom
     if (!isDrawingEnabled || e.pointerType === 'touch') return;
     e.preventDefault();
+    e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const coords = getNormalizedCoords(e);
     setStartPos(coords);
@@ -242,6 +243,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isDrawing || !isDrawingEnabled) return;
+    e.preventDefault();
+    e.stopPropagation();
     const coords = getNormalizedCoords(e);
 
     setTempRect({
@@ -444,6 +447,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                   cursor: isDrawingEnabled ? 'crosshair' : 'default',
                   width: displayDimensions.width,
                   height: displayDimensions.height,
+                  touchAction: isDrawingEnabled ? 'none' : 'auto',
                 }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
