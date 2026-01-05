@@ -1,12 +1,13 @@
-import { memo, useRef, useEffect } from 'react';
+import { memo, useRef, useEffect, useState } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
-import { Crosshair, X } from 'lucide-react';
+import { Crosshair, X, Loader2 } from 'lucide-react';
 import type { PointerNodeData } from '../types';
 
 function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
   const { title, onClick, onDelete, animationKey } = data;
   const divRef = useRef<HTMLDivElement>(null);
   const prevAnimationKey = useRef(animationKey);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     // Only restart animation when animationKey changes, not on initial mount
@@ -53,13 +54,16 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
         <button
           onClick={(e) => {
             e.stopPropagation();
+            if (isDeleting) return; // Prevent double-click
+            setIsDeleting(true);
             onDelete();
           }}
+          disabled={isDeleting}
           className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20
-                     text-slate-500 hover:text-red-400 transition-all shrink-0"
+                     text-slate-500 hover:text-red-400 transition-all shrink-0 disabled:opacity-50"
           title="Delete pointer"
         >
-          <X size={12} />
+          {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
         </button>
       </div>
     </div>
