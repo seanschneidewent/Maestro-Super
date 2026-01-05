@@ -267,72 +267,77 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
           </>
         )}
 
-        {/* Loading overlay - shown on top of viewer when loading */}
-        {isLoadingAgentPage && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-            <Loader2 size={48} className="text-cyan-500 animate-spin" />
-          </div>
-        )}
-
-        {/* Pinch-to-zoom enabled viewer - always mounted to keep decoded bitmaps in GPU memory */}
-        <TransformWrapper
-          initialScale={1}
-          minScale={0.5}
-          maxScale={5}
-          centerOnInit={true}
-          doubleClick={{ mode: "reset" }}
-          panning={{ velocityDisabled: true }}
+        {/* Canvas Area - pinch-to-zoom enabled */}
+        <div
+          ref={containerRef}
+          className="flex-1 canvas-grid"
+          style={{ position: 'relative' }}
         >
-          <TransformComponent
-            wrapperStyle={{
-              width: '100%',
-              height: '100%',
-              backgroundColor: '#f1f5f9', // bg-slate-100
-            }}
-            contentStyle={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <div
-              className="relative select-none rounded-sm"
-              style={{
-                width: agentDisplayDimensions.width,
-                height: agentDisplayDimensions.height,
-                boxShadow: agentPageImage ? '0 4px 20px rgba(0, 0, 0, 0.15), 0 8px 40px rgba(0, 0, 0, 0.1)' : 'none',
-                visibility: agentPageImage ? 'visible' : 'hidden',
-              }}
-            >
-              <img
-                src={agentPageImage?.dataUrl ?? ''}
-                alt={currentAgentPage?.pageName ?? ''}
-                className="max-w-none w-full h-full"
-                draggable={false}
-              />
+          {/* Loading overlay - shown on top of viewer when loading */}
+          {isLoadingAgentPage && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
+              <Loader2 size={48} className="text-cyan-500 animate-spin" />
+            </div>
+          )}
 
-              {/* Pointer overlays - only shown when viewing query results */}
-              {showPointers && agentPageImage && currentAgentPage?.pointers.map((pointer) => (
+          {agentPageImage && (
+            <TransformWrapper
+              initialScale={1}
+              minScale={0.5}
+              maxScale={5}
+              centerOnInit={true}
+              doubleClick={{ mode: "reset" }}
+              panning={{ velocityDisabled: true }}
+            >
+              <TransformComponent
+                wrapperStyle={{
+                  width: '100%',
+                  height: '100%',
+                }}
+                contentStyle={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <div
-                  key={pointer.pointerId}
-                  className="absolute border-2 border-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/30 transition-colors cursor-pointer group"
+                  className="relative shadow-2xl select-none"
                   style={{
-                    left: `${pointer.bboxX * 100}%`,
-                    top: `${pointer.bboxY * 100}%`,
-                    width: `${pointer.bboxWidth * 100}%`,
-                    height: `${pointer.bboxHeight * 100}%`,
+                    width: agentDisplayDimensions.width,
+                    height: agentDisplayDimensions.height,
                   }}
                 >
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 backdrop-blur-sm px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    {pointer.title}
-                  </div>
+                  <img
+                    src={agentPageImage.dataUrl}
+                    alt={currentAgentPage?.pageName ?? ''}
+                    className="max-w-none w-full h-full"
+                    draggable={false}
+                  />
+
+                  {/* Pointer overlays - only shown when viewing query results */}
+                  {showPointers && currentAgentPage?.pointers.map((pointer) => (
+                    <div
+                      key={pointer.pointerId}
+                      className="absolute border-2 border-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/30 transition-colors cursor-pointer group"
+                      style={{
+                        left: `${pointer.bboxX * 100}%`,
+                        top: `${pointer.bboxY * 100}%`,
+                        width: `${pointer.bboxWidth * 100}%`,
+                        height: `${pointer.bboxHeight * 100}%`,
+                      }}
+                    >
+                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 backdrop-blur-sm px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                        {pointer.title}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </TransformComponent>
-        </TransformWrapper>
+              </TransformComponent>
+            </TransformWrapper>
+          )}
+        </div>
       </div>
     );
   }
