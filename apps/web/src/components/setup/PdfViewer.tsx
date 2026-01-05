@@ -7,8 +7,10 @@ import { ContextPointer } from '../../types';
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// Render scale for PNG conversion (4 = crisp at 4x zoom)
-const RENDER_SCALE = 4;
+// Render scale for PNG conversion
+// iOS Safari has strict canvas/dataURL limits, so use lower scale on mobile
+const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const RENDER_SCALE = isMobile ? 2 : 4;
 
 interface PageImage {
   dataUrl: string;
