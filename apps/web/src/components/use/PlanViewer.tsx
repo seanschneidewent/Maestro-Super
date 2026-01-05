@@ -270,7 +270,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
         {/* Canvas Area - pinch-to-zoom enabled */}
         <div
           ref={containerRef}
-          className="flex-1 canvas-grid"
+          className="flex-1 bg-slate-100"
           style={{ position: 'relative' }}
         >
           {/* Loading overlay - shown on top of viewer when loading */}
@@ -316,11 +316,11 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                     draggable={false}
                   />
 
-                  {/* Pointer overlays - only shown when viewing query results */}
+                  {/* Pointer overlays - simplified for iOS Safari compatibility */}
                   {showPointers && currentAgentPage?.pointers.map((pointer) => (
                     <div
                       key={pointer.pointerId}
-                      className="absolute border-2 border-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/30 transition-colors cursor-pointer group"
+                      className="absolute border-2 border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20 cursor-pointer group"
                       style={{
                         left: `${pointer.bboxX * 100}%`,
                         top: `${pointer.bboxY * 100}%`,
@@ -328,7 +328,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                         height: `${pointer.bboxHeight * 100}%`,
                       }}
                     >
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 backdrop-blur-sm px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                      <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none">
                         {pointer.title}
                       </div>
                     </div>
