@@ -6,7 +6,7 @@ import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, DisciplineWithPagesResponse, PointerResponse } from '../../lib/api';
+import { api, DisciplineWithPagesResponse, isNotFoundError } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 
@@ -235,6 +235,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     const pageId = selectedFile.id;
     const pageName = selectedFile.name;
 
+    // Clear stale pointers immediately when switching pages
+    // This prevents showing old page's pointers while new ones load
+    setPointers([]);
+
     async function loadPointers() {
       try {
         setIsLoadingPointers(true);
@@ -420,11 +424,14 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     // Call API
     try {
       await api.pointers.delete(id);
-      // Trigger hierarchy refresh
-      setHierarchyRefresh(prev => prev + 1);
-    } catch (err) {
-      console.error('Failed to delete pointer:', err);
+    } catch (err: unknown) {
+      // 404 means pointer was already deleted (e.g., stale cache) - that's fine
+      if (!isNotFoundError(err)) {
+        console.error('Failed to delete pointer:', err);
+      }
     }
+    // Always refresh hierarchy to sync UI with database state
+    setHierarchyRefresh(prev => prev + 1);
   }, [selectedPointerId]);
 
   // Create pointer via API (with AI analysis) - uses optimistic UI and race condition prevention
