@@ -55,7 +55,7 @@ export function layoutHierarchy(
   g.setGraph({
     rankdir: 'LR',
     nodesep: 20,      // Reduced vertical separation
-    ranksep: 80,      // Reduced horizontal separation
+    ranksep: 180,     // Horizontal separation between hierarchy levels
     marginx: 10,
     marginy: 10,
   });
