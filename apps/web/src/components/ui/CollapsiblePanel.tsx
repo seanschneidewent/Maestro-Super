@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { ChevronLeft } from 'lucide-react';
 
 interface CollapsiblePanelProps {
   children: React.ReactNode;
@@ -70,10 +71,41 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
     setIsDragging(false);
   }, []);
 
+  // Touch handlers for iPad support
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    dragStartRef.current = {
+      x: touch.clientX,
+      width: width,
+      time: Date.now()
+    };
+    wasClickRef.current = true;
+    setIsDragging(true);
+  }, [width]);
+
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!dragStartRef.current) return;
+    const touch = e.touches[0];
+    const deltaX = side === 'left'
+      ? touch.clientX - dragStartRef.current.x
+      : dragStartRef.current.x - touch.clientX;
+    if (Math.abs(deltaX) > 5) wasClickRef.current = false;
+    const newWidth = Math.min(maxWidth, Math.max(minWidth, dragStartRef.current.width + deltaX));
+    setWidth(newWidth);
+  }, [side, minWidth, maxWidth]);
+
+  const handleTouchEnd = useCallback(() => {
+    dragStartRef.current = null;
+    wasClickRef.current = false;
+    setIsDragging(false);
+  }, []);
+
   useEffect(() => {
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('touchmove', handleTouchMove);
+      document.addEventListener('touchend', handleTouchEnd);
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     }
@@ -81,10 +113,12 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+  }, [isDragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
 
   const handleExpandClick = () => {
     setIsCollapsed(false);
@@ -119,27 +153,51 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
         {children}
       </div>
 
-      {/* Resize handle - shown when expanded */}
+      {/* Expanded notch handle - spine with bulge, drag to resize, tap to collapse */}
       {!isCollapsed && (
         <div
           className={`
-            absolute top-0 ${side === 'left' ? 'right-0 translate-x-1/2' : 'left-0 -translate-x-1/2'}
-            h-full w-4 z-40
+            absolute inset-y-0 w-[44px] z-40
+            ${side === 'left' ? 'right-0 translate-x-1/2' : 'left-0 -translate-x-1/2'}
+            flex items-center
             cursor-col-resize
-            flex items-center justify-center
             group
           `}
           onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
         >
+          {/* Spine - thin vertical line */}
           <div
             className={`
-              h-16 w-1.5 rounded-full
-              bg-slate-600/50
-              group-hover:bg-cyan-500/70 group-hover:h-24
-              transition-all duration-200
-              ${isDragging ? 'bg-cyan-400 h-32' : ''}
+              absolute inset-y-0 w-[3px]
+              bg-slate-700/60
+              left-1/2 -translate-x-1/2
+              transition-colors duration-200
+              group-hover:bg-slate-600/80
+              ${isDragging ? 'bg-cyan-500/70' : ''}
             `}
           />
+
+          {/* Bulge with chevron - tap to collapse */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsCollapsed(true); }}
+            className={`
+              absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2
+              w-[44px] h-[150px]
+              rounded-2xl
+              bg-slate-800/90 backdrop-blur-sm
+              border border-slate-700/50
+              flex items-center justify-center
+              transition-all duration-200
+              hover:bg-slate-700/90
+              hover:border-cyan-500/30
+              hover:shadow-glow-cyan-sm
+              text-slate-400 hover:text-cyan-400
+              ${isDragging ? 'border-cyan-500/50 bg-slate-700/90' : ''}
+            `}
+          >
+            <ChevronLeft size={20} className={side === 'right' ? 'rotate-180' : ''} />
+          </button>
         </div>
       )}
 
