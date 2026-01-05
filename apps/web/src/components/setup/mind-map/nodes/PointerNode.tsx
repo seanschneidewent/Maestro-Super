@@ -45,6 +45,7 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
                    shadow-sm shadow-violet-900/10
                    transition-all duration-200 cursor-pointer pointer-events-auto max-w-[140px]"
         onClick={onClick}
+        onPointerUp={onClick}
       >
         <Crosshair size={10} className="text-violet-400 shrink-0" />
 
@@ -55,6 +56,12 @@ function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
           onClick={(e) => {
             e.stopPropagation();
             if (isDeleting) return; // Prevent double-click
+            setIsDeleting(true);
+            onDelete();
+          }}
+          onPointerUp={(e) => {
+            e.stopPropagation();
+            if (isDeleting) return;
             setIsDeleting(true);
             onDelete();
           }}
