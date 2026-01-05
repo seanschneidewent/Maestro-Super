@@ -466,7 +466,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                       selectedPointerId === p.id
                         ? 'border-cyan-400 bg-cyan-400/25'
                         : 'border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20'
-                    } ${p.isGenerating ? 'animate-pulse' : ''}`}
+                    }`}
                     style={{
                       left: `${p.bboxX * 100}%`,
                       top: `${p.bboxY * 100}%`,
@@ -474,15 +474,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                       height: `${p.bboxHeight * 100}%`,
                     }}
                   >
-                    {p.isGenerating ? (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-                      </div>
-                    ) : (
-                      <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none transition-opacity">
-                        {p.title}
-                      </div>
-                    )}
+                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none transition-opacity">
+                      {p.title}
+                    </div>
                   </div>
                 ))}
 
