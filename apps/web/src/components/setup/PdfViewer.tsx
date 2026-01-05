@@ -506,7 +506,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 {highlightedBounds && (
                   <div
                     className="absolute border border-orange-400 bg-orange-400/20 rounded-sm
-                               shadow-[0_0_20px_rgba(249,115,22,0.5)] animate-pulse pointer-events-none z-20"
+                               shadow-[0_0_20px_rgba(249,115,22,0.5)] pointer-events-none z-20"
                     style={{
                       left: `${highlightedBounds.x * 100}%`,
                       top: `${highlightedBounds.y * 100}%`,
@@ -519,7 +519,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 {/* Temp drawing rect */}
                 {tempRect && (
                   <div
-                    className="absolute border border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan animate-pulse"
+                    className="absolute border border-cyan-400 bg-cyan-400/15 rounded-sm shadow-glow-cyan"
                     style={{
                       left: `${tempRect.x * 100}%`,
                       top: `${tempRect.y * 100}%`,
