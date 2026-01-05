@@ -203,12 +203,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     setTempRect(null);
 
     // Use callback if provided (for API integration)
+    // State updates are handled by SetupMode's handlePointerCreate
     if (onPointerCreate) {
-      const createdPointer = await onPointerCreate({ pageNumber, bounds });
-      if (createdPointer) {
-        setPointers(prev => [...prev, createdPointer]);
-        setSelectedPointerId(createdPointer.id);
-      }
+      await onPointerCreate({ pageNumber, bounds });
       return;
     }
 

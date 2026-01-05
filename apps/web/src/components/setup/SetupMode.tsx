@@ -390,10 +390,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         bboxHeight: data.bounds.hNorm,
       });
 
-      // Trigger hierarchy refresh
-      setHierarchyRefresh(prev => prev + 1);
-
-      return {
+      const newPointer: ContextPointer = {
         id: created.id,
         pageId: created.pageId,
         title: created.title,
@@ -407,6 +404,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         pngPath: created.pngPath,
         hasEmbedding: created.hasEmbedding,
       };
+
+      // Update state directly in SetupMode (where pointers state lives)
+      setPointers(prev => [...prev, newPointer]);
+      setSelectedPointerId(created.id);
+
+      // Trigger hierarchy refresh
+      setHierarchyRefresh(prev => prev + 1);
+
+      return newPointer;
     } catch (err) {
       console.error('Failed to create pointer:', err);
       return null;
