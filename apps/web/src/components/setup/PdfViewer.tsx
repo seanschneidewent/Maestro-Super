@@ -7,8 +7,8 @@ import { ContextPointer } from '../../types';
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// Render scale for PNG conversion (2 = retina quality)
-const RENDER_SCALE = 2;
+// Render scale for PNG conversion (3 = sharp up to 3x zoom on iPad)
+const RENDER_SCALE = 3;
 
 interface PageImage {
   dataUrl: string;
