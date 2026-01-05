@@ -19,7 +19,7 @@ def crop_pdf_region(
     y_norm: float,
     w_norm: float,
     h_norm: float,
-    dpi: int = 150,
+    dpi: int = 300,
 ) -> bytes:
     """
     Crop a region from a PDF page to PNG.
@@ -31,7 +31,7 @@ def crop_pdf_region(
         page_index: Zero-based page index
         x_norm, y_norm: Top-left corner (normalized 0-1)
         w_norm, h_norm: Width and height (normalized 0-1)
-        dpi: Target DPI for rendering (default 150)
+        dpi: Target DPI for rendering (default 300 for retina displays)
 
     Returns:
         PNG image bytes of the cropped region
