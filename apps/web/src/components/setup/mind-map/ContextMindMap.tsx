@@ -81,7 +81,20 @@ function ContextMindMapInner({
     );
   }, [setExpandedNodes]);
 
-  const callbacks = useMemo(() => ({
+  // Store callbacks in a ref for stable identity - prevents unnecessary layout recalculations
+  // This is critical for performance when the mind map has many nodes
+  const callbacksRef = useRef({
+    onProjectExpand: () => {},
+    onDisciplineClick: (_id: string) => {},
+    onDisciplineExpand: (_id: string) => {},
+    onPageClick: (_id: string, _disciplineId: string) => {},
+    onPageExpand: (_id: string) => {},
+    onPointerClick: (_id: string, _pageId: string, _disciplineId: string) => {},
+    onPointerDelete: (_id: string) => {},
+  });
+
+  // Update the ref with current callback implementations (runs every render but doesn't trigger effects)
+  callbacksRef.current = {
     onProjectExpand: () => {
       const projectNodeId = hierarchy ? `project-${hierarchy.name}` : '';
       if (projectNodeId) toggleExpanded(projectNodeId);
@@ -104,7 +117,18 @@ function ContextMindMapInner({
     onPointerDelete: (id: string) => {
       onPointerDelete?.(id);
     },
-  }), [hierarchy, toggleExpanded, onDisciplineClick, onPageClick, onPointerClick, onPointerDelete]);
+  };
+
+  // Create stable callbacks that delegate to the ref
+  const callbacks = useMemo(() => ({
+    onProjectExpand: () => callbacksRef.current.onProjectExpand(),
+    onDisciplineClick: (id: string) => callbacksRef.current.onDisciplineClick(id),
+    onDisciplineExpand: (id: string) => callbacksRef.current.onDisciplineExpand(id),
+    onPageClick: (id: string, disciplineId: string) => callbacksRef.current.onPageClick(id, disciplineId),
+    onPageExpand: (id: string) => callbacksRef.current.onPageExpand(id),
+    onPointerClick: (id: string, pageId: string, disciplineId: string) => callbacksRef.current.onPointerClick(id, pageId, disciplineId),
+    onPointerDelete: (id: string) => callbacksRef.current.onPointerDelete(id),
+  }), []); // Empty deps - callbacks are stable, they delegate to ref
 
   useEffect(() => {
     if (!hierarchy) return;

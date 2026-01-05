@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, startTransition } from 'react';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { ContextPanel, PanelView } from './context-panel';
@@ -80,6 +80,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   // Race condition prevention refs
   const loadPointersAbortRef = useRef<AbortController | null>(null);
   const createPointerRequestIdRef = useRef(0);
+  const activeCreatesRef = useRef<Set<string>>(new Set()); // Track temp pointer IDs during creation
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
 
   // Convert discipline hierarchy to ProjectFile format for tree display
@@ -237,9 +238,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     const pageId = selectedFile.id;
     const pageName = selectedFile.name;
 
-    // Clear stale pointers immediately when switching pages
-    // This prevents showing old page's pointers while new ones load
-    setPointers([]);
+    // Clear stale pointers but preserve any that are currently being created
+    // This prevents race conditions where a pointer disappears during Gemini analysis
+    setPointers(prev => prev.filter(p => p.isGenerating && activeCreatesRef.current.has(p.id)));
 
     async function loadPointers() {
       try {
@@ -255,7 +256,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         }
 
         console.log(`[Pointers] Loaded ${pointerList.length} pointers for: ${pageName}`);
-        setPointers(pointerList.map(p => ({
+
+        // Merge loaded pointers with any that are still being created
+        // This prevents losing pointers that are in the middle of Gemini analysis
+        const loadedPointers = pointerList.map(p => ({
           id: p.id,
           pageId: p.pageId,
           title: p.title,
@@ -267,7 +271,18 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           bboxHeight: p.bboxHeight,
           pngPath: p.pngPath,
           hasEmbedding: p.hasEmbedding,
-        })));
+        }));
+
+        setPointers(prev => {
+          // Keep generating pointers that aren't in the loaded list
+          const loadedIds = new Set(loadedPointers.map(p => p.id));
+          const generatingPointers = prev.filter(p =>
+            p.isGenerating &&
+            activeCreatesRef.current.has(p.id) &&
+            !loadedIds.has(p.id)
+          );
+          return [...loadedPointers, ...generatingPointers];
+        });
       } catch (err: unknown) {
         // Ignore AbortError - it's expected when switching pages
         if (err instanceof Error && err.name === 'AbortError') {
@@ -467,6 +482,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       isGenerating: true,
     };
 
+    // Track this temp pointer ID so it survives effect re-runs
+    activeCreatesRef.current.add(tempId);
+
     // Show box immediately
     setPointers(prev => [...prev, tempPointer]);
     setSelectedPointerId(tempId);
@@ -484,6 +502,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       if (requestId !== createPointerRequestIdRef.current) {
         console.warn(`[Pointer Create #${requestId}] Stale response, discarding (current: #${createPointerRequestIdRef.current})`);
         // Remove temp pointer but don't add the real one to wrong page
+        activeCreatesRef.current.delete(tempId);
         setPointers(prev => prev.filter(p => p.id !== tempId));
         return null;
       }
@@ -513,6 +532,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       };
 
       // Replace temp pointer with real one
+      activeCreatesRef.current.delete(tempId);
       setPointers(prev => prev.map(p => p.id === tempId ? newPointer : p));
       setSelectedPointerId(created.id);
 
@@ -532,13 +552,16 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Signal to scroll/center on the new pointer after hierarchy refreshes
       setFocusPointerId(created.id);
 
-      // Trigger hierarchy refresh
-      setHierarchyRefresh(prev => prev + 1);
+      // Trigger hierarchy refresh (use startTransition for non-urgent update)
+      startTransition(() => {
+        setHierarchyRefresh(prev => prev + 1);
+      });
 
       return newPointer;
     } catch (err) {
       console.error(`[Pointer Create #${requestId}] Failed:`, err);
       // Remove temp pointer on failure
+      activeCreatesRef.current.delete(tempId);
       setPointers(prev => prev.filter(p => p.id !== tempId));
       setSelectedPointerId(null);
       return null;

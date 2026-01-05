@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
@@ -295,8 +295,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     setSelectedPointerId(newPointer.id);
   };
 
-  // Current page data
-  const currentPagePointers = pointers.filter(p => p.pageId === fileId);
+  // Current page data - memoized to prevent unnecessary re-renders
+  const currentPagePointers = useMemo(
+    () => pointers.filter(p => p.pageId === fileId),
+    [pointers, fileId]
+  );
 
   // Diagnostic logging for pointer-page mismatches
   useEffect(() => {
@@ -315,8 +318,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
   }, [pointers, fileId, currentPagePointers.length]);
 
-  // Calculate display dimensions to fit container at zoom=1
-  const displayDimensions = currentPageImage ? (() => {
+  // Calculate display dimensions to fit container at zoom=1 - memoized
+  const displayDimensions = useMemo(() => {
+    if (!currentPageImage) return { width: 800, height: 600 };
+
     const imgWidth = currentPageImage.width;
     const imgHeight = currentPageImage.height;
 
@@ -329,7 +334,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       width: imgWidth * fitScale,
       height: imgHeight * fitScale,
     };
-  })() : { width: 800, height: 600 };
+  }, [currentPageImage, containerSize.width, containerSize.height]);
 
   // Loading state - file is being fetched from storage
   if (isLoadingFile) {
