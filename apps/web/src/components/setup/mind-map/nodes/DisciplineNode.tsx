@@ -1,13 +1,22 @@
-import { memo } from 'react';
+import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import type { DisciplineNodeData } from '../types';
 
 function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
   const { displayName, processed, pageCount, pointerCount, onExpand, onClick, isExpanded, animationKey } = data;
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (divRef.current) {
+      divRef.current.style.animation = 'none';
+      divRef.current.offsetHeight; // Trigger reflow
+      divRef.current.style.animation = '';
+    }
+  }, [animationKey]);
 
   return (
-    <div key={animationKey} className="relative group animate-scale-in">
+    <div ref={divRef} className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"

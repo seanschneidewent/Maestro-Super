@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { PageNodeData } from '../types';
@@ -20,12 +20,21 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
     isActive,
     animationKey
   } = data;
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (divRef.current) {
+      divRef.current.style.animation = 'none';
+      divRef.current.offsetHeight; // Trigger reflow
+      divRef.current.style.animation = '';
+    }
+  }, [animationKey]);
 
   const statusIcon = getStatusIcon(pointerCount, processedPass2);
   const hasPointers = pointerCount > 0;
 
   return (
-    <div key={animationKey} className="relative group animate-scale-in">
+    <div ref={divRef} className="relative group animate-scale-in">
       {/* Target handle (left side) */}
       <Handle
         type="target"
