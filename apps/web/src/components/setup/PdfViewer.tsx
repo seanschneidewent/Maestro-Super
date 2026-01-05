@@ -8,13 +8,75 @@ import { ContextPointer } from '../../types';
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 // Render scale for PNG conversion (2 = retina quality)
-// Higher values cause canvas/dataURL failures on iPad
 const RENDER_SCALE = 2;
 
 interface PageImage {
   dataUrl: string;
   width: number;
   height: number;
+}
+
+// Cache for rendered page images (matches PlanViewer pattern)
+const pageImageCache = new Map<string, PageImage>();
+
+// Track in-flight loads to avoid duplicate renders
+const loadingPromises = new Map<string, Promise<PageImage | null>>();
+
+// Reusable function to render a single page (matches PlanViewer pattern)
+async function renderPageImage(
+  pdfDoc: pdfjs.PDFDocumentProxy,
+  pageNum: number,
+  cacheKey: string
+): Promise<PageImage | null> {
+  // Check cache first
+  const cached = pageImageCache.get(cacheKey);
+  if (cached) return cached;
+
+  // Check if already loading
+  const existing = loadingPromises.get(cacheKey);
+  if (existing) return existing;
+
+  // Start loading
+  const promise = (async () => {
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: RENDER_SCALE });
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d')!;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await page.render({
+        canvasContext: context,
+        viewport: viewport,
+      }).promise;
+
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // Pre-decode the image so it's ready for instant display (critical for iPad)
+      const img = new Image();
+      img.src = dataUrl;
+      await img.decode();
+
+      const pageImage: PageImage = {
+        dataUrl,
+        width: viewport.width / RENDER_SCALE,
+        height: viewport.height / RENDER_SCALE,
+      };
+
+      pageImageCache.set(cacheKey, pageImage);
+      return pageImage;
+    } catch (err) {
+      console.error('Failed to render page:', pageNum, err);
+      return null;
+    } finally {
+      loadingPromises.delete(cacheKey);
+    }
+  })();
+
+  loadingPromises.set(cacheKey, promise);
+  return promise;
 }
 
 interface PdfViewerProps {
@@ -49,10 +111,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   fileLoadError,
   highlightedBounds,
 }) => {
-  // Page images (PNG data URLs)
-  const [pageImages, setPageImages] = useState<PageImage[]>([]);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionProgress, setConversionProgress] = useState({ current: 0, total: 0 });
+  // PDF document state (on-demand rendering like PlanViewer)
+  const [pdfDoc, setPdfDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
+  const [numPages, setNumPages] = useState(0);
+  const [isLoadingPdf, setIsLoadingPdf] = useState(false);
+
+  // Current page image (rendered on-demand)
+  const [currentPageImage, setCurrentPageImage] = useState<PageImage | null>(null);
+  const [isRenderingPage, setIsRenderingPage] = useState(false);
 
   // Viewer state
   const [pageNumber, setPageNumber] = useState(1);
@@ -87,67 +153,63 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
   }, []);
 
-  // Convert PDF to PNGs when file changes
+  // Load PDF document when file changes (don't render all pages upfront)
   useEffect(() => {
     if (!file) {
-      setPageImages([]);
+      setPdfDoc(null);
+      setNumPages(0);
+      setCurrentPageImage(null);
       setPageNumber(1);
       return;
     }
 
-    const convertPdfToImages = async () => {
-      setIsConverting(true);
-      setPageImages([]);
+    const loadPdf = async () => {
+      setIsLoadingPdf(true);
+      setPdfDoc(null);
+      setCurrentPageImage(null);
       setPageNumber(1);
       transformRef.current?.resetTransform();
 
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-        const numPages = pdf.numPages;
-
-        setConversionProgress({ current: 0, total: numPages });
-
-        const images: PageImage[] = [];
-
-        for (let i = 1; i <= numPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: RENDER_SCALE });
-
-          // Create canvas
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d')!;
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          // Render page to canvas
-          await page.render({
-            canvasContext: context,
-            viewport: viewport,
-          }).promise;
-
-          // Convert to PNG data URL
-          const dataUrl = canvas.toDataURL('image/png');
-
-          images.push({
-            dataUrl,
-            width: viewport.width / RENDER_SCALE,  // Display size (not render size)
-            height: viewport.height / RENDER_SCALE,
-          });
-
-          setConversionProgress({ current: i, total: numPages });
-        }
-
-        setPageImages(images);
+        setPdfDoc(pdf);
+        setNumPages(pdf.numPages);
       } catch (error) {
-        console.error('PDF conversion failed:', error);
+        console.error('PDF loading failed:', error);
       } finally {
-        setIsConverting(false);
+        setIsLoadingPdf(false);
       }
     };
 
-    convertPdfToImages();
+    loadPdf();
   }, [file]);
+
+  // Render current page on-demand when page changes (matches PlanViewer pattern)
+  useEffect(() => {
+    if (!pdfDoc || !fileId) {
+      setCurrentPageImage(null);
+      return;
+    }
+
+    const cacheKey = `${fileId}-page-${pageNumber}`;
+
+    // Check cache first for instant display
+    const cached = pageImageCache.get(cacheKey);
+    if (cached) {
+      setCurrentPageImage(cached);
+      return;
+    }
+
+    // Render the page
+    setIsRenderingPage(true);
+    renderPageImage(pdfDoc, pageNumber, cacheKey).then(pageImage => {
+      if (pageImage) {
+        setCurrentPageImage(pageImage);
+      }
+      setIsRenderingPage(false);
+    });
+  }, [pdfDoc, pageNumber, fileId]);
 
   // Reset transform when page changes
   useEffect(() => {
@@ -156,7 +218,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));
-  const goToNextPage = () => setPageNumber(prev => Math.min(prev + 1, pageImages.length));
+  const goToNextPage = () => setPageNumber(prev => Math.min(prev + 1, numPages));
 
   // Drawing handlers (Pointer Events for mouse, touch, and Apple Pencil support)
   const getNormalizedCoords = (e: React.PointerEvent) => {
@@ -231,13 +293,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   };
 
   // Current page data
-  const currentImage = pageImages[pageNumber - 1];
   const currentPagePointers = pointers.filter(p => p.pageId === fileId);
 
   // Calculate display dimensions to fit container at zoom=1
-  const displayDimensions = currentImage ? (() => {
-    const imgWidth = currentImage.width;
-    const imgHeight = currentImage.height;
+  const displayDimensions = currentPageImage ? (() => {
+    const imgWidth = currentPageImage.width;
+    const imgHeight = currentPageImage.height;
 
     // Calculate scale to fit within container (with some padding)
     const scaleX = containerSize.width / imgWidth;
@@ -287,22 +348,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     );
   }
 
-  // Converting state
-  if (isConverting) {
+  // Loading PDF state
+  if (isLoadingPdf) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center text-slate-400">
           <Loader2 size={48} className="mx-auto mb-4 text-cyan-400 animate-spin" />
-          <p className="text-sm font-medium mb-2">Converting PDF to images...</p>
-          <p className="text-xs text-slate-500">
-            Page {conversionProgress.current} of {conversionProgress.total}
-          </p>
-          <div className="w-48 h-1.5 bg-slate-700 rounded-full mt-3 mx-auto overflow-hidden">
-            <div
-              className="h-full bg-cyan-500 transition-all duration-300"
-              style={{ width: `${(conversionProgress.current / conversionProgress.total) * 100}%` }}
-            />
-          </div>
+          <p className="text-sm font-medium">Loading PDF...</p>
         </div>
       </div>
     );
@@ -326,7 +378,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       </div>
 
       {/* Page Navigation */}
-      {pageImages.length > 1 && (
+      {numPages > 1 && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 glass rounded-xl px-3 py-2 animate-fade-in">
           <button
             onClick={goToPrevPage}
@@ -336,11 +388,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             <ChevronLeft size={18} />
           </button>
           <span className="text-sm text-slate-300 min-w-[80px] text-center">
-            {pageNumber} / {pageImages.length}
+            {pageNumber} / {numPages}
           </span>
           <button
             onClick={goToNextPage}
-            disabled={pageNumber >= pageImages.length}
+            disabled={pageNumber >= numPages}
             className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronRight size={18} />
@@ -354,7 +406,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         className="flex-1 canvas-grid"
         style={{ position: 'relative' }}
       >
-        {currentImage && (
+        {/* Page rendering indicator */}
+        {isRenderingPage && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 z-10">
+            <Loader2 size={48} className="text-cyan-500 animate-spin" />
+          </div>
+        )}
+
+        {currentPageImage && (
           <TransformWrapper
             ref={transformRef}
             initialScale={1}
@@ -392,7 +451,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               >
                 {/* The actual page image */}
                 <img
-                  src={currentImage.dataUrl}
+                  src={currentPageImage.dataUrl}
                   alt={`Page ${pageNumber}`}
                   className="max-w-none w-full h-full"
                   draggable={false}
