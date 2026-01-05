@@ -8,8 +8,8 @@ import { AgentSelectedPage } from '../field';
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// Render scale for PNG conversion (2 = retina quality)
-const RENDER_SCALE = 2;
+// Render scale for PNG conversion (300 DPI for sharp rendering on iPad)
+const RENDER_SCALE = 300 / 72;
 
 interface PageImage {
   dataUrl: string;
