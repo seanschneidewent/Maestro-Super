@@ -90,7 +90,7 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
     setIsCollapsed(false);
   };
 
-  const COLLAPSED_TAB_WIDTH = 36; // Width of the collapsed tab in pixels
+  const COLLAPSED_TAB_WIDTH = 44; // Width of the collapsed tab in pixels
 
   // Always render the same structure, just change width
   return (
@@ -143,32 +143,52 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
         </div>
       )}
 
-      {/* Collapsed tab - shown when collapsed */}
+      {/* Collapsed notch tab - spine with bulge */}
       {isCollapsed && (
         <button
           onClick={handleExpandClick}
           className={`
-            absolute top-1/2 -translate-y-1/2
+            absolute inset-y-0 w-[44px] flex items-center
             ${side === 'left' ? 'left-0' : 'right-0'}
-            flex items-center gap-2 px-2 py-4
-            bg-slate-800/90 backdrop-blur-sm
-            border border-slate-700/50
-            ${side === 'left' ? 'rounded-r-lg border-l-0' : 'rounded-l-lg border-r-0'}
-            hover:bg-slate-700/90 hover:border-cyan-500/30
-            transition-all duration-200
-            text-slate-400 hover:text-cyan-400
-            shadow-lg
             group
           `}
           title={collapsedLabel || 'Expand panel'}
         >
-          <div className="flex flex-col items-center gap-3">
+          {/* Spine - thin vertical line */}
+          <div
+            className={`
+              absolute inset-y-0 w-[3px]
+              bg-slate-800/80 backdrop-blur-sm
+              ${side === 'left' ? 'left-0' : 'right-0'}
+              transition-colors duration-200
+              group-hover:bg-slate-700/90
+            `}
+          />
+
+          {/* Bulge - curved protrusion with icon/label */}
+          <div
+            className={`
+              absolute top-1/2 -translate-y-1/2
+              ${side === 'left' ? 'left-0' : 'right-0'}
+              w-[40px] h-[150px]
+              ${side === 'left' ? 'rounded-r-2xl' : 'rounded-l-2xl'}
+              bg-slate-800/90 backdrop-blur-sm
+              border border-slate-700/50
+              ${side === 'left' ? 'border-l-0' : 'border-r-0'}
+              flex flex-col items-center justify-center gap-3
+              transition-all duration-200
+              group-hover:bg-slate-700/90
+              group-hover:border-cyan-500/30
+              group-hover:shadow-glow-cyan-sm
+              text-slate-400 group-hover:text-cyan-400
+            `}
+          >
             <div className="transition-transform duration-200 group-hover:scale-110">
               {collapsedIcon}
             </div>
             {collapsedLabel && (
               <span
-                className="text-xs font-medium"
+                className="text-xs font-medium transition-colors"
                 style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
               >
                 {collapsedLabel}
