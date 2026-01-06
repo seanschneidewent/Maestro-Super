@@ -31,7 +31,11 @@
       "Bash(\" button on right side \\(shows when not on last page\\)\n- Buttons positioned at vertical center of viewer\n- More reliable on iPad than touch gestures\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(grep:*)",
       "Bash(ls:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(./venv/bin/python --version)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd%40@db.maestro-super.supabase.co:5432/postgres\" ./venv/bin/python:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd%40@db.ybyqobdyvbmsiehdmxwp.supabase.co:5432/postgres\" ./venv/bin/python:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd@db.ybyqobdyvbmsiehdmxwp.supabase.co:5432/postgres\" ./venv/bin/python:*)"
     ],
     "deny": [],
     "ask": []

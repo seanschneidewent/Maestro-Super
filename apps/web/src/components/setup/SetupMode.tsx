@@ -593,6 +593,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
+    let sseTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
       // Build upload plan using discipline classifier
@@ -684,6 +685,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Get auth token for SSE request
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
 
+      // Use AbortController for timeout (5 minutes for large uploads)
+      const controller = new AbortController();
+      sseTimeoutId = setTimeout(() => {
+        console.log('SSE processing timeout - aborting after 5 minutes');
+        controller.abort();
+      }, 300000); // 5 minute timeout
+
       // Use fetch with POST for SSE (EventSource only supports GET)
       const sseResponse = await fetch(`${API_URL}/projects/${projectId}/process-uploads-stream`, {
         method: 'POST',
@@ -691,6 +699,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           'Content-Type': 'application/json',
           ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
         },
+        signal: controller.signal,
       });
 
       if (!sseResponse.ok) {
@@ -738,10 +747,17 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
     } catch (err) {
       console.error('Failed to upload files:', err);
-      alert('Failed to upload files. Please try again.');
+      // Don't show alert for abort (timeout) - user can see progress stopped
+      if (err instanceof Error && err.name !== 'AbortError') {
+        alert('Failed to upload files. Please try again.');
+      }
       setPipelineProgress(null);
     } finally {
       setIsUploading(false);
+      // Clear the SSE timeout if it hasn't fired yet
+      if (sseTimeoutId) {
+        clearTimeout(sseTimeoutId);
+      }
       // Reset input so the same folder can be selected again
       e.target.value = '';
     }

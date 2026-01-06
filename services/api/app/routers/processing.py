@@ -608,14 +608,25 @@ async def process_uploads_stream(
         ai_png_task = asyncio.create_task(process_ai_png_stage())
 
         # Yield progress updates while processing
+        # Use heartbeat to keep connection alive (Railway/Vercel drop silent HTTP2 connections)
         last_progress = dict(progress)
+        last_emit_time = asyncio.get_event_loop().time()
+
         while not ocr_task.done() or not ai_png_task.done():
-            await asyncio.sleep(0.1)  # Check every 100ms
+            await asyncio.sleep(0.2)  # Check every 200ms
+            current_time = asyncio.get_event_loop().time()
+
             if progress != last_progress:
+                # Progress changed - emit update
                 yield f"data: {json.dumps(progress)}\n\n"
                 last_progress = dict(progress)
+                last_emit_time = current_time
+            elif current_time - last_emit_time > 3:
+                # No progress for 3 seconds - send heartbeat comment to keep connection alive
+                yield f": heartbeat\n\n"
+                last_emit_time = current_time
 
-        # Wait for completion
+        # Wait for completion (should already be done, but ensure cleanup)
         await ocr_task
         await ai_png_task
 
