@@ -278,6 +278,12 @@ export interface PageResponse {
   fullContext?: string;
   processedPass1: boolean;
   processedPass2: boolean;
+  // PNG pipeline fields
+  pageImagePath?: string;
+  pageImageReady: boolean;
+  fullPageText?: string;
+  ocrData?: OcrSpan[];
+  processedOcr: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -365,6 +371,25 @@ export interface SessionResponse {
 
 export interface SessionWithQueriesResponse extends SessionResponse {
   queries: QueryResponse[];
+}
+
+// Processing types
+export interface PageProcessResult {
+  pageId: string;
+  success: boolean;
+  ocrSuccess: boolean;
+  pngSuccess: boolean;
+  aiSuccess: boolean;
+  error?: string;
+}
+
+export interface ProcessUploadsResult {
+  total: number;
+  ocrCompleted: number;
+  pngCompleted: number;
+  aiCompleted: number;
+  failed: number;
+  results: PageProcessResult[];
 }
 
 // API functions
@@ -491,6 +516,11 @@ export const api = {
       request<SessionResponse>(`/projects/${projectId}/sessions`, { method: 'POST' }),
     get: (sessionId: string) =>
       request<SessionWithQueriesResponse>(`/sessions/${sessionId}`),
+  },
+
+  processing: {
+    processUploads: (projectId: string) =>
+      request<ProcessUploadsResult>(`/projects/${projectId}/process-uploads`, { method: 'POST' }),
   },
 };
 

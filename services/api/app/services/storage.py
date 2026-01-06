@@ -138,3 +138,53 @@ async def delete_file(storage_path: str) -> None:
     except Exception as e:
         logger.error(f"Failed to delete file {storage_path}: {e}")
         raise
+
+
+async def upload_page_image(
+    image_content: bytes,
+    project_id: str,
+    page_id: str,
+) -> str:
+    """
+    Upload a pre-rendered page image (PNG) to Supabase Storage.
+
+    Args:
+        image_content: PNG image bytes
+        project_id: Project ID
+        page_id: Page ID
+
+    Returns:
+        Storage path for the uploaded image
+    """
+    storage_path = f"page-images/{project_id}/{page_id}.png"
+    try:
+        supabase = _get_supabase_client()
+        supabase.storage.from_(BUCKET_NAME).upload(
+            storage_path,
+            image_content,
+            {"content-type": "image/png", "cache-control": "86400"},  # 24hr cache
+        )
+        logger.info(f"Uploaded page image: {storage_path}")
+        return storage_path
+    except Exception as e:
+        logger.error(f"Failed to upload page image for page {page_id}: {e}")
+        raise
+
+
+async def get_public_url(storage_path: str) -> str:
+    """
+    Get the public URL for a file in storage.
+
+    Args:
+        storage_path: Path in Supabase Storage
+
+    Returns:
+        Public URL for the file
+    """
+    try:
+        supabase = _get_supabase_client()
+        response = supabase.storage.from_(BUCKET_NAME).get_public_url(storage_path)
+        return response
+    except Exception as e:
+        logger.error(f"Failed to get public URL for {storage_path}: {e}")
+        raise

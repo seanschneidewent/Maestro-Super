@@ -39,6 +39,12 @@ class PageResponse(BaseModel):
     full_context: str | None = Field(default=None, alias="fullContext")
     processed_pass_1: bool = Field(alias="processedPass1")
     processed_pass_2: bool = Field(alias="processedPass2")
+    # PNG pipeline fields
+    page_image_path: str | None = Field(default=None, alias="pageImagePath")
+    page_image_ready: bool = Field(default=False, alias="pageImageReady")
+    full_page_text: str | None = Field(default=None, alias="fullPageText")
+    ocr_data: list[dict] | None = Field(default=None, alias="ocrData")
+    processed_ocr: bool = Field(default=False, alias="processedOcr")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 

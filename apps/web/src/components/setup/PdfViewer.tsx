@@ -3,6 +3,8 @@ import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Square, ChevronLeft, ChevronRight, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { ContextPointer } from '../../types';
+import { api } from '../../lib/api';
+import { getPublicUrl } from '../../lib/storage';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -116,9 +118,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [numPages, setNumPages] = useState(0);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
 
-  // Current page image (rendered on-demand)
+  // Current page image (rendered on-demand or from pre-rendered PNG)
   const [currentPageImage, setCurrentPageImage] = useState<PageImage | null>(null);
   const [isRenderingPage, setIsRenderingPage] = useState(false);
+
+  // Pre-rendered PNG state
+  const [preRenderedImageUrl, setPreRenderedImageUrl] = useState<string | null>(null);
+  const [usePreRendered, setUsePreRendered] = useState(false);
 
   // Viewer state
   const [pageNumber, setPageNumber] = useState(1);
@@ -153,13 +159,50 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
   }, []);
 
-  // Load PDF document when file changes (don't render all pages upfront)
+  // Check for pre-rendered PNG when fileId changes
   useEffect(() => {
-    if (!file) {
-      setPdfDoc(null);
-      setNumPages(0);
-      setCurrentPageImage(null);
-      setPageNumber(1);
+    if (!fileId) {
+      setPreRenderedImageUrl(null);
+      setUsePreRendered(false);
+      return;
+    }
+
+    const checkPreRendered = async () => {
+      try {
+        const pageData = await api.pages.get(fileId);
+        if (pageData.pageImageReady && pageData.pageImagePath) {
+          // Use pre-rendered PNG
+          const url = getPublicUrl(pageData.pageImagePath);
+          setPreRenderedImageUrl(url);
+          setUsePreRendered(true);
+          setNumPages(1); // Single-page PDFs for now
+          setIsLoadingPdf(false);
+        } else {
+          // Fall back to PDF.js rendering
+          setPreRenderedImageUrl(null);
+          setUsePreRendered(false);
+        }
+      } catch (err) {
+        // Page data not available, fall back to PDF.js
+        console.log('Pre-rendered check failed, using PDF.js:', err);
+        setPreRenderedImageUrl(null);
+        setUsePreRendered(false);
+      }
+    };
+
+    checkPreRendered();
+  }, [fileId]);
+
+  // Load PDF document when file changes (don't render all pages upfront)
+  // Skip if we're using pre-rendered PNG
+  useEffect(() => {
+    if (!file || usePreRendered) {
+      if (!usePreRendered) {
+        setPdfDoc(null);
+        setNumPages(0);
+        setCurrentPageImage(null);
+        setPageNumber(1);
+      }
       return;
     }
 
@@ -183,10 +226,37 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
 
     loadPdf();
-  }, [file]);
+  }, [file, usePreRendered]);
 
   // Render current page on-demand when page changes (matches PlanViewer pattern)
+  // If using pre-rendered PNG, load it instead of PDF.js rendering
   useEffect(() => {
+    // Case 1: Using pre-rendered PNG
+    if (usePreRendered && preRenderedImageUrl) {
+      setIsRenderingPage(true);
+
+      // Load pre-rendered PNG
+      const img = new Image();
+      img.onload = () => {
+        const pageImage: PageImage = {
+          dataUrl: preRenderedImageUrl,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        };
+        setCurrentPageImage(pageImage);
+        setIsRenderingPage(false);
+      };
+      img.onerror = () => {
+        console.error('Failed to load pre-rendered PNG, falling back to PDF.js');
+        setUsePreRendered(false);
+        setPreRenderedImageUrl(null);
+        setIsRenderingPage(false);
+      };
+      img.src = preRenderedImageUrl;
+      return;
+    }
+
+    // Case 2: Using PDF.js rendering
     if (!pdfDoc || !fileId) {
       setCurrentPageImage(null);
       return;
@@ -209,7 +279,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       }
       setIsRenderingPage(false);
     });
-  }, [pdfDoc, pageNumber, fileId]);
+  }, [pdfDoc, pageNumber, fileId, usePreRendered, preRenderedImageUrl]);
 
   // Reset transform when page changes
   useEffect(() => {
@@ -363,8 +433,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     );
   }
 
-  // Empty state - no file selected or file not yet loaded
-  if (!file) {
+  // Empty state - no file selected and no pre-rendered image
+  if (!file && !usePreRendered) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center text-slate-500">
@@ -375,8 +445,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     );
   }
 
-  // Loading PDF state
-  if (isLoadingPdf) {
+  // Loading PDF state (only when not using pre-rendered)
+  if (isLoadingPdf && !usePreRendered) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center text-slate-400">

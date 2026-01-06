@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, created_at_column, updated_at_column
@@ -38,6 +39,13 @@ class Page(Base):
     full_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Pass 2 AI summary
     processed_pass_1: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     processed_pass_2: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # PNG pre-rendering pipeline fields
+    page_image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Storage path to PNG
+    page_image_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    full_page_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Full OCR text
+    ocr_data: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Word positions [{text, x, y, w, h}]
+    processed_ocr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()

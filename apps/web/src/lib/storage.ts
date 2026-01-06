@@ -81,6 +81,19 @@ export async function getSignedUrl(
 }
 
 /**
+ * Get public URL for a file in storage
+ * @param storagePath - Path in storage bucket
+ * @returns Public URL
+ */
+export function getPublicUrl(storagePath: string): string {
+  const { data: { publicUrl } } = supabase.storage
+    .from(BUCKET_NAME)
+    .getPublicUrl(storagePath);
+
+  return publicUrl;
+}
+
+/**
  * Delete a file from Supabase Storage
  * @param storagePath - Path in storage bucket
  */

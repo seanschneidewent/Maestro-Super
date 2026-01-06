@@ -7,7 +7,7 @@ import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, DisciplineWithPagesResponse } from '../../lib/api';
+import { api, DisciplineWithPagesResponse, ProcessUploadsResult } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
@@ -69,6 +69,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    stage: 'uploading' | 'ocr' | 'ai_png' | 'done';
+    current: number;
+    total: number;
+    result?: ProcessUploadsResult;
+  } | null>(null);
   const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
   const [highlightedPointer, setHighlightedPointer] = useState<{
     bounds: { x: number; y: number; w: number; h: number };
@@ -599,8 +605,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         console.log(`${plan.filesNeedingReview.length} files need discipline review`);
       }
 
+      // Start upload progress tracking
+      setUploadProgress({ stage: 'uploading', current: 0, total: plan.totalFileCount });
+
       // Track uploaded file paths
       const uploadedPaths = new Map<string, string>(); // relativePath -> storagePath
+      let uploadedCount = 0;
 
       // Upload all files to Supabase Storage
       for (const [_disciplineCode, classifiedFiles] of plan.disciplines) {
@@ -610,6 +620,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
             uploadedPaths.set(cf.relativePath, uploadResult.storagePath);
             // Store file in memory for immediate viewing
             localFileMapRef.current.set(cf.relativePath, cf.file);
+            uploadedCount++;
+            setUploadProgress({ stage: 'uploading', current: uploadedCount, total: plan.totalFileCount });
           } catch (uploadErr) {
             console.error(`Failed to upload ${cf.fileName} to storage:`, uploadErr);
           }
@@ -659,11 +671,35 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Reload disciplines and pages from backend
       const response = await api.projects.getFull(projectId);
       setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
+      setIsUploading(false);
+
+      // Stage 2: Start processing pipeline (OCR → AI + PNG)
+      const totalPages = plan.totalFileCount;
+      setUploadProgress({ stage: 'ocr', current: 0, total: totalPages });
+
+      // Call the processing endpoint
+      const processingResult = await api.processing.processUploads(projectId);
+
+      // Show completion
+      setUploadProgress({
+        stage: 'done',
+        current: totalPages,
+        total: totalPages,
+        result: processingResult,
+      });
+
+      // Refresh hierarchy after processing
       setHierarchyRefresh(prev => prev + 1);
+
+      // Auto-hide progress after 3 seconds
+      setTimeout(() => {
+        setUploadProgress(null);
+      }, 3000);
 
     } catch (err) {
       console.error('Failed to upload files:', err);
       alert('Failed to upload files. Please try again.');
+      setUploadProgress(null);
     } finally {
       setIsUploading(false);
       // Reset input so the same folder can be selected again
@@ -842,6 +878,65 @@ export const SetupMode: React.FC<SetupModeProps> = ({
            </div>
         </div>
       </CollapsiblePanel>
+
+      {/* Upload Progress Overlay */}
+      {uploadProgress && (
+        <div className="fixed bottom-4 right-4 z-50 bg-slate-800/95 backdrop-blur-sm border border-slate-700 rounded-xl p-4 shadow-2xl min-w-[280px] animate-fade-in">
+          <div className="flex items-center gap-3 mb-3">
+            {uploadProgress.stage !== 'done' ? (
+              <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+            ) : (
+              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            )}
+            <div className="text-sm font-medium text-white">
+              {uploadProgress.stage === 'uploading' && 'Uploading files...'}
+              {uploadProgress.stage === 'ocr' && 'Extracting text (OCR)...'}
+              {uploadProgress.stage === 'ai_png' && 'Processing AI + Images...'}
+              {uploadProgress.stage === 'done' && 'Processing complete!'}
+            </div>
+          </div>
+
+          <div className="w-full bg-slate-700 rounded-full h-2 mb-2">
+            <div
+              className={`h-2 rounded-full transition-all duration-300 ${
+                uploadProgress.stage === 'done' ? 'bg-green-500' : 'bg-cyan-500'
+              }`}
+              style={{
+                width: uploadProgress.stage === 'done'
+                  ? '100%'
+                  : uploadProgress.stage === 'uploading'
+                    ? `${(uploadProgress.current / uploadProgress.total) * 100}%`
+                    : uploadProgress.stage === 'ocr'
+                      ? '33%'
+                      : '66%'
+              }}
+            />
+          </div>
+
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>
+              {uploadProgress.stage === 'uploading' && `${uploadProgress.current} / ${uploadProgress.total} files`}
+              {uploadProgress.stage === 'ocr' && 'Step 1/2: Text extraction'}
+              {uploadProgress.stage === 'ai_png' && 'Step 2/2: AI analysis + images'}
+              {uploadProgress.stage === 'done' && uploadProgress.result && (
+                `${uploadProgress.result.ocrCompleted} OCR, ${uploadProgress.result.pngCompleted} images, ${uploadProgress.result.aiCompleted} AI`
+              )}
+            </span>
+            {uploadProgress.stage === 'done' && (
+              <button
+                onClick={() => setUploadProgress(null)}
+                className="text-slate-500 hover:text-white transition-colors"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
