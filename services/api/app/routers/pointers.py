@@ -10,6 +10,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.schemas import User
 from app.database.session import get_db
 from app.dependencies.rate_limit import check_rate_limit
+from app.models.discipline import Discipline
 from app.models.page import Page
 from app.models.pointer import Pointer
 from app.models.pointer_reference import PointerReference
@@ -19,7 +20,11 @@ from app.schemas.pointer import (
     PointerResponse,
     PointerUpdate,
 )
+from app.services.gemini import analyze_pointer
+from app.services.ocr import crop_pdf_region, extract_text_with_positions
+from app.services.storage import download_file, upload_snapshot
 from app.services.usage import UsageService
+from app.services.voyage import embed_pointer as generate_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +50,22 @@ async def create_pointer(
     user: User = Depends(check_rate_limit),
     db: Session = Depends(get_db),
 ) -> PointerResponse:
-    """Create a pointer (bounding box only, no PDF processing).
+    """Create a pointer with full AI analysis.
 
-    PDF processing has been removed. Pointers just store the bounding box coordinates.
+    Pipeline:
+    1. Check rate limits and pointer limits
+    2. Crop PDF to bounding box region
+    3. Run Tesseract OCR to extract text with positions (graceful failure)
+    4. Analyze with Gemini to generate title, description, references (graceful failure)
+    5. Upload cropped PNG to Supabase
+    6. Create pointer and reference records
+    7. Generate embedding (graceful failure, flags for retry)
     """
-    # Get page and validate
+    # 1. Get page and validate
     page = verify_page_exists(page_id, db)
     logger.info(f"Creating pointer on page {page.page_name} at ({bbox.x}, {bbox.y}) for user {user.id}")
 
-    # Check pointer limit for project
+    # 1b. Check pointer limit for project
     project_id = page.discipline.project_id
     allowed, error_info = UsageService.check_pointer_limit(db, user.id, project_id)
     if not allowed:
@@ -63,36 +75,142 @@ async def create_pointer(
         )
 
     try:
-        # Create Pointer record (no PDF processing)
+        # 2. Download PDF from Supabase Storage
+        logger.info(f"Downloading PDF: {page.file_path}")
+        pdf_bytes = await download_file(page.file_path)
+
+        # 3. Crop to bounding box region
+        logger.info(f"Cropping region: ({bbox.x}, {bbox.y}, {bbox.width}, {bbox.height})")
+        cropped_png = crop_pdf_region(
+            pdf_bytes,
+            page_index=0,  # Pages are single-page PDFs
+            x_norm=bbox.x,
+            y_norm=bbox.y,
+            w_norm=bbox.width,
+            h_norm=bbox.height,
+        )
+
+        # 4. Run Tesseract OCR - graceful failure
+        logger.info("Running Tesseract OCR")
+        try:
+            ocr_spans = extract_text_with_positions(cropped_png)
+            logger.info(f"OCR found {len(ocr_spans)} text spans")
+        except Exception as e:
+            logger.warning(f"OCR failed, continuing with empty spans: {e}")
+            ocr_spans = []
+
+        # 5. Get page context and all page names in project
+        page_context = page.initial_context or ""
+
+        # Get all page names in the same project
+        all_pages = (
+            db.query(Page.page_name)
+            .filter(
+                Page.discipline_id.in_(
+                    db.query(Discipline.id).filter(
+                        Discipline.project_id == project_id
+                    )
+                )
+            )
+            .all()
+        )
+        all_page_names = [p.page_name for p in all_pages]
+        logger.info(f"Project has {len(all_page_names)} pages for reference matching")
+
+        # 6. Analyze with Gemini - graceful failure
+        logger.info("Sending to Gemini for analysis")
+        try:
+            analysis = await analyze_pointer(
+                cropped_png,
+                ocr_spans,
+                page_context,
+                all_page_names,
+            )
+            logger.info(f"Gemini analysis complete: {analysis.get('title', 'Unknown')}")
+        except Exception as e:
+            logger.warning(f"Gemini analysis failed, using fallback: {e}")
+            analysis = {
+                "title": "Untitled Region",
+                "description": "Analysis pending - please try regenerating.",
+                "text_spans": [],
+                "references": [],
+            }
+
+        # 7. Upload cropped PNG to Supabase
         pointer_id = str(uuid.uuid4())
+        png_path = await upload_snapshot(
+            cropped_png,
+            pointer_id,
+            user.id,
+        )
+        logger.info(f"Uploaded snapshot to {png_path}")
+
+        # 8. Create Pointer record
         pointer = Pointer(
             id=pointer_id,
             page_id=page_id,
-            title="New Pointer",
-            description="",
-            text_spans=[],
-            ocr_data=[],
+            title=analysis["title"],
+            description=analysis["description"],
+            text_spans=analysis.get("text_spans", []),
+            ocr_data=ocr_spans,  # Full OCR data with word positions
             bbox_x=bbox.x,
             bbox_y=bbox.y,
             bbox_width=bbox.width,
             bbox_height=bbox.height,
-            png_path=None,
-            needs_embedding=False,
+            png_path=png_path,
+            needs_embedding=False,  # Will set to True if embedding fails
         )
         db.add(pointer)
+
+        # 9. Create PointerReference records for detected cross-references
+        for ref in analysis.get("references", []):
+            target_page_name = ref.get("target_page")
+            if not target_page_name:
+                continue
+
+            # Find target page by name
+            target_page = db.query(Page).filter(Page.page_name == target_page_name).first()
+
+            if target_page:
+                pointer_ref = PointerReference(
+                    id=str(uuid.uuid4()),
+                    source_pointer_id=pointer_id,
+                    target_page_id=target_page.id,
+                    justification=ref.get("justification", ""),
+                )
+                db.add(pointer_ref)
+                logger.info(f"Created reference to page {target_page_name}")
+
         db.commit()
         db.refresh(pointer)
         logger.info(f"Pointer {pointer_id} created successfully")
 
-        # Track usage
+        # 10. Track usage
         UsageService.increment_pointers(db, user.id)
         UsageService.increment_request(db, user.id)
+
+        # 11. Generate embedding - graceful failure, flag for retry
+        try:
+            embedding = await generate_embedding(
+                pointer.title,
+                pointer.description,
+                pointer.text_spans,
+            )
+            pointer.embedding = embedding
+            db.commit()
+            logger.info(f"Generated embedding for pointer {pointer_id}")
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding for {pointer_id}, flagging for retry: {e}")
+            pointer.needs_embedding = True
+            db.commit()
 
         return PointerResponse.from_orm_with_embedding_check(pointer)
 
     except HTTPException:
+        # Re-raise HTTP exceptions (including rate limit)
         raise
     except Exception as e:
+        # Rollback on unexpected errors
         db.rollback()
         logger.error(f"Pointer creation failed: {e}", exc_info=True)
         raise HTTPException(

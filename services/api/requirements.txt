@@ -24,6 +24,9 @@ anthropic>=0.40.0
 google-genai>=1.0.0
 voyageai>=0.2.0
 
+# PDF Rendering
+pdf2image>=1.16.0
+
 # OCR
 pytesseract>=0.3.10
 Pillow>=10.0.0
