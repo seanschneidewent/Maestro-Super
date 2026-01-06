@@ -35,8 +35,6 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
-        pool_recycle=300,  # Recycle connections after 5 minutes (Supabase can drop idle)
-        pool_timeout=30,  # Timeout waiting for connection from pool
         echo=False,
     )
 
