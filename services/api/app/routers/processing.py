@@ -89,9 +89,9 @@ async def _process_page_pass_1(page_id: str, db: Session) -> Pass1Result:
         logger.info(f"Downloading PDF for page {page_id}: {page.file_path}")
         pdf_bytes = await download_file(page.file_path)
 
-        # 3. Convert PDF page to PNG image
+        # 3. Convert PDF page to PNG image (run in thread pool to avoid blocking event loop)
         logger.info(f"Converting PDF to image for page {page_id}")
-        image_bytes = pdf_page_to_image(pdf_bytes, page_index=0, dpi=150)
+        image_bytes = await asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150)
 
         # 4. Send to Gemini for analysis
         logger.info(f"Sending page {page_id} to Gemini for Pass 1 analysis")
@@ -219,9 +219,9 @@ async def _process_page_ocr(page_id: str, db: Session) -> tuple[bool, str | None
         logger.info(f"OCR: Downloading PDF for page {page_id}")
         pdf_bytes = await download_file(page.file_path)
 
-        # Extract text and word positions
+        # Extract text and word positions (run in thread pool to avoid blocking event loop)
         logger.info(f"OCR: Extracting text for page {page_id}")
-        ocr_result = extract_full_page_text(pdf_bytes, page_index=0)
+        ocr_result = await asyncio.to_thread(extract_full_page_text, pdf_bytes, 0)
 
         # Update database
         page.full_page_text = ocr_result["text"]
@@ -251,9 +251,9 @@ async def _process_page_png(
         if not page:
             return False, "Page not found"
 
-        # Convert to PNG at 150 DPI
+        # Convert to PNG at 150 DPI (run in thread pool to avoid blocking event loop)
         logger.info(f"PNG: Rendering page {page_id} at 150 DPI")
-        image_bytes = pdf_page_to_image(pdf_bytes, page_index=0, dpi=150)
+        image_bytes = await asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150)
 
         # Upload to Supabase Storage
         logger.info(f"PNG: Uploading image for page {page_id}")
@@ -287,9 +287,9 @@ async def _process_page_ai(
         if not page:
             return False, "Page not found"
 
-        # Convert to image for Gemini
+        # Convert to image for Gemini (run in thread pool to avoid blocking event loop)
         logger.info(f"AI: Converting PDF to image for page {page_id}")
-        image_bytes = pdf_page_to_image(pdf_bytes, page_index=0, dpi=150)
+        image_bytes = await asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150)
 
         # Send to Gemini (OCR text is now available for enhanced prompting)
         logger.info(f"AI: Sending page {page_id} to Gemini for Pass 1")
