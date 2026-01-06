@@ -1,7 +1,15 @@
 """FastAPI application entry point."""
 
 import logging
+import sys
 from uuid import uuid4
+
+# Configure logging to output to stdout (Railway captures this)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
