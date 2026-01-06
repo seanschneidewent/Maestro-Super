@@ -1,9 +1,12 @@
 """Processing endpoints for page and discipline analysis."""
 
 import asyncio
+import json
 import logging
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -468,4 +471,169 @@ async def process_uploads(
         ai_completed=ai_completed,
         failed=failed,
         results=results,
+    )
+
+
+@router.post("/projects/{project_id}/process-uploads-stream")
+async def process_uploads_stream(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    SSE endpoint that streams progress updates as processing happens.
+
+    Pipeline: OCR → (AI + PNG in parallel)
+    Each stage starts as soon as its dependency completes.
+    Progress is streamed in real-time via Server-Sent Events.
+    """
+    # Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all unprocessed pages
+    pages = (
+        db.query(Page)
+        .join(Discipline)
+        .filter(
+            Discipline.project_id == project_id,
+            (Page.processed_ocr == False)  # noqa: E712
+            | (Page.page_image_ready == False)  # noqa: E712
+            | (Page.processed_pass_1 == False),  # noqa: E712
+        )
+        .all()
+    )
+
+    total = len(pages)
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        if total == 0:
+            yield f"data: {json.dumps({'upload': 0, 'ocr': 0, 'ai': 0, 'png': 0, 'total': 0, 'complete': True})}\n\n"
+            return
+
+        # Progress counters (shared state)
+        progress = {"upload": total, "ocr": 0, "ai": 0, "png": 0, "total": total}
+
+        # Send initial state
+        yield f"data: {json.dumps(progress)}\n\n"
+
+        # PDF cache for reuse
+        pdf_cache: dict[str, bytes] = {}
+
+        # Queue for pages ready for AI+PNG processing
+        ai_png_queue: asyncio.Queue = asyncio.Queue()
+
+        # Semaphore for AI+PNG concurrency
+        semaphore = asyncio.Semaphore(5)
+
+        # Track completed AI and PNG separately
+        ai_done = 0
+        png_done = 0
+        ai_png_started = 0
+
+        async def process_ocr_stage():
+            """Process OCR for all pages sequentially, feeding AI+PNG queue."""
+            nonlocal progress
+            for page in pages:
+                page_id = str(page.id)
+
+                # Download PDF if not cached
+                if page.file_path not in pdf_cache:
+                    try:
+                        pdf_cache[page.file_path] = await download_file(page.file_path)
+                    except Exception as e:
+                        logger.error(f"Failed to download PDF for page {page_id}: {e}")
+                        continue
+
+                # Run OCR
+                if not page.processed_ocr:
+                    with SessionLocal() as ocr_db:
+                        success, _ = await _process_page_ocr(page_id, ocr_db)
+                        if success:
+                            progress["ocr"] += 1
+                else:
+                    progress["ocr"] += 1
+
+                # Put page in AI+PNG queue
+                await ai_png_queue.put((page, pdf_cache.get(page.file_path)))
+
+            # Signal end of OCR stage
+            await ai_png_queue.put(None)
+
+        async def process_ai_png_stage():
+            """Process AI and PNG in parallel for each page from queue."""
+            nonlocal progress, ai_done, png_done, ai_png_started
+
+            async def process_single_page(page: Page, pdf_bytes: bytes):
+                nonlocal progress, ai_done, png_done
+                page_id = str(page.id)
+
+                async with semaphore:
+                    # PNG processing
+                    if not page.page_image_ready and pdf_bytes:
+                        with SessionLocal() as png_db:
+                            success, _ = await _process_page_png(
+                                page_id, project_id, pdf_bytes, png_db
+                            )
+                            if success:
+                                progress["png"] += 1
+                    else:
+                        progress["png"] += 1
+
+                    # AI processing
+                    if not page.processed_pass_1 and pdf_bytes:
+                        with SessionLocal() as ai_db:
+                            success, _ = await _process_page_ai(page_id, pdf_bytes, ai_db)
+                            if success:
+                                progress["ai"] += 1
+                    else:
+                        progress["ai"] += 1
+
+            tasks = []
+            while True:
+                item = await ai_png_queue.get()
+                if item is None:
+                    break
+                page, pdf_bytes = item
+                if pdf_bytes:
+                    task = asyncio.create_task(process_single_page(page, pdf_bytes))
+                    tasks.append(task)
+
+            # Wait for all AI+PNG tasks to complete
+            if tasks:
+                await asyncio.gather(*tasks)
+
+        # Run OCR and AI+PNG stages, yielding progress updates
+        ocr_task = asyncio.create_task(process_ocr_stage())
+        ai_png_task = asyncio.create_task(process_ai_png_stage())
+
+        # Yield progress updates while processing
+        last_progress = dict(progress)
+        while not ocr_task.done() or not ai_png_task.done():
+            await asyncio.sleep(0.1)  # Check every 100ms
+            if progress != last_progress:
+                yield f"data: {json.dumps(progress)}\n\n"
+                last_progress = dict(progress)
+
+        # Wait for completion
+        await ocr_task
+        await ai_png_task
+
+        # Final progress update
+        progress["complete"] = True
+        yield f"data: {json.dumps(progress)}\n\n"
+
+        logger.info(
+            f"Stream processing complete for project {project_id}: "
+            f"OCR={progress['ocr']}, PNG={progress['png']}, AI={progress['ai']}"
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
