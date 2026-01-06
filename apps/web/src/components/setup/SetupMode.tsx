@@ -3,11 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { ContextPanel, PanelView } from './context-panel';
+import { UploadProgressModal } from './UploadProgressModal';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
-import { api, DisciplineWithPagesResponse, ProcessUploadsResult } from '../../lib/api';
+import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
@@ -69,15 +70,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
-  // Pipeline progress with 4 parallel progress bars
-  const [pipelineProgress, setPipelineProgress] = useState<{
-    upload: number;
-    ocr: number;
-    ai: number;
-    png: number;
-    total: number;
-    complete?: boolean;
+  // Pipeline progress with 4 progress bars (nested structure)
+  const [uploadProgress, setUploadProgress] = useState<{
+    upload: { current: number; total: number };
+    png: { current: number; total: number };
+    ocr: { current: number; total: number };
+    ai: { current: number; total: number };
   } | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
   const [highlightedPointer, setHighlightedPointer] = useState<{
     bounds: { x: number; y: number; w: number; h: number };
@@ -593,6 +594,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
+    setUploadError(null);
     let sseTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
@@ -601,6 +603,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
       if (plan.totalFileCount === 0) {
         alert('No PDF files found in the selected folder.');
+        setIsUploading(false);
         return;
       }
 
@@ -609,29 +612,59 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         console.log(`${plan.filesNeedingReview.length} files need discipline review`);
       }
 
-      // Initialize pipeline progress with all 4 bars
+      // Initialize progress with nested structure and show modal
       const totalFiles = plan.totalFileCount;
-      setPipelineProgress({ upload: 0, ocr: 0, ai: 0, png: 0, total: totalFiles });
+      setUploadProgress({
+        upload: { current: 0, total: totalFiles },
+        png: { current: 0, total: totalFiles },
+        ocr: { current: 0, total: totalFiles },
+        ai: { current: 0, total: totalFiles },
+      });
+      setShowProgressModal(true);
 
       // Track uploaded file paths
       const uploadedPaths = new Map<string, string>(); // relativePath -> storagePath
-      let uploadedCount = 0;
 
-      // Upload all files to Supabase Storage
+      // Collect all files to upload
+      const filesToUpload: Array<{ file: File; relativePath: string }> = [];
       for (const [_disciplineCode, classifiedFiles] of plan.disciplines) {
         for (const cf of classifiedFiles) {
-          try {
-            const uploadResult = await uploadFile(projectId, cf.file, cf.relativePath);
-            uploadedPaths.set(cf.relativePath, uploadResult.storagePath);
-            // Store file in memory for immediate viewing
-            localFileMapRef.current.set(cf.relativePath, cf.file);
-            uploadedCount++;
-            setPipelineProgress(prev => prev ? { ...prev, upload: uploadedCount } : null);
-          } catch (uploadErr) {
-            console.error(`Failed to upload ${cf.fileName} to storage:`, uploadErr);
-          }
+          filesToUpload.push({ file: cf.file, relativePath: cf.relativePath });
         }
       }
+
+      // Parallel upload with concurrency limit of 5
+      const MAX_CONCURRENT = 5;
+      const semaphore = new Set<Promise<void>>();
+      let uploadedCount = 0;
+
+      for (const { file, relativePath } of filesToUpload) {
+        const promise = (async () => {
+          try {
+            const uploadResult = await uploadFile(projectId, file, relativePath);
+            uploadedPaths.set(relativePath, uploadResult.storagePath);
+            // Store file in memory for immediate viewing
+            localFileMapRef.current.set(relativePath, file);
+          } catch (uploadErr) {
+            console.error(`Failed to upload ${file.name} to storage:`, uploadErr);
+          } finally {
+            uploadedCount++;
+            setUploadProgress(prev => prev ? {
+              ...prev,
+              upload: { current: uploadedCount, total: totalFiles },
+            } : null);
+          }
+        })();
+
+        semaphore.add(promise);
+        promise.finally(() => semaphore.delete(promise));
+
+        if (semaphore.size >= MAX_CONCURRENT) {
+          await Promise.race(semaphore);
+        }
+      }
+      // Wait for remaining uploads
+      await Promise.all(semaphore);
 
       // Build API request from plan
       const apiRequest = planToApiRequest(plan, uploadedPaths);
@@ -678,7 +711,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
       setIsUploading(false);
 
-      // Stage 2: Start processing pipeline via SSE (OCR → AI + PNG in parallel)
+      // Stage 2: Start processing pipeline via SSE (PNG → OCR → AI)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -727,19 +760,40 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
           for (const line of lines) {
+            // Skip heartbeat comments
+            if (line.startsWith(':')) continue;
+
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                setPipelineProgress(data);
 
-                if (data.complete) {
+                // Handle new stage-based event format
+                if (data.stage === 'png') {
+                  setUploadProgress(prev => prev ? {
+                    ...prev,
+                    png: { current: data.current, total: data.total },
+                  } : null);
+                } else if (data.stage === 'ocr') {
+                  setUploadProgress(prev => prev ? {
+                    ...prev,
+                    ocr: { current: data.current, total: data.total },
+                  } : null);
+                } else if (data.stage === 'ai') {
+                  setUploadProgress(prev => prev ? {
+                    ...prev,
+                    ai: { current: data.current, total: data.total },
+                  } : null);
+                } else if (data.stage === 'complete') {
                   // Refresh hierarchy after processing
                   setHierarchyRefresh(prev => prev + 1);
 
-                  // Auto-hide progress after 3 seconds
+                  // Auto-close modal after 1.5 seconds
                   setTimeout(() => {
-                    setPipelineProgress(null);
-                  }, 3000);
+                    setShowProgressModal(false);
+                    setUploadProgress(null);
+                  }, 1500);
+                } else if (data.stage === 'error') {
+                  setUploadError(data.message || 'An error occurred during processing');
                 }
               } catch (parseErr) {
                 console.error('Failed to parse SSE data:', parseErr);
@@ -757,9 +811,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       }
       // Don't show alert for abort (timeout) - user can see progress stopped
       if (err instanceof Error && err.name !== 'AbortError') {
-        alert('Failed to upload files. Please try again.');
+        setUploadError(err.message || 'Failed to upload files. Please try again.');
       }
-      setPipelineProgress(null);
     } finally {
       setIsUploading(false);
       // Clear the SSE timeout if it hasn't fired yet
@@ -943,90 +996,22 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         </div>
       </CollapsiblePanel>
 
-      {/* Pipeline Progress Overlay - 4 Parallel Progress Bars */}
-      {pipelineProgress && (
-        <div className="fixed bottom-4 right-4 z-50 bg-slate-800/95 backdrop-blur-sm border border-slate-700 rounded-xl p-4 shadow-2xl min-w-[320px] animate-fade-in">
-          <div className="flex items-center gap-3 mb-3">
-            {!pipelineProgress.complete ? (
-              <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-            ) : (
-              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
-                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            )}
-            <div className="text-sm font-medium text-white">
-              {pipelineProgress.complete ? 'Processing complete!' : 'Processing files...'}
-            </div>
-          </div>
-
-          {/* Upload Progress */}
-          <div className="mb-2">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
-              <span>Upload</span>
-              <span>{pipelineProgress.upload} / {pipelineProgress.total}</span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-1.5">
-              <div
-                className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${pipelineProgress.total > 0 ? (pipelineProgress.upload / pipelineProgress.total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-
-          {/* OCR Progress */}
-          <div className="mb-2">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
-              <span>Text Extraction</span>
-              <span>{pipelineProgress.ocr} / {pipelineProgress.total}</span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-1.5">
-              <div
-                className="bg-cyan-500 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${pipelineProgress.total > 0 ? (pipelineProgress.ocr / pipelineProgress.total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-
-          {/* AI Progress */}
-          <div className="mb-2">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
-              <span>AI Analysis</span>
-              <span>{pipelineProgress.ai} / {pipelineProgress.total}</span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-1.5">
-              <div
-                className="bg-purple-500 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${pipelineProgress.total > 0 ? (pipelineProgress.ai / pipelineProgress.total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-
-          {/* PNG Progress */}
-          <div className="mb-2">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
-              <span>Image Rendering</span>
-              <span>{pipelineProgress.png} / {pipelineProgress.total}</span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-1.5">
-              <div
-                className="bg-green-500 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${pipelineProgress.total > 0 ? (pipelineProgress.png / pipelineProgress.total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-
-          {pipelineProgress.complete && (
-            <button
-              onClick={() => setPipelineProgress(null)}
-              className="mt-2 text-xs text-slate-500 hover:text-white transition-colors"
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
+      {/* Upload Progress Modal */}
+      <UploadProgressModal
+        isOpen={showProgressModal}
+        progress={uploadProgress ?? {
+          upload: { current: 0, total: 0 },
+          png: { current: 0, total: 0 },
+          ocr: { current: 0, total: 0 },
+          ai: { current: 0, total: 0 },
+        }}
+        error={uploadError ?? undefined}
+        onRetry={() => {
+          setUploadError(null);
+          setShowProgressModal(false);
+          setUploadProgress(null);
+        }}
+      />
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (

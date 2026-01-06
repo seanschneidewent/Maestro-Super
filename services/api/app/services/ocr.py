@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 # Re-export crop_pdf_region from pdf_renderer for backwards compatibility
-__all__ = ["crop_pdf_region", "extract_text_with_positions"]
+__all__ = ["crop_pdf_region", "extract_text_with_positions", "extract_full_page_text"]
 
 
 def extract_text_with_positions(image_bytes: bytes) -> list[dict]:
@@ -70,70 +70,38 @@ def extract_text_with_positions(image_bytes: bytes) -> list[dict]:
         return []
 
 
-async def extract_text_from_region(
-    pdf_path: str,
-    page_number: int,
-    x_norm: float,
-    y_norm: float,
-    w_norm: float,
-    h_norm: float,
-) -> dict:
+async def extract_full_page_text(
+    image_bytes: bytes,
+    max_retries: int = 3,
+) -> tuple[str, list[dict]]:
     """
-    Extract text from a region of a PDF page using hybrid OCR.
-
-    Uses PyMuPDF native text extraction first, falls back to
-    Tesseract OCR if native extraction fails or is incomplete.
+    Run Tesseract on full page PNG with retry logic.
 
     Args:
-        pdf_path: Path to PDF file (Supabase Storage path)
-        page_number: Page number (1-indexed)
-        x_norm, y_norm, w_norm, h_norm: Normalized bounds (0-1)
+        image_bytes: PNG image bytes of the page
+        max_retries: Maximum retry attempts on failure (default 3)
 
     Returns:
-        Dictionary with:
-        - native_text: str (from PyMuPDF)
-        - ocr_text: str | None (from Tesseract if needed)
-        - combined_text: str (deduplicated merge)
-        - confidence: float (0-1)
+        (full_text, ocr_spans) where ocr_spans is [{text, x, y, w, h, confidence}]
+        Returns ("", []) if all retries fail.
     """
-    raise NotImplementedError("Hybrid OCR not yet implemented - use extract_text_with_positions instead")
+    import asyncio
 
+    for attempt in range(max_retries):
+        try:
+            # Use existing extract_text_with_positions function
+            spans = extract_text_with_positions(image_bytes)
 
-async def extract_page_text(pdf_path: str, page_number: int) -> dict:
-    """
-    Extract all text from a PDF page.
+            # Join all span text for full_text
+            full_text = " ".join(span["text"] for span in spans)
 
-    Args:
-        pdf_path: Path to PDF file (Supabase Storage path)
-        page_number: Page number (1-indexed)
+            logger.info(f"Full page OCR complete: {len(spans)} spans, {len(full_text)} chars")
+            return full_text, spans
 
-    Returns:
-        Dictionary with:
-        - text_blocks: list[dict] with position and content
-        - full_text: str
-    """
-    raise NotImplementedError("Full page OCR not yet implemented")
+        except Exception as e:
+            logger.warning(f"OCR attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0)  # 1s backoff between retries
 
-
-async def capture_region_snapshot(
-    pdf_path: str,
-    page_number: int,
-    x_norm: float,
-    y_norm: float,
-    w_norm: float,
-    h_norm: float,
-    dpi: int = 150,
-) -> bytes:
-    """
-    Capture a high-DPI snapshot of a PDF region.
-
-    Args:
-        pdf_path: Path to PDF file (Supabase Storage path)
-        page_number: Page number (1-indexed)
-        x_norm, y_norm, w_norm, h_norm: Normalized bounds (0-1)
-        dpi: Target DPI for capture (default 150)
-
-    Returns:
-        PNG image bytes
-    """
-    raise NotImplementedError("Use crop_pdf_region with pdf_bytes instead")
+    logger.error(f"Full page OCR failed after {max_retries} attempts")
+    return "", []

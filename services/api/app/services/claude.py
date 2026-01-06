@@ -20,64 +20,6 @@ def _get_claude_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
-async def analyze_page_pass_1(image_base64: str) -> str:
-    """
-    Analyze a construction drawing page and return initial context summary.
-
-    This is Pass 1 processing - generates a brief 2-3 sentence description
-    of the page type, key elements, and notable features.
-
-    Args:
-        image_base64: Base64-encoded PNG image of the page
-
-    Returns:
-        Initial context summary (2-3 sentences)
-    """
-    try:
-        client = _get_claude_client()
-
-        message = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=300,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": image_base64,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Describe this construction drawing page briefly. "
-                                "Include: what type of page it is (floor plan, detail sheet, "
-                                "elevation, section, schedule, notes, etc.), key elements visible "
-                                "(keynotes, legends, details, general notes, dimensions, etc.), "
-                                "and any notable features. Keep it to 2-3 sentences."
-                            ),
-                        },
-                    ],
-                }
-            ],
-        )
-
-        result = message.content[0].text
-        logger.info(
-            f"Pass 1 analysis complete. Tokens: {message.usage.input_tokens} in, "
-            f"{message.usage.output_tokens} out"
-        )
-        return result
-
-    except Exception as e:
-        logger.error(f"Claude Pass 1 analysis failed: {e}")
-        raise
-
-
 async def generate_response(
     query_text: str,
     context_pointers: list[dict],
