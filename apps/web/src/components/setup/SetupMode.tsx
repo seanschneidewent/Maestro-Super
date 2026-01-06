@@ -750,6 +750,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Read the SSE stream
       const reader = sseResponse.body?.getReader();
       const decoder = new TextDecoder();
+      let receivedComplete = false;
 
       if (reader) {
         let buffer = '';
@@ -803,6 +804,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     ai: { current: data.current, total: data.total },
                   } : null);
                 } else if (data.stage === 'complete') {
+                  receivedComplete = true;
                   // Refresh hierarchy after processing
                   setHierarchyRefresh(prev => prev + 1);
 
@@ -818,6 +820,95 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 console.error('Failed to parse SSE data:', parseErr);
               }
             }
+          }
+        }
+      }
+
+      // RETRY LOGIC: If SSE stream closed without receiving "complete",
+      // automatically call the reprocess endpoint to finish remaining pages
+      if (!receivedComplete) {
+        console.log('SSE stream closed without completion - starting automatic retry...');
+
+        // Small delay before retry to let server recover
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        try {
+          const retryController = new AbortController();
+          const retryTimeoutId = setTimeout(() => {
+            console.log('Retry SSE timeout - aborting after 15 minutes');
+            retryController.abort();
+          }, 900000); // 15 minute timeout
+
+          const retryResponse = await fetch(`${API_URL}/projects/${projectId}/reprocess-ocr-ai-stream`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+            },
+            signal: retryController.signal,
+          });
+
+          if (retryResponse.ok) {
+            console.log('Retry SSE connection established');
+            const retryReader = retryResponse.body?.getReader();
+            const retryDecoder = new TextDecoder();
+
+            if (retryReader) {
+              let retryBuffer = '';
+              while (true) {
+                const { done, value } = await retryReader.read();
+                if (done) break;
+
+                retryBuffer += retryDecoder.decode(value, { stream: true });
+                const lines = retryBuffer.split('\n');
+                retryBuffer = lines.pop() || '';
+
+                for (const line of lines) {
+                  if (line.startsWith(':')) continue; // Skip heartbeats
+
+                  if (line.startsWith('data: ')) {
+                    try {
+                      const data = JSON.parse(line.slice(6));
+
+                      if (data.stage === 'init') {
+                        console.log(`Retrying ${data.pageCount} remaining pages`);
+                      } else if (data.stage === 'ocr') {
+                        setUploadProgress(prev => prev ? {
+                          ...prev,
+                          ocr: { current: (prev.ocr.total - data.total) + data.current, total: prev.ocr.total },
+                        } : null);
+                      } else if (data.stage === 'ai') {
+                        setUploadProgress(prev => prev ? {
+                          ...prev,
+                          ai: { current: (prev.ai.total - data.total) + data.current, total: prev.ai.total },
+                        } : null);
+                      } else if (data.stage === 'complete') {
+                        console.log('Retry processing complete!');
+                        setHierarchyRefresh(prev => prev + 1);
+                        setTimeout(() => {
+                          setShowProgressModal(false);
+                          setUploadProgress(null);
+                        }, 1500);
+                      } else if (data.stage === 'error') {
+                        setUploadError(data.message || 'An error occurred during retry processing');
+                      }
+                    } catch (parseErr) {
+                      console.error('Failed to parse retry SSE data:', parseErr);
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            console.error('Retry request failed:', retryResponse.status);
+          }
+
+          clearTimeout(retryTimeoutId);
+        } catch (retryErr) {
+          console.error('Retry processing failed:', retryErr);
+          // Don't set error for abort - user can see progress
+          if (retryErr instanceof Error && retryErr.name !== 'AbortError') {
+            setUploadError('Some pages may not have been fully processed. You can retry later.');
           }
         }
       }

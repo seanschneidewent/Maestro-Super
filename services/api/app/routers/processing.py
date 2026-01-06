@@ -193,8 +193,10 @@ async def process_uploads_stream(
         semaphore = asyncio.Semaphore(10)
 
         # ============================================================
-        # Stage 1: PNG rendering (parallel)
+        # Stage 1: PNG rendering (parallel) with GLOBAL TIMEOUT
         # ============================================================
+        PNG_STAGE_TIMEOUT = 300  # 5 minutes max for entire PNG stage
+
         try:
             async def render_with_semaphore(page_data: dict) -> tuple[str, bytes | None, str | None, str | None]:
                 try:
@@ -214,8 +216,21 @@ async def process_uploads_stream(
             pending_futures = [asyncio.ensure_future(t) for t in tasks]
 
             last_emit_time = asyncio.get_event_loop().time()
+            stage_start_time = asyncio.get_event_loop().time()
+
+            global_timeout_triggered = False
 
             while pending_futures:
+                # Check global timeout - if exceeded, cancel remaining and move on
+                elapsed = asyncio.get_event_loop().time() - stage_start_time
+                if elapsed > PNG_STAGE_TIMEOUT and not global_timeout_triggered:
+                    logger.warning(f"PNG stage global timeout after {elapsed:.1f}s - cancelling {len(pending_futures)} remaining tasks")
+                    global_timeout_triggered = True
+                    # Cancel all remaining tasks (they'll raise CancelledError)
+                    for fut in pending_futures:
+                        fut.cancel()
+                    # Don't break - let the loop collect the cancelled results
+
                 # Wait for at least one task to complete (with timeout for heartbeat)
                 done, pending_futures_set = await asyncio.wait(
                     pending_futures,
@@ -229,6 +244,11 @@ async def process_uploads_stream(
                     completed += 1
                     try:
                         results.append(fut.result())
+                    except asyncio.CancelledError:
+                        # Task was cancelled due to global timeout
+                        # We don't know which page this was, but we'll handle missing pages later
+                        logger.warning(f"Task {completed} was cancelled due to timeout")
+                        results.append(Exception("Global timeout - task cancelled"))
                     except Exception as e:
                         # Store exception as result (mimics return_exceptions=True)
                         results.append(e)
