@@ -703,8 +703,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       });
 
       if (!sseResponse.ok) {
-        throw new Error('Failed to start processing pipeline');
+        const errorText = await sseResponse.text();
+        console.error('SSE response error:', sseResponse.status, errorText);
+        throw new Error(`Failed to start processing pipeline: ${sseResponse.status}`);
       }
+
+      console.log('SSE connection established, reading stream...');
 
       // Read the SSE stream
       const reader = sseResponse.body?.getReader();
@@ -746,7 +750,11 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       }
 
     } catch (err) {
-      console.error('Failed to upload files:', err);
+      console.error('Failed to upload/process files:', err);
+      // Log more details for debugging
+      if (err instanceof Error) {
+        console.error('Error name:', err.name, 'message:', err.message);
+      }
       // Don't show alert for abort (timeout) - user can see progress stopped
       if (err instanceof Error && err.name !== 'AbortError') {
         alert('Failed to upload files. Please try again.');
