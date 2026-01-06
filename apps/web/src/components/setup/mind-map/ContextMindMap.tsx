@@ -148,6 +148,13 @@ function ContextMindMapInner({
   useEffect(() => {
     if (nodes.length === 0) return;
 
+    // Verify all nodes have valid positions before calling fitView
+    const allNodesValid = nodes.every(n =>
+      typeof n.position?.x === 'number' && !isNaN(n.position.x) &&
+      typeof n.position?.y === 'number' && !isNaN(n.position.y)
+    );
+    if (!allNodesValid) return;
+
     // Only fit view when node count changes (expansion/collapse)
     if (nodes.length !== prevNodeCountRef.current) {
       prevNodeCountRef.current = nodes.length;
@@ -162,7 +169,7 @@ function ContextMindMapInner({
         });
       });
     }
-  }, [nodes.length, fitView]);
+  }, [nodes, fitView]);
 
   // Scroll to focused node (e.g., after creating a new pointer)
   useEffect(() => {
@@ -171,7 +178,10 @@ function ContextMindMapInner({
     // Wait for Dagre layout to complete before scrolling
     const timeoutId = setTimeout(() => {
       const node = getNode(focusNodeId);
-      if (node) {
+      // Validate node position before calling setCenter
+      if (node &&
+          typeof node.position?.x === 'number' && !isNaN(node.position.x) &&
+          typeof node.position?.y === 'number' && !isNaN(node.position.y)) {
         const dims = NODE_DIMENSIONS.pointer;
         setCenter(
           node.position.x + dims.width / 2,
@@ -213,6 +223,12 @@ function ContextMindMapInner({
     );
   }
 
+  // Only enable fitView after nodes have valid positions
+  const nodesReady = nodes.length > 0 && nodes.every(n =>
+    typeof n.position?.x === 'number' && !isNaN(n.position.x) &&
+    typeof n.position?.y === 'number' && !isNaN(n.position.y)
+  );
+
   return (
     <div className="w-full h-full">
       <ReactFlow
@@ -221,7 +237,7 @@ function ContextMindMapInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
-        fitView
+        fitView={nodesReady}
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.1}
         maxZoom={2}
