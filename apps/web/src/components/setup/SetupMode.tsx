@@ -685,12 +685,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Get auth token for SSE request
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
 
-      // Use AbortController for timeout (5 minutes for large uploads)
+      // Use AbortController for timeout (15 minutes for large uploads with OCR/AI processing)
       const controller = new AbortController();
       sseTimeoutId = setTimeout(() => {
-        console.log('SSE processing timeout - aborting after 5 minutes');
+        console.log('SSE processing timeout - aborting after 15 minutes');
         controller.abort();
-      }, 300000); // 5 minute timeout
+      }, 900000); // 15 minute timeout
 
       // Use fetch with POST for SSE (EventSource only supports GET)
       const sseResponse = await fetch(`${API_URL}/projects/${projectId}/process-uploads-stream`, {
