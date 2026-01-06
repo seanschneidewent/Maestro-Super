@@ -72,7 +72,6 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
                      : 'border-slate-600/50 hover:border-slate-500 shadow-slate-900/20'
                    }`}
         onClick={onClick}
-        onPointerUp={onClick}
       >
         <span className={`text-sm shrink-0 ${
           hasPointers ? 'text-slate-300' : 'text-slate-500'
@@ -94,10 +93,6 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
           <button
             className="p-0.5 rounded hover:bg-white/10 text-slate-500 hover:text-white transition-colors shrink-0"
             onClick={(e) => {
-              e.stopPropagation();
-              onExpand();
-            }}
-            onPointerUp={(e) => {
               e.stopPropagation();
               onExpand();
             }}

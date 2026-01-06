@@ -54,7 +54,6 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
                      : 'border-slate-600 hover:border-slate-500 shadow-slate-900/30'
                    }`}
         onClick={onClick}
-        onPointerUp={onClick}
       >
         {processed && (
           <Star size={14} className="text-amber-400 fill-amber-400 shrink-0" />
@@ -70,10 +69,6 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
         <button
           className="p-1 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-colors shrink-0"
           onClick={(e) => {
-            e.stopPropagation();
-            onExpand();
-          }}
-          onPointerUp={(e) => {
             e.stopPropagation();
             onExpand();
           }}

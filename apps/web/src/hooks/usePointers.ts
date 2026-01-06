@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, PointerResponse } from '../lib/api';
-import type { ContextPointer } from '../types';
+import type { ContextPointer, ProjectHierarchy } from '../types';
 
 /**
  * Hook for fetching and caching pointers for a specific page.
@@ -143,7 +143,7 @@ interface DeletePointerArgs {
 
 /**
  * Hook for deleting a pointer with optimistic UI.
- * Immediately removes from UI while API runs.
+ * Immediately removes from UI AND updates hierarchy cache (no refetch delay).
  */
 export function useDeletePointer(projectId: string) {
   const queryClient = useQueryClient();
@@ -156,33 +156,46 @@ export function useDeletePointer(projectId: string) {
     onMutate: async ({ pointerId, pageId }) => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['pointers', pageId] });
+      await queryClient.cancelQueries({ queryKey: ['hierarchy', projectId] });
 
-      // Snapshot previous value for rollback
-      const previous = queryClient.getQueryData<PointerResponse[]>(['pointers', pageId]);
+      // Snapshot previous values for rollback
+      const previousPointers = queryClient.getQueryData<PointerResponse[]>(['pointers', pageId]);
+      const previousHierarchy = queryClient.getQueryData<ProjectHierarchy>(['hierarchy', projectId]);
 
-      // Optimistically remove pointer from cache
+      // Optimistically remove pointer from pointers cache
       queryClient.setQueryData<PointerResponse[]>(['pointers', pageId], (old = []) =>
         old.filter(p => p.id !== pointerId)
       );
 
-      // Also optimistically update hierarchy cache
-      const hierarchyPrevious = queryClient.getQueryData(['hierarchy', projectId]);
+      // Optimistically update hierarchy cache (INSTANT - no API refetch)
+      if (previousHierarchy) {
+        queryClient.setQueryData<ProjectHierarchy>(['hierarchy', projectId], {
+          ...previousHierarchy,
+          disciplines: previousHierarchy.disciplines.map(d => ({
+            ...d,
+            pages: d.pages.map(p => ({
+              ...p,
+              pointerCount: p.pointers.some(ptr => ptr.id === pointerId)
+                ? p.pointerCount - 1
+                : p.pointerCount,
+              pointers: p.pointers.filter(ptr => ptr.id !== pointerId),
+            })),
+          })),
+        });
+      }
 
-      return { previous, pageId, hierarchyPrevious };
+      return { previousPointers, previousHierarchy, pageId };
     },
 
-    onSuccess: () => {
-      // Invalidate hierarchy to update pointer counts
-      queryClient.invalidateQueries({ queryKey: ['hierarchy', projectId] });
-    },
+    // No onSuccess - we already updated optimistically, no need to refetch
 
     onError: (error, variables, context) => {
-      // Rollback on error
-      if (context?.previous) {
-        queryClient.setQueryData(['pointers', context.pageId], context.previous);
+      // Rollback both caches on error
+      if (context?.previousPointers) {
+        queryClient.setQueryData(['pointers', context.pageId], context.previousPointers);
       }
-      if (context?.hierarchyPrevious) {
-        queryClient.setQueryData(['hierarchy', projectId], context.hierarchyPrevious);
+      if (context?.previousHierarchy) {
+        queryClient.setQueryData(['hierarchy', projectId], context.previousHierarchy);
       }
       console.error('Failed to delete pointer:', error);
     },

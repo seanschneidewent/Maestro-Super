@@ -153,20 +153,55 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setSetupState(prev => ({ ...prev, selectedFileId: file.id }));
   };
 
-  // Load hierarchy for context panel
+  // Load hierarchy and files together on mount (hierarchy first for pointer counts)
   useEffect(() => {
-    async function loadHierarchy() {
+    async function loadFilesWithHierarchy() {
+      try {
+        setIsLoadingFiles(true);
+
+        // Load hierarchy FIRST (has pointer counts)
+        const hierarchyData = await api.projects.getHierarchy(projectId);
+        setHierarchy(hierarchyData);
+
+        // Then load file structure with counts from hierarchy
+        const response = await api.projects.getFull(projectId);
+        const convertedFiles = convertDisciplinesToProjectFiles(response.disciplines, hierarchyData);
+        setUploadedFiles(sortFiles(convertedFiles));
+
+        // Restore file selection if we have a saved selectedFileId
+        if (setupState.selectedFileId && !selectedFile) {
+          const foundFile = findFileById(convertedFiles, setupState.selectedFileId);
+          if (foundFile) {
+            setSelectedFile(foundFile);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load files:', err);
+        // Project might not have any disciplines yet - that's OK
+        setUploadedFiles([]);
+      } finally {
+        setIsLoadingFiles(false);
+      }
+    }
+    loadFilesWithHierarchy();
+  }, [projectId]);
+
+  // Refresh hierarchy when hierarchyRefresh changes (after uploads, etc.)
+  useEffect(() => {
+    if (hierarchyRefresh === 0) return; // Skip initial mount (already loaded above)
+
+    async function refreshHierarchy() {
       try {
         const data = await api.projects.getHierarchy(projectId);
         setHierarchy(data);
       } catch (err) {
-        console.error('Failed to load hierarchy:', err);
+        console.error('Failed to refresh hierarchy:', err);
       }
     }
-    loadHierarchy();
+    refreshHierarchy();
   }, [projectId, hierarchyRefresh]);
 
-  // Sync pointer counts from hierarchy to uploadedFiles
+  // Sync pointer counts from hierarchy to uploadedFiles when hierarchy changes
   useEffect(() => {
     if (!hierarchy || uploadedFiles.length === 0) return;
 
@@ -194,33 +229,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
     setUploadedFiles(prev => updatePointerCounts(prev));
   }, [hierarchy]);
-
-  // Load disciplines and pages from backend on mount
-  useEffect(() => {
-    async function loadFiles() {
-      try {
-        setIsLoadingFiles(true);
-        const response = await api.projects.getFull(projectId);
-        const convertedFiles = convertDisciplinesToProjectFiles(response.disciplines);
-        setUploadedFiles(sortFiles(convertedFiles));
-
-        // Restore file selection if we have a saved selectedFileId
-        if (setupState.selectedFileId && !selectedFile) {
-          const foundFile = findFileById(convertedFiles, setupState.selectedFileId);
-          if (foundFile) {
-            setSelectedFile(foundFile);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load files:', err);
-        // Project might not have any disciplines yet - that's OK
-        setUploadedFiles([]);
-      } finally {
-        setIsLoadingFiles(false);
-      }
-    }
-    loadFiles();
-  }, [projectId]);
 
   // Fetch file from storage when page is selected
   useEffect(() => {
