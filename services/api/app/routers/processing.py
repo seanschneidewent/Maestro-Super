@@ -380,6 +380,154 @@ async def process_uploads_stream(
     )
 
 
+@router.post("/projects/{project_id}/reprocess-ocr-ai-stream")
+async def reprocess_ocr_ai_stream(
+    project_id: str,
+    # NOTE: Intentionally NOT using Depends(get_db) - SSE runs too long
+):
+    """
+    SSE endpoint that reprocesses OCR+AI for pages that have PNGs but weren't processed.
+
+    This is useful when the initial processing was interrupted (e.g., timeout).
+    Only processes pages where page_image_ready=true but processed_pass_1=false.
+
+    SSE events:
+    - {"stage": "init", "pageCount": N}
+    - {"stage": "ocr", "current": N, "total": T}
+    - {"stage": "ai", "current": N, "total": T}
+    - {"stage": "complete"}
+    - {"stage": "error", "message": "..."}
+
+    Heartbeat comment sent every 3 seconds to prevent connection timeout.
+    """
+    # Extract page data before SSE starts
+    page_data_list: list[dict] = []
+
+    with SessionLocal() as db:
+        # Verify project exists
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Get pages with PNGs but no AI processing
+        pages = (
+            db.query(Page)
+            .join(Discipline)
+            .filter(
+                Discipline.project_id == project_id,
+                Page.page_image_ready == True,  # noqa: E712
+                Page.processed_pass_1 == False,  # noqa: E712
+            )
+            .all()
+        )
+
+        # Extract to simple dicts before session closes
+        page_data_list = [
+            {"id": str(p.id), "page_image_path": p.page_image_path}
+            for p in pages
+        ]
+
+    total = len(page_data_list)
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        # Emit init event with page count
+        yield f"data: {json.dumps({'stage': 'init', 'pageCount': total})}\n\n"
+
+        if total == 0:
+            yield f"data: {json.dumps({'stage': 'complete'})}\n\n"
+            return
+
+        last_emit_time = asyncio.get_event_loop().time()
+
+        for i, page_data in enumerate(page_data_list):
+            page_id = page_data["id"]
+            page_image_path = page_data["page_image_path"]
+
+            # Download PNG from storage
+            try:
+                png_bytes = await download_file(page_image_path)
+                logger.info(f"Downloaded PNG for page {page_id}")
+            except Exception as e:
+                logger.error(f"Failed to download PNG for page {page_id}: {e}")
+                # Emit progress and continue to next page
+                yield f"data: {json.dumps({'stage': 'ocr', 'current': i + 1, 'total': total})}\n\n"
+                yield f"data: {json.dumps({'stage': 'ai', 'current': i + 1, 'total': total})}\n\n"
+                continue
+
+            # --- OCR ---
+            full_text = ""
+            ocr_spans = []
+            try:
+                full_text, ocr_spans = await extract_full_page_text(png_bytes)
+
+                # Save OCR results with short-lived session
+                with SessionLocal() as ocr_db:
+                    ocr_db.query(Page).filter(Page.id == page_id).update({
+                        "full_page_text": full_text,
+                        "ocr_data": ocr_spans,
+                        "processed_ocr": True
+                    })
+                    ocr_db.commit()
+
+                logger.info(f"OCR complete for page {page_id}: {len(ocr_spans)} spans")
+
+            except Exception as e:
+                logger.error(f"OCR failed for page {page_id}: {e}")
+                # Continue with empty text/spans
+
+            # Emit OCR progress
+            yield f"data: {json.dumps({'stage': 'ocr', 'current': i + 1, 'total': total})}\n\n"
+            last_emit_time = asyncio.get_event_loop().time()
+
+            # --- AI Pass 1 ---
+            try:
+                initial_context = await analyze_page_pass_1(
+                    image_bytes=png_bytes,
+                    ocr_text=full_text,
+                    ocr_spans=ocr_spans,
+                )
+
+                # Save AI results with short-lived session
+                with SessionLocal() as ai_db:
+                    ai_db.query(Page).filter(Page.id == page_id).update({
+                        "initial_context": initial_context,
+                        "processed_pass_1": True
+                    })
+                    ai_db.commit()
+
+                logger.info(f"AI Pass 1 complete for page {page_id}")
+
+            except Exception as e:
+                logger.error(f"AI failed for page {page_id}: {e}")
+                # Continue to next page - don't set processed_pass_1
+
+            # Emit AI progress
+            yield f"data: {json.dumps({'stage': 'ai', 'current': i + 1, 'total': total})}\n\n"
+
+            # Heartbeat if processing is slow
+            current_time = asyncio.get_event_loop().time()
+            if current_time - last_emit_time > 3:
+                yield ": heartbeat\n\n"
+            last_emit_time = current_time
+
+        # Complete
+        yield f"data: {json.dumps({'stage': 'complete'})}\n\n"
+
+        logger.info(
+            f"Reprocessing complete for project {project_id}: {total} pages"
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/pages/{page_id}/retry-png")
 async def retry_page_png(
     page_id: str,
