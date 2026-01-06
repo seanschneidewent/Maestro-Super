@@ -35,7 +35,11 @@
       "Bash(./venv/bin/python --version)",
       "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd%40@db.maestro-super.supabase.co:5432/postgres\" ./venv/bin/python:*)",
       "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd%40@db.ybyqobdyvbmsiehdmxwp.supabase.co:5432/postgres\" ./venv/bin/python:*)",
-      "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd@db.ybyqobdyvbmsiehdmxwp.supabase.co:5432/postgres\" ./venv/bin/python:*)"
+      "Bash(DATABASE_URL=\"postgresql://postgres:SchneidewentM1G%40r%40nd@db.ybyqobdyvbmsiehdmxwp.supabase.co:5432/postgres\" ./venv/bin/python:*)",
+      "Bash(ocr:*)",
+      "Bash(ai)",
+      "Bash(complete)",
+      "Bash(error\", \"current\": N, \"total\": T}\n- Remove Pass 2/3 processing and unused endpoints\n- Add extract_full_page_text\\(\\) with retry logic in ocr.py\n- Update Gemini Pass 1 to accept OCR text for better analysis\n\nFrontend:\n- Add UploadProgressModal component with 4-bar progress UI\n- Implement parallel uploads with semaphore pattern \\(max 5 concurrent\\)\n- Update SSE parsing for new stage-based event format\n- Replace inline progress overlay with modal component\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

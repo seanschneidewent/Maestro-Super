@@ -51,23 +51,22 @@ class ProcessUploadsRequest(BaseModel):
 
 
 async def _render_page_png(
-    page: Page,
+    page_id: str,
     project_id: str,
     pdf_bytes: bytes,
-) -> tuple[str, bytes | None, str | None]:
+) -> tuple[str, bytes | None, str | None, str | None]:
     """
     Render PDF page to PNG and upload to storage.
 
     Args:
-        page: Page model instance
+        page_id: Page ID string
         project_id: Project ID for storage path
         pdf_bytes: PDF bytes for this page
 
     Returns:
-        (page_id, png_bytes, error_message)
-        png_bytes is None if rendering failed
+        (page_id, png_bytes, storage_path, error_message)
+        png_bytes/storage_path is None if rendering failed
     """
-    page_id = str(page.id)
     try:
         # Render to PNG at 150 DPI with 30s timeout
         png_bytes = await asyncio.wait_for(
@@ -78,27 +77,19 @@ async def _render_page_png(
         # Upload to storage
         storage_path = await upload_page_image(png_bytes, project_id, page_id)
 
-        # Update database
-        with SessionLocal() as db:
-            page_record = db.query(Page).filter(Page.id == page_id).first()
-            if page_record:
-                page_record.page_image_path = storage_path
-                page_record.page_image_ready = True
-                db.commit()
-
         logger.info(f"PNG complete for page {page_id}")
-        return page_id, png_bytes, None
+        return page_id, png_bytes, storage_path, None
 
     except Exception as e:
         logger.error(f"PNG failed for page {page_id}: {e}")
-        return page_id, None, str(e)
+        return page_id, None, None, str(e)
 
 
 @router.post("/projects/{project_id}/process-uploads-stream")
 async def process_uploads_stream(
     project_id: str,
     request: ProcessUploadsRequest | None = None,
-    db: Session = Depends(get_db),
+    # NOTE: Intentionally NOT using Depends(get_db) - SSE runs too long
 ):
     """
     SSE endpoint that streams progress updates as processing happens.
@@ -122,47 +113,59 @@ async def process_uploads_stream(
 
     Heartbeat comment sent every 3 seconds to prevent connection timeout.
     """
-    # Verify project exists
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Use manual session management - quick open/close, don't hold for SSE duration
+    # Extract page data to dicts so we can close session before SSE starts
+    page_data_list: list[dict] = []
 
-    # Bulk insert disciplines/pages if request body provided
-    if request and request.disciplines:
-        for disc_data in request.disciplines:
-            discipline = Discipline(
-                project_id=project_id,
-                name=disc_data.code,
-                display_name=disc_data.display_name,
-            )
-            db.add(discipline)
-            db.flush()  # Get ID without committing
+    with SessionLocal() as db:
+        # Verify project exists
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            for page_data in disc_data.pages:
-                page = Page(
-                    discipline_id=str(discipline.id),
-                    page_name=page_data.page_name,
-                    file_path=page_data.storage_path,
+        # Bulk insert disciplines/pages if request body provided
+        if request and request.disciplines:
+            for disc_data in request.disciplines:
+                discipline = Discipline(
+                    project_id=project_id,
+                    name=disc_data.code,
+                    display_name=disc_data.display_name,
                 )
-                db.add(page)
+                db.add(discipline)
+                db.flush()  # Get ID without committing
 
-        db.commit()
-        logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
+                for page_input in disc_data.pages:
+                    page = Page(
+                        discipline_id=str(discipline.id),
+                        page_name=page_input.page_name,
+                        file_path=page_input.storage_path,
+                    )
+                    db.add(page)
 
-    # Get all unprocessed pages
-    pages = (
-        db.query(Page)
-        .join(Discipline)
-        .filter(
-            Discipline.project_id == project_id,
-            (Page.page_image_ready == False)  # noqa: E712
-            | (Page.processed_ocr == False)  # noqa: E712
-            | (Page.processed_pass_1 == False),  # noqa: E712
+            db.commit()
+            logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
+
+        # Get all unprocessed pages and extract to dicts (detach from ORM)
+        pages = (
+            db.query(Page)
+            .join(Discipline)
+            .filter(
+                Discipline.project_id == project_id,
+                (Page.page_image_ready == False)  # noqa: E712
+                | (Page.processed_ocr == False)  # noqa: E712
+                | (Page.processed_pass_1 == False),  # noqa: E712
+            )
+            .all()
         )
-        .all()
-    )
 
-    total = len(pages)
+        # Extract to simple dicts before session closes
+        page_data_list = [
+            {"id": str(p.id), "file_path": p.file_path}
+            for p in pages
+        ]
+
+    # Session is now closed - SSE can run without holding DB connection
+    total = len(page_data_list)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         # Emit init event with page count
@@ -193,21 +196,21 @@ async def process_uploads_stream(
         # Stage 1: PNG rendering (parallel)
         # ============================================================
         try:
-            async def render_with_semaphore(page: Page) -> tuple[str, bytes | None, str | None]:
+            async def render_with_semaphore(page_data: dict) -> tuple[str, bytes | None, str | None, str | None]:
                 try:
-                    pdf_bytes = await get_pdf_bytes(page.file_path)
+                    pdf_bytes = await get_pdf_bytes(page_data["file_path"])
                 except Exception as e:
-                    return str(page.id), None, f"PDF download failed: {e}"
+                    return page_data["id"], None, None, f"PDF download failed: {e}"
                 async with semaphore:
-                    return await _render_page_png(page, project_id, pdf_bytes)
+                    return await _render_page_png(page_data["id"], project_id, pdf_bytes)
 
             # Use asyncio.gather with return_exceptions=True to prevent stream crash
             # Run tasks and emit progress periodically
-            tasks = [render_with_semaphore(p) for p in pages]
+            tasks = [render_with_semaphore(p) for p in page_data_list]
 
             # Track progress with a wrapper that updates on completion
             completed = 0
-            results: list[tuple[str, bytes | None, str | None] | BaseException] = []
+            results: list[tuple[str, bytes | None, str | None, str | None] | BaseException] = []
             pending_futures = [asyncio.ensure_future(t) for t in tasks]
 
             last_emit_time = asyncio.get_event_loop().time()
@@ -242,19 +245,21 @@ async def process_uploads_stream(
             # Final PNG progress event
             yield f"data: {json.dumps({'stage': 'png', 'current': total, 'total': total})}\n\n"
 
-            # Build map of page_id -> png_bytes, track failures
+            # Build map of page_id -> png_bytes, track failures and successful paths
             page_png_map: dict[str, bytes] = {}
+            successful_pages: list[tuple[str, str]] = []  # (page_id, storage_path)
             failed_page_ids: list[str] = []
 
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    page_id = str(pages[i].id)
+                    page_id = page_data_list[i]["id"]
                     logger.error(f"PNG task exception for page {page_id}: {result}")
                     failed_page_ids.append(page_id)
                 else:
-                    page_id, png_bytes, error = result
-                    if png_bytes:
+                    page_id, png_bytes, storage_path, error = result
+                    if png_bytes and storage_path:
                         page_png_map[page_id] = png_bytes
+                        successful_pages.append((page_id, storage_path))
                     elif error:
                         logger.warning(f"Page {page_id} PNG failed: {error}")
                         failed_page_ids.append(page_id)
@@ -262,6 +267,19 @@ async def process_uploads_stream(
             # Emit failures event if any
             if failed_page_ids:
                 yield f"data: {json.dumps({'stage': 'png_failures', 'pageIds': failed_page_ids})}\n\n"
+
+            # ============================================================
+            # Batch DB update for successful PNG renders
+            # ============================================================
+            if successful_pages:
+                with SessionLocal() as db:
+                    for page_id, storage_path in successful_pages:
+                        db.query(Page).filter(Page.id == page_id).update({
+                            "page_image_path": storage_path,
+                            "page_image_ready": True
+                        })
+                    db.commit()
+                    logger.info(f"Batch updated {len(successful_pages)} pages with PNG paths")
 
             # Clear PDF cache to free memory before OCR stage
             pdf_cache.clear()
@@ -274,11 +292,12 @@ async def process_uploads_stream(
 
         # ============================================================
         # Stage 2: OCR + AI (sequential per page)
+        # Uses short-lived DB sessions per page to avoid connection timeout
         # ============================================================
         last_emit_time = asyncio.get_event_loop().time()
 
-        for i, page in enumerate(pages):
-            page_id = str(page.id)
+        for i, page_data in enumerate(page_data_list):
+            page_id = page_data["id"]
             png_bytes = page_png_map.get(page_id)
 
             if not png_bytes:
@@ -286,24 +305,25 @@ async def process_uploads_stream(
                 continue
 
             # --- OCR ---
+            full_text = ""
+            ocr_spans = []
             try:
                 full_text, ocr_spans = await extract_full_page_text(png_bytes)
 
-                # Save OCR results
+                # Save OCR results with short-lived session
                 with SessionLocal() as ocr_db:
-                    page_record = ocr_db.query(Page).filter(Page.id == page_id).first()
-                    if page_record:
-                        page_record.full_page_text = full_text
-                        page_record.ocr_data = ocr_spans
-                        page_record.processed_ocr = True
-                        ocr_db.commit()
+                    ocr_db.query(Page).filter(Page.id == page_id).update({
+                        "full_page_text": full_text,
+                        "ocr_data": ocr_spans,
+                        "processed_ocr": True
+                    })
+                    ocr_db.commit()
 
                 logger.info(f"OCR complete for page {page_id}: {len(ocr_spans)} spans")
 
             except Exception as e:
                 logger.error(f"OCR failed for page {page_id}: {e}")
-                full_text = ""
-                ocr_spans = []
+                # Continue with empty text/spans
 
             # Emit OCR progress
             yield f"data: {json.dumps({'stage': 'ocr', 'current': i + 1, 'total': total})}\n\n"
@@ -317,13 +337,13 @@ async def process_uploads_stream(
                     ocr_spans=ocr_spans,
                 )
 
-                # Save AI results
+                # Save AI results with short-lived session
                 with SessionLocal() as ai_db:
-                    page_record = ai_db.query(Page).filter(Page.id == page_id).first()
-                    if page_record:
-                        page_record.initial_context = initial_context
-                        page_record.processed_pass_1 = True
-                        ai_db.commit()
+                    ai_db.query(Page).filter(Page.id == page_id).update({
+                        "initial_context": initial_context,
+                        "processed_pass_1": True
+                    })
+                    ai_db.commit()
 
                 logger.info(f"AI Pass 1 complete for page {page_id}")
 
@@ -390,9 +410,15 @@ async def retry_page_png(
         return {"success": False, "error": f"Failed to download PDF: {e}"}
 
     # Render PNG
-    result_page_id, png_bytes, error = await _render_page_png(page, project_id, pdf_bytes)
+    result_page_id, png_bytes, storage_path, error = await _render_page_png(
+        page_id, project_id, pdf_bytes
+    )
 
-    if png_bytes:
-        return {"success": True, "pageImagePath": page.page_image_path}
+    if png_bytes and storage_path:
+        # Update DB with the new storage path
+        page.page_image_path = storage_path
+        page.page_image_ready = True
+        db.commit()
+        return {"success": True, "pageImagePath": storage_path}
     else:
         return {"success": False, "error": error or "Unknown error"}
