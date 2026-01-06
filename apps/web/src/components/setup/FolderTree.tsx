@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ProjectFile, FileType } from '../../types';
-import { ChevronRight, ChevronDown, Folder, FileText, Image, Box, File, Check } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FileText, Image, Box, File, Check, RefreshCw } from 'lucide-react';
 
 // Helper to find path to a file (returns array of parent IDs)
 const findPathToFile = (files: ProjectFile[], targetId: string, path: string[] = []): string[] | null => {
@@ -25,6 +25,8 @@ interface FileNodeProps {
   isDeleteMode?: boolean;
   selectedForDeletion?: Set<string>;
   onToggleSelection?: (fileId: string) => void;
+  failedPageIds?: Set<string>;
+  onRetryPng?: (pageId: string) => void;
 }
 
 const FileNode: React.FC<FileNodeProps> = ({
@@ -36,6 +38,8 @@ const FileNode: React.FC<FileNodeProps> = ({
   isDeleteMode,
   selectedForDeletion,
   onToggleSelection,
+  failedPageIds,
+  onRetryPng,
 }) => {
   // Initialize open state based on whether this folder should be expanded
   const shouldBeExpanded = expandedIds?.has(node.id) ?? false;
@@ -50,6 +54,7 @@ const FileNode: React.FC<FileNodeProps> = ({
   const isFolder = node.type === FileType.FOLDER;
   const isSelected = selectedId === node.id;
   const isMarkedForDeletion = selectedForDeletion?.has(node.id) ?? false;
+  const isPngFailed = !isFolder && (failedPageIds?.has(node.id) ?? false);
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -126,7 +131,20 @@ const FileNode: React.FC<FileNodeProps> = ({
               ? 'text-cyan-300 font-medium'
               : 'text-slate-300 hover:text-slate-200'
         }`}>{node.name}</span>
-        {!isFolder && node.pointerCount !== undefined && (
+        {/* Retry button for failed PNG rendering */}
+        {isPngFailed && onRetryPng && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetryPng(node.id);
+            }}
+            title="PNG rendering failed - click to retry"
+            className="ml-auto mr-2 p-1 rounded hover:bg-yellow-500/20 transition-colors shrink-0"
+          >
+            <RefreshCw size={14} className="text-yellow-500" />
+          </button>
+        )}
+        {!isFolder && node.pointerCount !== undefined && !isPngFailed && (
           <span className={`ml-auto text-xs px-1.5 py-0.5 rounded shrink-0 ${
             isSelected && !isDeleteMode
               ? 'bg-cyan-500/20 text-cyan-300'
@@ -151,6 +169,8 @@ const FileNode: React.FC<FileNodeProps> = ({
               isDeleteMode={isDeleteMode}
               selectedForDeletion={selectedForDeletion}
               onToggleSelection={onToggleSelection}
+              failedPageIds={failedPageIds}
+              onRetryPng={onRetryPng}
             />
           ))}
         </div>
@@ -167,6 +187,8 @@ interface FolderTreeProps {
   isDeleteMode?: boolean;
   selectedForDeletion?: Set<string>;
   onToggleSelection?: (fileId: string) => void;
+  failedPageIds?: Set<string>;
+  onRetryPng?: (pageId: string) => void;
 }
 
 export const FolderTree: React.FC<FolderTreeProps> = ({
@@ -177,6 +199,8 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
   isDeleteMode,
   selectedForDeletion,
   onToggleSelection,
+  failedPageIds,
+  onRetryPng,
 }) => {
   // Calculate which folders should be expanded to reveal the selected file
   const expandedIds = useMemo(() => {
@@ -198,6 +222,8 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
           isDeleteMode={isDeleteMode}
           selectedForDeletion={selectedForDeletion}
           onToggleSelection={onToggleSelection}
+          failedPageIds={failedPageIds}
+          onRetryPng={onRetryPng}
         />
       ))}
     </div>

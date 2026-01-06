@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal, get_db
@@ -21,6 +22,32 @@ from app.services.storage import download_file, upload_page_image
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["processing"])
+
+
+# ============================================================
+# Pydantic models for bulk insert
+# ============================================================
+
+
+class PageInput(BaseModel):
+    """Input for a single page in the upload plan."""
+
+    page_name: str
+    storage_path: str
+
+
+class DisciplineInput(BaseModel):
+    """Input for a discipline with its pages."""
+
+    code: str
+    display_name: str
+    pages: list[PageInput]
+
+
+class ProcessUploadsRequest(BaseModel):
+    """Request body for process-uploads-stream endpoint."""
+
+    disciplines: list[DisciplineInput]
 
 
 async def _render_page_png(
@@ -68,17 +95,24 @@ async def _render_page_png(
 @router.post("/projects/{project_id}/process-uploads-stream")
 async def process_uploads_stream(
     project_id: str,
+    request: ProcessUploadsRequest | None = None,
     db: Session = Depends(get_db),
 ):
     """
     SSE endpoint that streams progress updates as processing happens.
 
+    Accepts optional request body with disciplines/pages to bulk-insert before processing.
+    If no body provided, processes existing unprocessed pages.
+
     Pipeline:
-    1. PNG stage (parallel): Render all pages to PNG, upload to storage
-    2. OCR+AI stage (sequential): For each page, run Tesseract → Gemini → save
+    1. Bulk insert disciplines/pages (if request body provided)
+    2. PNG stage (parallel): Render all pages to PNG, upload to storage
+    3. OCR+AI stage (sequential): For each page, run Tesseract → Gemini → save
 
     SSE events:
+    - {"stage": "init", "pageCount": N}  (after bulk insert)
     - {"stage": "png", "current": N, "total": T}
+    - {"stage": "png_failures", "pageIds": [...]}  (list of failed page IDs)
     - {"stage": "ocr", "current": N, "total": T}
     - {"stage": "ai", "current": N, "total": T}
     - {"stage": "complete"}
@@ -90,6 +124,28 @@ async def process_uploads_stream(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Bulk insert disciplines/pages if request body provided
+    if request and request.disciplines:
+        for disc_data in request.disciplines:
+            discipline = Discipline(
+                project_id=project_id,
+                name=disc_data.code,
+                display_name=disc_data.display_name,
+            )
+            db.add(discipline)
+            db.flush()  # Get ID without committing
+
+            for page_data in disc_data.pages:
+                page = Page(
+                    discipline_id=str(discipline.id),
+                    page_name=page_data.page_name,
+                    file_path=page_data.storage_path,
+                )
+                db.add(page)
+
+        db.commit()
+        logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
 
     # Get all unprocessed pages
     pages = (
@@ -107,6 +163,9 @@ async def process_uploads_stream(
     total = len(pages)
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        # Emit init event with page count
+        yield f"data: {json.dumps({'stage': 'init', 'pageCount': total})}\n\n"
+
         if total == 0:
             yield f"data: {json.dumps({'stage': 'complete'})}\n\n"
             return
@@ -114,53 +173,83 @@ async def process_uploads_stream(
         # PDF cache for reuse across stages
         pdf_cache: dict[str, bytes] = {}
 
-        # Progress tracking
-        png_progress = {"current": 0}
-
         # Semaphore for PNG concurrency (max 5)
         semaphore = asyncio.Semaphore(5)
 
         # ============================================================
-        # Stage 1: PNG rendering (parallel)
+        # Stage 1: PNG rendering (parallel with asyncio.gather)
         # ============================================================
-        async def render_with_tracking(page: Page) -> tuple[str, bytes | None, str | None]:
-            async with semaphore:
-                result = await _render_page_png(page, project_id, pdf_cache)
-                png_progress["current"] += 1
-                return result
+        try:
+            async def render_with_semaphore(page: Page) -> tuple[str, bytes | None, str | None]:
+                async with semaphore:
+                    return await _render_page_png(page, project_id, pdf_cache)
 
-        # Launch all PNG tasks
-        tasks = [asyncio.create_task(render_with_tracking(p)) for p in pages]
+            # Use asyncio.gather with return_exceptions=True to prevent stream crash
+            # Run tasks and emit progress periodically
+            tasks = [render_with_semaphore(p) for p in pages]
 
-        # Yield progress while PNG tasks complete
-        last_emit_time = asyncio.get_event_loop().time()
-        last_current = 0
+            # Track progress with a wrapper that updates on completion
+            completed = 0
+            results: list[tuple[str, bytes | None, str | None] | BaseException] = []
+            pending_futures = [asyncio.ensure_future(t) for t in tasks]
 
-        while not all(t.done() for t in tasks):
-            await asyncio.sleep(0.3)
-            current_time = asyncio.get_event_loop().time()
+            last_emit_time = asyncio.get_event_loop().time()
 
-            if png_progress["current"] != last_current:
-                yield f"data: {json.dumps({'stage': 'png', 'current': png_progress['current'], 'total': total})}\n\n"
-                last_current = png_progress["current"]
-                last_emit_time = current_time
-            elif current_time - last_emit_time > 3:
-                yield ": heartbeat\n\n"
-                last_emit_time = current_time
+            while pending_futures:
+                # Wait for at least one task to complete (with timeout for heartbeat)
+                done, pending_futures_set = await asyncio.wait(
+                    pending_futures,
+                    timeout=0.5,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                pending_futures = list(pending_futures_set)
 
-        # Collect PNG results
-        png_results: list[tuple[str, bytes | None, str | None]] = [t.result() for t in tasks]
+                # Process completed tasks
+                for fut in done:
+                    completed += 1
+                    try:
+                        results.append(fut.result())
+                    except Exception as e:
+                        # Store exception as result (mimics return_exceptions=True)
+                        results.append(e)
 
-        # Final PNG progress event
-        yield f"data: {json.dumps({'stage': 'png', 'current': total, 'total': total})}\n\n"
+                # Emit progress
+                current_time = asyncio.get_event_loop().time()
+                if done:
+                    yield f"data: {json.dumps({'stage': 'png', 'current': completed, 'total': total})}\n\n"
+                    last_emit_time = current_time
+                elif current_time - last_emit_time > 3:
+                    yield ": heartbeat\n\n"
+                    last_emit_time = current_time
 
-        # Build map of page_id -> png_bytes for OCR+AI stage
-        page_png_map: dict[str, bytes] = {}
-        for page_id, png_bytes, error in png_results:
-            if png_bytes:
-                page_png_map[page_id] = png_bytes
-            elif error:
-                logger.warning(f"Page {page_id} PNG failed: {error}")
+            # Final PNG progress event
+            yield f"data: {json.dumps({'stage': 'png', 'current': total, 'total': total})}\n\n"
+
+            # Build map of page_id -> png_bytes, track failures
+            page_png_map: dict[str, bytes] = {}
+            failed_page_ids: list[str] = []
+
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    page_id = str(pages[i].id)
+                    logger.error(f"PNG task exception for page {page_id}: {result}")
+                    failed_page_ids.append(page_id)
+                else:
+                    page_id, png_bytes, error = result
+                    if png_bytes:
+                        page_png_map[page_id] = png_bytes
+                    elif error:
+                        logger.warning(f"Page {page_id} PNG failed: {error}")
+                        failed_page_ids.append(page_id)
+
+            # Emit failures event if any
+            if failed_page_ids:
+                yield f"data: {json.dumps({'stage': 'png_failures', 'pageIds': failed_page_ids})}\n\n"
+
+        except Exception as e:
+            logger.error(f"PNG stage failed: {e}")
+            yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
+            return
 
         # ============================================================
         # Stage 2: OCR + AI (sequential per page)
@@ -248,3 +337,36 @@ async def process_uploads_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/pages/{page_id}/retry-png")
+async def retry_page_png(
+    page_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Retry PNG rendering for a single page that previously failed.
+
+    Returns:
+        {"success": true, "pageImagePath": "..."} on success
+        {"success": false, "error": "..."} on failure
+    """
+    page = db.query(Page).filter(Page.id == page_id).first()
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    # Get project_id from discipline
+    discipline = db.query(Discipline).filter(Discipline.id == page.discipline_id).first()
+    if not discipline:
+        raise HTTPException(status_code=404, detail="Discipline not found")
+
+    project_id = discipline.project_id
+
+    # Render PNG
+    pdf_cache: dict[str, bytes] = {}
+    result_page_id, png_bytes, error = await _render_page_png(page, project_id, pdf_cache)
+
+    if png_bytes:
+        return {"success": True, "pageImagePath": page.page_image_path}
+    else:
+        return {"success": False, "error": error or "Unknown error"}

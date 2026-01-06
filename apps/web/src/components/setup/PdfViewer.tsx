@@ -97,6 +97,7 @@ interface PdfViewerProps {
   isLoadingFile?: boolean;
   fileLoadError?: string | null;
   highlightedBounds?: { x: number; y: number; w: number; h: number } | null;
+  refreshTrigger?: number;  // Increment to re-check PNG availability
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
@@ -112,6 +113,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   isLoadingFile,
   fileLoadError,
   highlightedBounds,
+  refreshTrigger,
 }) => {
   // PDF document state (on-demand rendering like PlanViewer)
   const [pdfDoc, setPdfDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -191,7 +193,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
 
     checkPreRendered();
-  }, [fileId]);
+  }, [fileId, refreshTrigger]);
 
   // Load PDF document when file changes (don't render all pages upfront)
   // Skip if we're using pre-rendered PNG
@@ -459,6 +461,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full relative overflow-hidden">
+      {/* Fallback rendering warning */}
+      {!usePreRendered && fileId && (
+        <div className="absolute top-4 left-4 z-20 bg-yellow-500/20 text-yellow-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 animate-fade-in">
+          <AlertCircle size={14} />
+          Using local rendering
+        </div>
+      )}
+
       {/* Toolbar - Single rectangle toggle button */}
       <div className="absolute top-4 right-4 z-20 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
         <button

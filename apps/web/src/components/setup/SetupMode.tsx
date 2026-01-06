@@ -79,6 +79,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   } | null>(null);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [pngStageComplete, setPngStageComplete] = useState(false);
+  const [failedPageIds, setFailedPageIds] = useState<Set<string>>(new Set());
   const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
   const [highlightedPointer, setHighlightedPointer] = useState<{
     bounds: { x: number; y: number; w: number; h: number };
@@ -164,7 +166,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   };
 
   // Load hierarchy and files together on mount (hierarchy first for pointer counts)
+  // Delay loading if upload is in progress and PNG stage hasn't completed
   useEffect(() => {
+    // Skip loading if upload is in progress and PNG stage isn't complete
+    if (showProgressModal && !pngStageComplete) {
+      return;
+    }
+
     async function loadFilesWithHierarchy() {
       try {
         setIsLoadingFiles(true);
@@ -194,7 +202,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       }
     }
     loadFilesWithHierarchy();
-  }, [projectId]);
+  }, [projectId, pngStageComplete, showProgressModal]);
 
   // Refresh hierarchy when hierarchyRefresh changes (after uploads, etc.)
   useEffect(() => {
@@ -589,6 +597,29 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setSelectedForDeletion(new Set());
   }, []);
 
+  // Retry PNG rendering for a failed page
+  const handleRetryPng = useCallback(async (pageId: string) => {
+    try {
+      const result = await api.pages.retryPng(pageId);
+      if (result.success) {
+        // Remove from failed set
+        setFailedPageIds(prev => {
+          const next = new Set(prev);
+          next.delete(pageId);
+          return next;
+        });
+        // Refresh hierarchy to get updated pageImageReady status
+        setHierarchyRefresh(prev => prev + 1);
+      } else {
+        console.error(`Retry PNG failed for page ${pageId}:`, result.error);
+        alert(`Failed to re-render PNG: ${result.error}`);
+      }
+    } catch (err) {
+      console.error(`Retry PNG error for page ${pageId}:`, err);
+      alert('Failed to retry PNG rendering. Please try again.');
+    }
+  }, []);
+
   const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -621,6 +652,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         ai: { current: 0, total: totalFiles },
       });
       setShowProgressModal(true);
+      setPngStageComplete(false); // Reset for new upload
+      setFailedPageIds(new Set()); // Clear previous failures
 
       // Track uploaded file paths
       const uploadedPaths = new Map<string, string>(); // relativePath -> storagePath
@@ -666,52 +699,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       // Wait for remaining uploads
       await Promise.all(semaphore);
 
-      // Build API request from plan
+      // Build API request from plan (will be sent to SSE endpoint for bulk insert)
       const apiRequest = planToApiRequest(plan, uploadedPaths);
 
-      // Track relativePath -> pageId for file map updates
-      const relativePathToPageId = new Map<string, string>();
-
-      // Create disciplines and pages for each discipline
-      for (const discData of apiRequest.disciplines) {
-        // Create discipline
-        const discipline = await api.disciplines.create(projectId, {
-          name: discData.code,
-          displayName: discData.displayName,
-        });
-
-        // Create pages for this discipline
-        for (const pageData of discData.pages) {
-          const page = await api.pages.create(discipline.id, {
-            pageName: pageData.pageName,
-            filePath: pageData.storagePath,
-          });
-
-          // Find the relative path that corresponds to this storage path
-          for (const [relativePath, storagePath] of uploadedPaths.entries()) {
-            if (storagePath === pageData.storagePath) {
-              relativePathToPageId.set(relativePath, page.id);
-              break;
-            }
-          }
-        }
-      }
-
-      // Update local file map: move files from relativePath keys to pageId keys
-      for (const [relativePath, pageId] of relativePathToPageId.entries()) {
-        const file = localFileMapRef.current.get(relativePath);
-        if (file) {
-          localFileMapRef.current.delete(relativePath);
-          localFileMapRef.current.set(pageId, file);
-        }
-      }
-
-      // Reload disciplines and pages from backend
-      const response = await api.projects.getFull(projectId);
-      setUploadedFiles(sortFiles(convertDisciplinesToProjectFiles(response.disciplines)));
       setIsUploading(false);
 
-      // Stage 2: Start processing pipeline via SSE (PNG → OCR → AI)
+      // Start processing pipeline via SSE (bulk insert → PNG → OCR → AI)
+      // Backend will bulk insert disciplines/pages, then process
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -725,13 +719,23 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         controller.abort();
       }, 900000); // 15 minute timeout
 
-      // Use fetch with POST for SSE (EventSource only supports GET)
+      // Send upload plan in POST body - backend will bulk insert disciplines/pages
       const sseResponse = await fetch(`${API_URL}/projects/${projectId}/process-uploads-stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
         },
+        body: JSON.stringify({
+          disciplines: apiRequest.disciplines.map(d => ({
+            code: d.code,
+            display_name: d.displayName,
+            pages: d.pages.map(p => ({
+              page_name: p.pageName,
+              storage_path: p.storagePath,
+            })),
+          })),
+        }),
         signal: controller.signal,
       });
 
@@ -768,11 +772,26 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 const data = JSON.parse(line.slice(6));
 
                 // Handle new stage-based event format
-                if (data.stage === 'png') {
+                if (data.stage === 'init') {
+                  // Backend has bulk-inserted disciplines/pages
+                  console.log(`Processing ${data.pageCount} pages`);
+                } else if (data.stage === 'png') {
                   setUploadProgress(prev => prev ? {
                     ...prev,
                     png: { current: data.current, total: data.total },
                   } : null);
+
+                  // Mark PNG stage complete when finished - triggers file tree load
+                  if (data.current === data.total && data.total > 0) {
+                    setPngStageComplete(true);
+                    setHierarchyRefresh(prev => prev + 1);
+                  }
+                } else if (data.stage === 'png_failures') {
+                  // Some pages failed PNG rendering - track for retry UI
+                  if (data.pageIds && data.pageIds.length > 0) {
+                    console.warn(`PNG rendering failed for ${data.pageIds.length} pages:`, data.pageIds);
+                    setFailedPageIds(new Set(data.pageIds));
+                  }
                 } else if (data.stage === 'ocr') {
                   setUploadProgress(prev => prev ? {
                     ...prev,
@@ -898,6 +917,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
               isDeleteMode={isDeleteMode}
               selectedForDeletion={selectedForDeletion}
               onToggleSelection={toggleFileSelection}
+              failedPageIds={failedPageIds}
+              onRetryPng={handleRetryPng}
             />
           )}
 
@@ -946,6 +967,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     isLoadingFile={isLoadingFile}
                     fileLoadError={fileLoadError}
                     highlightedBounds={highlightedPointer?.bounds}
+                    refreshTrigger={hierarchyRefresh}
                 />
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-fade-in">

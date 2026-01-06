@@ -444,6 +444,10 @@ export const api = {
     update: (id: string, data: { pageName?: string; filePath?: string; initialContext?: string; fullContext?: string }) =>
       request<PageResponse>(`/pages/${id}`, { method: 'PATCH', body: data }),
     delete: (id: string) => request<void>(`/pages/${id}`, { method: 'DELETE' }),
+    retryPng: (id: string) =>
+      request<{ success: boolean; pageImagePath?: string; error?: string }>(`/pages/${id}/retry-png`, {
+        method: 'POST',
+      }),
   },
 
   files: {
