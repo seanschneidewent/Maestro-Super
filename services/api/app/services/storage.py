@@ -158,28 +158,41 @@ async def upload_page_image(
     image_content: bytes,
     project_id: str,
     page_id: str,
+    timeout: float = 60.0,
 ) -> str:
     """
-    Upload a pre-rendered page image (PNG) to Supabase Storage.
+    Upload a pre-rendered page image (PNG) to Supabase Storage with timeout.
 
     Args:
         image_content: PNG image bytes
         project_id: Project ID
         page_id: Page ID
+        timeout: Upload timeout in seconds (default 60s)
 
     Returns:
         Storage path for the uploaded image
+
+    Raises:
+        TimeoutError: If upload takes longer than timeout
     """
     storage_path = f"page-images/{project_id}/{page_id}.png"
     try:
         supabase = _get_supabase_client()
-        supabase.storage.from_(BUCKET_NAME).upload(
-            storage_path,
-            image_content,
-            {"content-type": "image/png", "cache-control": "86400"},  # 24hr cache
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: supabase.storage.from_(BUCKET_NAME).upload(
+                    storage_path,
+                    image_content,
+                    {"content-type": "image/png", "cache-control": "86400"},
+                )
+            ),
+            timeout=timeout,
         )
         logger.info(f"Uploaded page image: {storage_path}")
         return storage_path
+    except asyncio.TimeoutError:
+        logger.error(f"Upload timed out after {timeout}s: {storage_path}")
+        raise TimeoutError(f"Upload timed out after {timeout}s: {storage_path}")
     except Exception as e:
         logger.error(f"Failed to upload page image for page {page_id}: {e}")
         raise

@@ -61,7 +61,7 @@ async def _render_page_png(
     Args:
         page: Page model instance
         project_id: Project ID for storage path
-        pdf_bytes: Pre-downloaded PDF bytes (eliminates race condition)
+        pdf_bytes: PDF bytes for this page
 
     Returns:
         (page_id, png_bytes, error_message)
@@ -69,8 +69,11 @@ async def _render_page_png(
     """
     page_id = str(page.id)
     try:
-        # Render to PNG at 150 DPI
-        png_bytes = await asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150)
+        # Render to PNG at 150 DPI with 30s timeout
+        png_bytes = await asyncio.wait_for(
+            asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150),
+            timeout=30.0,
+        )
 
         # Upload to storage
         storage_path = await upload_page_image(png_bytes, project_id, page_id)
@@ -170,22 +173,18 @@ async def process_uploads_stream(
             return
 
         # ============================================================
-        # Pre-download all unique PDFs (eliminates race condition)
+        # On-demand PDF download with lock (prevents race condition + memory bloat)
         # ============================================================
         pdf_cache: dict[str, bytes] = {}
-        unique_paths = list(set(page.file_path for page in pages))
-        logger.info(f"Pre-downloading {len(unique_paths)} unique PDFs for {total} pages")
+        pdf_cache_lock = asyncio.Lock()
 
-        download_tasks = [download_file(path) for path in unique_paths]
-        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-
-        for path, result in zip(unique_paths, download_results):
-            if isinstance(result, Exception):
-                logger.error(f"Failed to download PDF {path}: {result}")
-            else:
-                pdf_cache[path] = result
-
-        logger.info(f"PDF cache ready: {len(pdf_cache)}/{len(unique_paths)} files cached")
+        async def get_pdf_bytes(file_path: str) -> bytes:
+            """Download PDF with lock to prevent race condition."""
+            async with pdf_cache_lock:
+                if file_path not in pdf_cache:
+                    logger.info(f"Downloading PDF: {file_path}")
+                    pdf_cache[file_path] = await download_file(file_path)
+                return pdf_cache[file_path]
 
         # Semaphore for PNG concurrency (max 10)
         semaphore = asyncio.Semaphore(10)
@@ -195,9 +194,10 @@ async def process_uploads_stream(
         # ============================================================
         try:
             async def render_with_semaphore(page: Page) -> tuple[str, bytes | None, str | None]:
-                pdf_bytes = pdf_cache.get(page.file_path)
-                if not pdf_bytes:
-                    return str(page.id), None, f"PDF not in cache: {page.file_path}"
+                try:
+                    pdf_bytes = await get_pdf_bytes(page.file_path)
+                except Exception as e:
+                    return str(page.id), None, f"PDF download failed: {e}"
                 async with semaphore:
                     return await _render_page_png(page, project_id, pdf_bytes)
 
@@ -262,6 +262,10 @@ async def process_uploads_stream(
             # Emit failures event if any
             if failed_page_ids:
                 yield f"data: {json.dumps({'stage': 'png_failures', 'pageIds': failed_page_ids})}\n\n"
+
+            # Clear PDF cache to free memory before OCR stage
+            pdf_cache.clear()
+            logger.info("PDF cache cleared to free memory")
 
         except Exception as e:
             logger.error(f"PNG stage failed: {e}")
