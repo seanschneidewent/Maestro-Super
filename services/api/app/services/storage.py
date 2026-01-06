@@ -2,6 +2,7 @@
 Supabase Storage service for file operations.
 """
 
+import asyncio
 import logging
 
 from supabase import create_client
@@ -22,20 +23,33 @@ def _get_supabase_client():
     return create_client(settings.supabase_url, settings.supabase_service_key)
 
 
-async def download_file(storage_path: str) -> bytes:
+async def download_file(storage_path: str, timeout: float = 60.0) -> bytes:
     """
-    Download a file from Supabase Storage.
+    Download a file from Supabase Storage with timeout.
 
     Args:
         storage_path: Path in Supabase Storage (e.g., "projects/abc-123/file.pdf")
+        timeout: Download timeout in seconds (default 60s for large PDFs)
 
     Returns:
         File bytes
+
+    Raises:
+        TimeoutError: If download takes longer than timeout
     """
     try:
         supabase = _get_supabase_client()
-        response = supabase.storage.from_(BUCKET_NAME).download(storage_path)
+        # Run blocking Supabase call in thread pool with timeout
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: supabase.storage.from_(BUCKET_NAME).download(storage_path)
+            ),
+            timeout=timeout,
+        )
         return response
+    except asyncio.TimeoutError:
+        logger.error(f"Download timed out after {timeout}s: {storage_path}")
+        raise TimeoutError(f"Download timed out after {timeout}s: {storage_path}")
     except Exception as e:
         logger.error(f"Failed to download file {storage_path}: {e}")
         raise

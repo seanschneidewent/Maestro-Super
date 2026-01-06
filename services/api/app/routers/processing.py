@@ -53,10 +53,15 @@ class ProcessUploadsRequest(BaseModel):
 async def _render_page_png(
     page: Page,
     project_id: str,
-    pdf_cache: dict[str, bytes],
+    pdf_bytes: bytes,
 ) -> tuple[str, bytes | None, str | None]:
     """
     Render PDF page to PNG and upload to storage.
+
+    Args:
+        page: Page model instance
+        project_id: Project ID for storage path
+        pdf_bytes: Pre-downloaded PDF bytes (eliminates race condition)
 
     Returns:
         (page_id, png_bytes, error_message)
@@ -64,12 +69,6 @@ async def _render_page_png(
     """
     page_id = str(page.id)
     try:
-        # Download PDF if not cached
-        if page.file_path not in pdf_cache:
-            pdf_cache[page.file_path] = await download_file(page.file_path)
-
-        pdf_bytes = pdf_cache[page.file_path]
-
         # Render to PNG at 150 DPI
         png_bytes = await asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150)
 
@@ -170,19 +169,37 @@ async def process_uploads_stream(
             yield f"data: {json.dumps({'stage': 'complete'})}\n\n"
             return
 
-        # PDF cache for reuse across stages
+        # ============================================================
+        # Pre-download all unique PDFs (eliminates race condition)
+        # ============================================================
         pdf_cache: dict[str, bytes] = {}
+        unique_paths = list(set(page.file_path for page in pages))
+        logger.info(f"Pre-downloading {len(unique_paths)} unique PDFs for {total} pages")
 
-        # Semaphore for PNG concurrency (max 5)
-        semaphore = asyncio.Semaphore(5)
+        download_tasks = [download_file(path) for path in unique_paths]
+        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+
+        for path, result in zip(unique_paths, download_results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to download PDF {path}: {result}")
+            else:
+                pdf_cache[path] = result
+
+        logger.info(f"PDF cache ready: {len(pdf_cache)}/{len(unique_paths)} files cached")
+
+        # Semaphore for PNG concurrency (max 10)
+        semaphore = asyncio.Semaphore(10)
 
         # ============================================================
-        # Stage 1: PNG rendering (parallel with asyncio.gather)
+        # Stage 1: PNG rendering (parallel)
         # ============================================================
         try:
             async def render_with_semaphore(page: Page) -> tuple[str, bytes | None, str | None]:
+                pdf_bytes = pdf_cache.get(page.file_path)
+                if not pdf_bytes:
+                    return str(page.id), None, f"PDF not in cache: {page.file_path}"
                 async with semaphore:
-                    return await _render_page_png(page, project_id, pdf_cache)
+                    return await _render_page_png(page, project_id, pdf_bytes)
 
             # Use asyncio.gather with return_exceptions=True to prevent stream crash
             # Run tasks and emit progress periodically
@@ -362,9 +379,14 @@ async def retry_page_png(
 
     project_id = discipline.project_id
 
+    # Download PDF first
+    try:
+        pdf_bytes = await download_file(page.file_path)
+    except Exception as e:
+        return {"success": False, "error": f"Failed to download PDF: {e}"}
+
     # Render PNG
-    pdf_cache: dict[str, bytes] = {}
-    result_page_id, png_bytes, error = await _render_page_png(page, project_id, pdf_cache)
+    result_page_id, png_bytes, error = await _render_page_png(page, project_id, pdf_bytes)
 
     if png_bytes:
         return {"success": True, "pageImagePath": page.page_image_path}
