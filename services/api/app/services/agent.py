@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 
 import openai
@@ -10,6 +11,28 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Pattern to filter out Kimi K2's native tool call tokens that sometimes leak through as text
+KIMI_TOKEN_PATTERN = re.compile(
+    r'<\|tool_call[s]?_[^>]+\|>|'  # <|tool_call_begin|>, <|tool_calls_section_begin|>, etc.
+    r'<\|tool_call_argument_begin\|>|'
+    r'functions\.[a-z_]+:\d+',  # functions.select_pages:2
+    re.IGNORECASE
+)
+
+
+def filter_kimi_tokens(text: str) -> str:
+    """Remove Kimi K2's native tool call tokens from text content."""
+    if not text:
+        return text
+    # Remove the token patterns
+    filtered = KIMI_TOKEN_PATTERN.sub('', text)
+    # Clean up any resulting JSON fragments that got orphaned
+    # (e.g., the argument JSON after removing the wrapper tokens)
+    if filtered.strip().startswith('{') and '"page_ids"' in filtered:
+        return ''  # This is a leaked tool call argument, drop it entirely
+    return filtered
+
 
 # Tool definitions in OpenAI format
 # Note: project_id is injected by execute_tool(), not exposed to the model
@@ -335,13 +358,19 @@ async def run_agent_query(
                 if hasattr(delta, 'model_extra') and delta.model_extra:
                     reasoning = delta.model_extra.get('reasoning')
                     if reasoning:
-                        yield {"type": "text", "content": reasoning}
-                        current_reasoning += reasoning
+                        # Filter out any leaked tool call tokens
+                        filtered_reasoning = filter_kimi_tokens(reasoning)
+                        if filtered_reasoning:
+                            yield {"type": "text", "content": filtered_reasoning}
+                            current_reasoning += filtered_reasoning
 
                 # Stream text content (final answer)
                 if delta.content:
-                    yield {"type": "text", "content": delta.content}
-                    current_text += delta.content
+                    # Filter out any leaked tool call tokens
+                    filtered_content = filter_kimi_tokens(delta.content)
+                    if filtered_content:
+                        yield {"type": "text", "content": filtered_content}
+                        current_text += filtered_content
 
                 # Accumulate tool calls (they come in chunks)
                 if delta.tool_calls:
