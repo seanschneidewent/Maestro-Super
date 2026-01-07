@@ -154,7 +154,8 @@ export function QueryBubbleStack({
       {visibleQueries.map((query) => {
         const isActive = query.id === activeQueryId
         const isExpanded = query.id === expandedQueryId
-        const responseText = query.responseText
+        // For active query, prefer streamingFinalAnswer (set by restore) over stored responseText
+        const responseText = isActive ? (streamingFinalAnswer || query.responseText) : query.responseText
 
         // Non-active: small compact style
         if (!isActive) {
