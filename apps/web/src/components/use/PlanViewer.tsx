@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { downloadFile } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 
@@ -28,6 +28,24 @@ const pageImageCache = new Map<string, PageImage>();
 
 // Track in-flight loads to avoid duplicate fetches
 const loadingPromises = new Map<string, Promise<PageImage | null>>();
+
+// Welcome greetings for empty state (randomly selected)
+const WELCOME_GREETINGS = [
+  "What do you need to see?",
+  "Where should we look?",
+  "What are we solving today?",
+  "I'm ready - ask away",
+  "Go ahead, I'm listening",
+  "Fire away",
+  "What are we hunting for?",
+  "Point me at a problem",
+  "Let's find it",
+  "I've got the plans - what do you need?",
+  "Ask me to pull something up",
+  "Tell me what you're working on",
+  "Ready when you are",
+  "What can I help you find?",
+];
 
 // Reusable function to load a page image (used by both prefetch and current-page loading)
 async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
@@ -96,6 +114,11 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
   // Container size for fit calculation
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+
+  // Random greeting for empty state (picked once on mount)
+  const [greeting] = useState(() =>
+    WELCOME_GREETINGS[Math.floor(Math.random() * WELCOME_GREETINGS.length)]
+  );
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -347,10 +370,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // =====================================
   return (
     <div className="flex-1 flex items-center justify-center h-full bg-slate-100">
-      <div className="text-center text-slate-500">
-        <FileText size={48} className="mx-auto mb-3 text-slate-400" />
-        <p className="text-sm">Select a page or ask a question</p>
-      </div>
+      <p className="text-slate-500 text-lg">{greeting}</p>
     </div>
   );
 };
