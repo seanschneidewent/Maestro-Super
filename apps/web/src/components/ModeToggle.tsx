@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppMode } from '../types';
-import { BrainCircuit, Construction, LogOut } from 'lucide-react';
+import { BrainCircuit, Hammer, LogOut } from 'lucide-react';
 
 interface ModeToggleProps {
   mode: AppMode;
@@ -41,7 +41,7 @@ export const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, variant =
               : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
         }`}
       >
-        <Construction size={14} /> Agent
+        <Hammer size={14} /> Maestro
       </button>
       <div className={`w-px h-5 mx-0.5 ${isDark ? 'bg-white/10' : 'bg-slate-300'}`}></div>
       <button
