@@ -122,6 +122,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasEverShownPage = useRef(false);
 
   // Multi-page mode: current page index
   const [agentPageIndex, setAgentPageIndex] = useState(0);
@@ -207,6 +208,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
     const cached = pageImageCache.get(currentAgentPage.pageId);
     if (cached) {
       setAgentPageImage(cached);
+      hasEverShownPage.current = true;
       return;
     }
 
@@ -215,6 +217,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
     loadPageImage(currentAgentPage).then(pageImage => {
       if (pageImage) {
         setAgentPageImage(pageImage);
+        hasEverShownPage.current = true;
       }
       setIsLoadingAgentPage(false);
     });
@@ -369,8 +372,10 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // EMPTY STATE (no pages selected)
   // =====================================
   return (
-    <div className="flex-1 flex items-center justify-center h-full bg-slate-100">
-      <p className="text-black text-2xl">{greeting}</p>
+    <div className="flex-1 flex items-center justify-center h-full blueprint-grid">
+      {!hasEverShownPage.current && (
+        <p className="text-black text-2xl">{greeting}</p>
+      )}
     </div>
   );
 };
