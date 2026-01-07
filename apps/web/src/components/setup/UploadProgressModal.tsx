@@ -11,8 +11,6 @@ interface UploadProgressModalProps {
   progress: {
     upload: ProgressStage;
     png: ProgressStage;
-    ocr: ProgressStage;
-    ai: ProgressStage;
   };
   error?: string;
   onRetry?: () => void;
@@ -29,15 +27,11 @@ export const UploadProgressModal: React.FC<UploadProgressModalProps> = ({
   const isComplete =
     progress.upload.current === progress.upload.total &&
     progress.png.current === progress.png.total &&
-    progress.ocr.current === progress.ocr.total &&
-    progress.ai.current === progress.ai.total &&
     progress.upload.total > 0;
 
   const stages = [
     { label: 'Upload', data: progress.upload, color: 'bg-blue-500' },
     { label: 'Rendering', data: progress.png, color: 'bg-green-500' },
-    { label: 'Text Extraction', data: progress.ocr, color: 'bg-cyan-500' },
-    { label: 'AI Analysis', data: progress.ai, color: 'bg-purple-500' },
   ];
 
   return (

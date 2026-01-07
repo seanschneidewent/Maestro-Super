@@ -14,8 +14,6 @@ from app.database.session import SessionLocal, get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
 from app.models.project import Project
-from app.services.gemini import analyze_page_pass_1
-from app.services.ocr import extract_full_page_text
 from app.services.pdf_renderer import pdf_page_to_image
 from app.services.storage import download_file, upload_page_image
 
@@ -100,14 +98,12 @@ async def process_uploads_stream(
     Pipeline:
     1. Bulk insert disciplines/pages (if request body provided)
     2. PNG stage (parallel): Render all pages to PNG, upload to storage
-    3. OCR+AI stage (sequential): For each page, run Tesseract → Gemini → save
+    3. Complete - app is immediately usable
 
     SSE events:
     - {"stage": "init", "pageCount": N}  (after bulk insert)
     - {"stage": "png", "current": N, "total": T}
     - {"stage": "png_failures", "pageIds": [...]}  (list of failed page IDs)
-    - {"stage": "ocr", "current": N, "total": T}
-    - {"stage": "ai", "current": N, "total": T}
     - {"stage": "complete"}
     - {"stage": "error", "message": "..."}
 
@@ -145,15 +141,13 @@ async def process_uploads_stream(
             db.commit()
             logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
 
-        # Get all unprocessed pages and extract to dicts (detach from ORM)
+        # Get all pages needing PNG rendering (detach from ORM)
         pages = (
             db.query(Page)
             .join(Discipline)
             .filter(
                 Discipline.project_id == project_id,
-                (Page.page_image_ready == False)  # noqa: E712
-                | (Page.processed_ocr == False)  # noqa: E712
-                | (Page.processed_pass_1 == False),  # noqa: E712
+                Page.page_image_ready == False,  # noqa: E712
             )
             .all()
         )
@@ -265,8 +259,7 @@ async def process_uploads_stream(
             # Final PNG progress event
             yield f"data: {json.dumps({'stage': 'png', 'current': total, 'total': total})}\n\n"
 
-            # Build map of page_id -> png_bytes, track failures and successful paths
-            page_png_map: dict[str, bytes] = {}
+            # Track successes and failures (no longer need to store PNG bytes)
             successful_pages: list[tuple[str, str]] = []  # (page_id, storage_path)
             failed_page_ids: list[str] = []
 
@@ -278,7 +271,6 @@ async def process_uploads_stream(
                 else:
                     page_id, png_bytes, storage_path, error = result
                     if png_bytes and storage_path:
-                        page_png_map[page_id] = png_bytes
                         successful_pages.append((page_id, storage_path))
                     elif error:
                         logger.warning(f"Page {page_id} PNG failed: {error}")
@@ -301,9 +293,9 @@ async def process_uploads_stream(
                     db.commit()
                     logger.info(f"Batch updated {len(successful_pages)} pages with PNG paths")
 
-            # Clear PDF cache to free memory before OCR stage
+            # Clear PDF cache to free memory
             pdf_cache.clear()
-            logger.info("PDF cache cleared to free memory")
+            logger.info("PDF cache cleared")
 
         except Exception as e:
             logger.error(f"PNG stage failed: {e}")
@@ -311,77 +303,8 @@ async def process_uploads_stream(
             return
 
         # ============================================================
-        # Stage 2: OCR + AI (sequential per page)
-        # Uses short-lived DB sessions per page to avoid connection timeout
-        # ============================================================
-        last_emit_time = asyncio.get_event_loop().time()
-
-        for i, page_data in enumerate(page_data_list):
-            page_id = page_data["id"]
-            png_bytes = page_png_map.get(page_id)
-
-            if not png_bytes:
-                logger.warning(f"Skipping OCR+AI for page {page_id}: no PNG available")
-                continue
-
-            # --- OCR ---
-            full_text = ""
-            ocr_spans = []
-            try:
-                full_text, ocr_spans = await extract_full_page_text(png_bytes)
-
-                # Save OCR results with short-lived session
-                with SessionLocal() as ocr_db:
-                    ocr_db.query(Page).filter(Page.id == page_id).update({
-                        "full_page_text": full_text,
-                        "ocr_data": ocr_spans,
-                        "processed_ocr": True
-                    })
-                    ocr_db.commit()
-
-                logger.info(f"OCR complete for page {page_id}: {len(ocr_spans)} spans")
-
-            except Exception as e:
-                logger.error(f"OCR failed for page {page_id}: {e}")
-                # Continue with empty text/spans
-
-            # Emit OCR progress
-            yield f"data: {json.dumps({'stage': 'ocr', 'current': i + 1, 'total': total})}\n\n"
-            last_emit_time = asyncio.get_event_loop().time()
-
-            # --- AI Pass 1 ---
-            try:
-                initial_context = await analyze_page_pass_1(
-                    image_bytes=png_bytes,
-                    ocr_text=full_text,
-                    ocr_spans=ocr_spans,
-                )
-
-                # Save AI results with short-lived session
-                with SessionLocal() as ai_db:
-                    ai_db.query(Page).filter(Page.id == page_id).update({
-                        "initial_context": initial_context,
-                        "processed_pass_1": True
-                    })
-                    ai_db.commit()
-
-                logger.info(f"AI Pass 1 complete for page {page_id}")
-
-            except Exception as e:
-                logger.error(f"AI failed for page {page_id}: {e}")
-                # Continue to next page - don't set processed_pass_1
-
-            # Emit AI progress
-            yield f"data: {json.dumps({'stage': 'ai', 'current': i + 1, 'total': total})}\n\n"
-
-            # Heartbeat if processing is slow
-            current_time = asyncio.get_event_loop().time()
-            if current_time - last_emit_time > 3:
-                yield ": heartbeat\n\n"
-            last_emit_time = current_time
-
-        # ============================================================
-        # Complete
+        # Complete - app is immediately usable after PNG stage
+        # OCR+AI can be added later as background jobs or on-demand
         # ============================================================
         yield f"data: {json.dumps({'stage': 'complete'})}\n\n"
 

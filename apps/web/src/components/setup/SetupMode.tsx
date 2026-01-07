@@ -70,12 +70,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
-  // Pipeline progress with 4 progress bars (nested structure)
+  // Pipeline progress with 2 progress bars (upload + PNG rendering)
   const [uploadProgress, setUploadProgress] = useState<{
     upload: { current: number; total: number };
     png: { current: number; total: number };
-    ocr: { current: number; total: number };
-    ai: { current: number; total: number };
   } | null>(null);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -643,13 +641,11 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         console.log(`${plan.filesNeedingReview.length} files need discipline review`);
       }
 
-      // Initialize progress with nested structure and show modal
+      // Initialize progress and show modal (only upload + PNG rendering)
       const totalFiles = plan.totalFileCount;
       setUploadProgress({
         upload: { current: 0, total: totalFiles },
         png: { current: 0, total: totalFiles },
-        ocr: { current: 0, total: totalFiles },
-        ai: { current: 0, total: totalFiles },
       });
       setShowProgressModal(true);
       setPngStageComplete(false); // Reset for new upload
@@ -704,8 +700,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
       setIsUploading(false);
 
-      // Start processing pipeline via SSE (bulk insert → PNG → OCR → AI)
-      // Backend will bulk insert disciplines/pages, then process
+      // Start processing pipeline via SSE (bulk insert → PNG → complete)
+      // Backend will bulk insert disciplines/pages, then render PNGs
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -793,16 +789,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     console.warn(`PNG rendering failed for ${data.pageIds.length} pages:`, data.pageIds);
                     setFailedPageIds(new Set(data.pageIds));
                   }
-                } else if (data.stage === 'ocr') {
-                  setUploadProgress(prev => prev ? {
-                    ...prev,
-                    ocr: { current: data.current, total: data.total },
-                  } : null);
-                } else if (data.stage === 'ai') {
-                  setUploadProgress(prev => prev ? {
-                    ...prev,
-                    ai: { current: data.current, total: data.total },
-                  } : null);
                 } else if (data.stage === 'complete') {
                   receivedComplete = true;
                   // Refresh hierarchy after processing
@@ -824,93 +810,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         }
       }
 
-      // RETRY LOGIC: If SSE stream closed without receiving "complete",
-      // automatically call the reprocess endpoint to finish remaining pages
+      // If stream closed without completion, log it but don't retry
+      // (PNG stage is fast enough that retries aren't needed)
       if (!receivedComplete) {
-        console.log('SSE stream closed without completion - starting automatic retry...');
-
-        // Small delay before retry to let server recover
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        try {
-          const retryController = new AbortController();
-          const retryTimeoutId = setTimeout(() => {
-            console.log('Retry SSE timeout - aborting after 15 minutes');
-            retryController.abort();
-          }, 900000); // 15 minute timeout
-
-          const retryResponse = await fetch(`${API_URL}/projects/${projectId}/reprocess-ocr-ai-stream`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-            },
-            signal: retryController.signal,
-          });
-
-          if (retryResponse.ok) {
-            console.log('Retry SSE connection established');
-            const retryReader = retryResponse.body?.getReader();
-            const retryDecoder = new TextDecoder();
-
-            if (retryReader) {
-              let retryBuffer = '';
-              while (true) {
-                const { done, value } = await retryReader.read();
-                if (done) break;
-
-                retryBuffer += retryDecoder.decode(value, { stream: true });
-                const lines = retryBuffer.split('\n');
-                retryBuffer = lines.pop() || '';
-
-                for (const line of lines) {
-                  if (line.startsWith(':')) continue; // Skip heartbeats
-
-                  if (line.startsWith('data: ')) {
-                    try {
-                      const data = JSON.parse(line.slice(6));
-
-                      if (data.stage === 'init') {
-                        console.log(`Retrying ${data.pageCount} remaining pages`);
-                      } else if (data.stage === 'ocr') {
-                        setUploadProgress(prev => prev ? {
-                          ...prev,
-                          ocr: { current: (prev.ocr.total - data.total) + data.current, total: prev.ocr.total },
-                        } : null);
-                      } else if (data.stage === 'ai') {
-                        setUploadProgress(prev => prev ? {
-                          ...prev,
-                          ai: { current: (prev.ai.total - data.total) + data.current, total: prev.ai.total },
-                        } : null);
-                      } else if (data.stage === 'complete') {
-                        console.log('Retry processing complete!');
-                        setHierarchyRefresh(prev => prev + 1);
-                        setTimeout(() => {
-                          setShowProgressModal(false);
-                          setUploadProgress(null);
-                        }, 1500);
-                      } else if (data.stage === 'error') {
-                        setUploadError(data.message || 'An error occurred during retry processing');
-                      }
-                    } catch (parseErr) {
-                      console.error('Failed to parse retry SSE data:', parseErr);
-                    }
-                  }
-                }
-              }
-            }
-          } else {
-            console.error('Retry request failed:', retryResponse.status);
-          }
-
-          clearTimeout(retryTimeoutId);
-        } catch (retryErr) {
-          console.error('Retry processing failed:', retryErr);
-          // Don't set error for abort - user can see progress
-          if (retryErr instanceof Error && retryErr.name !== 'AbortError') {
-            setUploadError('Some pages may not have been fully processed. You can retry later.');
-          }
-        }
+        console.warn('SSE stream closed without receiving complete event');
+        // Still close the modal after a delay - user can refresh if needed
+        setTimeout(() => {
+          setShowProgressModal(false);
+          setUploadProgress(null);
+        }, 1500);
       }
 
     } catch (err) {
@@ -1115,8 +1023,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         progress={uploadProgress ?? {
           upload: { current: 0, total: 0 },
           png: { current: 0, total: 0 },
-          ocr: { current: 0, total: 0 },
-          ai: { current: 0, total: 0 },
         }}
         error={uploadError ?? undefined}
         onRetry={() => {
