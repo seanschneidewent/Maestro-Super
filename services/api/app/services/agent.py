@@ -202,6 +202,7 @@ DISPLAYING RESULTS:
 - Use select_pages when you want to show the user specific plan sheets without highlighting
 - Use select_pointers when you want to highlight specific details/areas on the plans
 - Always call one of these before your final answer so the user can see the relevant plans
+- PAGE ORDERING: Always order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3). If the user requests a specific order (e.g., "show me the detail first" or "start with the overview"), follow their preference instead.
 
 BEFORE YOUR FINAL ANSWER:
 - Call set_display_title with a 2-4 word noun phrase summarizing the topic
