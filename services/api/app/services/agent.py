@@ -1,8 +1,7 @@
-"""Query agent for navigating construction plan graph with Kimi K2 via OpenRouter."""
+"""Query agent for navigating construction plan graph with Grok 4.1 Fast via OpenRouter."""
 
 import json
 import logging
-import re
 from typing import Any, AsyncIterator
 
 import openai
@@ -11,27 +10,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Pattern to filter out Kimi K2's native tool call tokens that sometimes leak through as text
-KIMI_TOKEN_PATTERN = re.compile(
-    r'<\|tool_call[s]?_[^>]+\|>|'  # <|tool_call_begin|>, <|tool_calls_section_begin|>, etc.
-    r'<\|tool_call_argument_begin\|>|'
-    r'functions\.[a-z_]+:\d+',  # functions.select_pages:2
-    re.IGNORECASE
-)
-
-
-def filter_kimi_tokens(text: str) -> str:
-    """Remove Kimi K2's native tool call tokens from text content."""
-    if not text:
-        return text
-    # Remove the token patterns
-    filtered = KIMI_TOKEN_PATTERN.sub('', text)
-    # Clean up any resulting JSON fragments that got orphaned
-    # (e.g., the argument JSON after removing the wrapper tokens)
-    if filtered.strip().startswith('{') and '"page_ids"' in filtered:
-        return ''  # This is a leaked tool call argument, drop it entirely
-    return filtered
 
 
 # Tool definitions in OpenAI format
@@ -298,7 +276,7 @@ async def run_agent_query(
     query: str,
 ) -> AsyncIterator[dict]:
     """
-    Execute agent query with streaming events using Kimi K2 via OpenRouter.
+    Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
 
     Yields events:
     - {"type": "text", "content": "..."} - Model's reasoning
@@ -333,9 +311,8 @@ async def run_agent_query(
 
     try:
         while True:
-            # Stream response from Kimi K2 Thinking (with native reasoning)
             stream = await client.chat.completions.create(
-                model="moonshotai/kimi-k2-thinking",
+                model="x-ai/grok-4.1-fast",
                 max_tokens=4096,
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
@@ -344,7 +321,6 @@ async def run_agent_query(
 
             # Collect streaming response
             current_text = ""
-            current_reasoning = ""
             tool_calls_data: dict[int, dict] = {}  # index -> {id, name, arguments}
 
             async for chunk in stream:
@@ -354,23 +330,10 @@ async def run_agent_query(
 
                 delta = choice.delta
 
-                # Stream native reasoning from Kimi K2 Thinking
-                if hasattr(delta, 'model_extra') and delta.model_extra:
-                    reasoning = delta.model_extra.get('reasoning')
-                    if reasoning:
-                        # Filter out any leaked tool call tokens
-                        filtered_reasoning = filter_kimi_tokens(reasoning)
-                        if filtered_reasoning:
-                            yield {"type": "text", "content": filtered_reasoning}
-                            current_reasoning += filtered_reasoning
-
-                # Stream text content (final answer)
+                # Stream text content
                 if delta.content:
-                    # Filter out any leaked tool call tokens
-                    filtered_content = filter_kimi_tokens(delta.content)
-                    if filtered_content:
-                        yield {"type": "text", "content": filtered_content}
-                        current_text += filtered_content
+                    yield {"type": "text", "content": delta.content}
+                    current_text += delta.content
 
                 # Accumulate tool calls (they come in chunks)
                 if delta.tool_calls:
@@ -395,9 +358,7 @@ async def run_agent_query(
                     total_input_tokens += chunk.usage.prompt_tokens or 0
                     total_output_tokens += chunk.usage.completion_tokens or 0
 
-            # Add accumulated reasoning and text to trace
-            if current_reasoning:
-                trace.append({"type": "reasoning", "content": current_reasoning})
+            # Add accumulated text to trace
             if current_text:
                 trace.append({"type": "response", "content": current_text})
 
@@ -437,7 +398,6 @@ async def run_agent_query(
                 if tool_name == "set_display_title":
                     title = tool_input.get("title", "")
                     # Clean up the title - strip leading colons, quotes, and whitespace
-                    # (Kimi K2 sometimes outputs `: "Title"` instead of just `Title`)
                     if title:
                         title = title.strip().lstrip(':').strip().strip('"').strip("'").strip()
                     display_title = title[:100] if title else None
@@ -470,10 +430,8 @@ async def run_agent_query(
 
             # Add assistant message with tool calls
             assistant_message: dict[str, Any] = {"role": "assistant"}
-            # Combine reasoning and content for message history
-            combined_content = current_reasoning + current_text
-            if combined_content:
-                assistant_message["content"] = combined_content
+            if current_text:
+                assistant_message["content"] = current_text
             if assistant_tool_calls:
                 assistant_message["tool_calls"] = assistant_tool_calls
             messages.append(assistant_message)
