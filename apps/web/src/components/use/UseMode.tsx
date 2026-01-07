@@ -381,8 +381,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </div>
         )}
 
-        {/* Query input bar - bottom center */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
+        {/* Query input bar - bottom right */}
+        <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
           {/* User query bubble - appears above input when query is active */}
           {submittedQuery && (isStreaming || activeQueryId) && (() => {
             const words = submittedQuery.split(/\s+/);
