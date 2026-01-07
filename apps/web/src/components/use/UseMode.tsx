@@ -323,6 +323,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       <div className="flex-1 relative flex flex-col overflow-hidden">
         {/* PlanViewer - handles PDF rendering */}
         <PlanViewer
+          key={currentSession?.id}
           selectedPages={selectedPages}
           onVisiblePageChange={handleVisiblePageChange}
           showPointers={isStreaming || activeQueryId !== null}
