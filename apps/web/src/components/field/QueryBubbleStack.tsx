@@ -56,12 +56,42 @@ export function QueryBubbleStack({
     (a, b) => (a.sequenceOrder ?? 0) - (b.sequenceOrder ?? 0)
   )
 
-  // Collapse/expand logic for history
-  const maxCollapsedHistory = 3
-  const hasMoreHistory = sortedQueries.length > maxCollapsedHistory
+  // When collapsed, show: previous to active, active, most recent
+  // This ensures the active query is always visible with context
+  const getCollapsedQueries = () => {
+    if (sortedQueries.length <= 3) return sortedQueries
+
+    const activeIndex = sortedQueries.findIndex(q => q.id === activeQueryId)
+
+    // If no active or active is most recent, just show last 3
+    if (activeIndex === -1 || activeIndex === sortedQueries.length - 1) {
+      return sortedQueries.slice(-3)
+    }
+
+    const result: typeof sortedQueries = []
+
+    // 1. Previous to active (if exists)
+    if (activeIndex > 0) {
+      result.push(sortedQueries[activeIndex - 1])
+    }
+
+    // 2. Active query
+    result.push(sortedQueries[activeIndex])
+
+    // 3. Most recent (if different from active)
+    const mostRecent = sortedQueries[sortedQueries.length - 1]
+    if (mostRecent.id !== activeQueryId) {
+      result.push(mostRecent)
+    }
+
+    return result
+  }
+
   const visibleQueries = isHistoryExpanded
     ? sortedQueries
-    : sortedQueries.slice(-maxCollapsedHistory)
+    : getCollapsedQueries()
+
+  const hasMoreHistory = sortedQueries.length > visibleQueries.length
 
   // Handle click on a query bubble
   const handleBubbleClick = (queryId: string) => {
