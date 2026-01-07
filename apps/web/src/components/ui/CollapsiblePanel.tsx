@@ -10,6 +10,7 @@ interface CollapsiblePanelProps {
   collapsedIcon: React.ReactNode;
   collapsedLabel?: string;
   className?: string;
+  onWidthChange?: (width: number) => void;
 }
 
 export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
@@ -21,7 +22,10 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
   collapsedIcon,
   collapsedLabel,
   className = '',
+  onWidthChange,
 }) => {
+  const COLLAPSED_TAB_WIDTH = 44; // Width of the collapsed tab in pixels
+
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
@@ -120,19 +124,25 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
     };
   }, [isDragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
 
+  // Notify parent of width changes (for visible-area centering calculation)
+  useEffect(() => {
+    const effectiveWidth = isCollapsed ? COLLAPSED_TAB_WIDTH : width;
+    onWidthChange?.(effectiveWidth);
+  }, [width, isCollapsed, onWidthChange]);
+
   const handleExpandClick = () => {
     setIsCollapsed(false);
   };
 
-  const COLLAPSED_TAB_WIDTH = 44; // Width of the collapsed tab in pixels
-
   // Always render the same structure, just change width
+  // Uses absolute positioning to overlay on content (not affect layout)
   return (
     <div
       ref={panelRef}
       className={`
-        relative flex-shrink-0 h-full
+        absolute top-0 bottom-0 z-30 h-full
         transition-all duration-300 ease-out
+        ${side === 'left' ? 'left-0' : 'right-0'}
       `}
       style={{
         width: isCollapsed ? COLLAPSED_TAB_WIDTH : width,

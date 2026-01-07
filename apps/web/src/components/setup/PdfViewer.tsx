@@ -98,6 +98,8 @@ interface PdfViewerProps {
   fileLoadError?: string | null;
   highlightedBounds?: { x: number; y: number; w: number; h: number } | null;
   refreshTrigger?: number;  // Increment to re-check PNG availability
+  leftSidebarWidth?: number;  // For visible-area centering
+  rightSidebarWidth?: number;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
@@ -114,6 +116,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   fileLoadError,
   highlightedBounds,
   refreshTrigger,
+  leftSidebarWidth = 288,
+  rightSidebarWidth = 400,
 }) => {
   // PDF document state (on-demand rendering like PlanViewer)
   const [pdfDoc, setPdfDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -213,7 +217,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       setPdfDoc(null);
       setCurrentPageImage(null);
       setPageNumber(1);
-      transformRef.current?.resetTransform();
+      // Reset will be applied with offset when image loads
 
       try {
         const arrayBuffer = await file.arrayBuffer();
@@ -283,10 +287,24 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     });
   }, [pdfDoc, pageNumber, fileId, usePreRendered, preRenderedImageUrl]);
 
-  // Reset transform when page changes
+  // Calculate X offset to center in visible area (between sidebars)
+  // Offset = (leftSidebarWidth - rightSidebarWidth) / 2
+  // Negative offset shifts content left when right sidebar is wider
+  const visibleAreaOffset = useMemo(() => {
+    return (leftSidebarWidth - rightSidebarWidth) / 2;
+  }, [leftSidebarWidth, rightSidebarWidth]);
+
+  // Reset transform when page changes or image loads, applying visible-area centering offset
   useEffect(() => {
-    transformRef.current?.resetTransform();
-  }, [pageNumber]);
+    if (transformRef.current && currentPageImage) {
+      transformRef.current.resetTransform();
+      // Apply offset after reset to center in visible area
+      // Small delay to ensure reset completes first
+      setTimeout(() => {
+        transformRef.current?.setTransform(visibleAreaOffset, 0, 1);
+      }, 50);
+    }
+  }, [pageNumber, currentPageImage, visibleAreaOffset]);
 
   // Page navigation
   const goToPrevPage = () => setPageNumber(prev => Math.max(prev - 1, 1));

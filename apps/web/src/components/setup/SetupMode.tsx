@@ -84,6 +84,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     bounds: { x: number; y: number; w: number; h: number };
   } | null>(null);
   const [focusPointerId, setFocusPointerId] = useState<string | null>(null);
+  // Track sidebar widths for visible-area centering
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(288);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(400);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
@@ -846,8 +849,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   };
 
   return (
-    <div className="relative flex h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
-      {/* Sidebar: File Tree */}
+    <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
+      {/* Sidebar: File Tree (absolute positioned overlay) */}
       <CollapsiblePanel
         side="left"
         defaultWidth={288}
@@ -856,6 +859,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         collapsedIcon={<FolderOpen size={20} />}
         collapsedLabel="Files"
         className="border-r border-slate-800/50 glass-panel"
+        onWidthChange={setLeftSidebarWidth}
       >
         <div className="flex flex-col h-full">
           <div className="p-4 border-b border-white/5 space-y-3">
@@ -952,8 +956,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         </div>
       </CollapsiblePanel>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full min-w-0 blueprint-grid-dark">
+      {/* Main Content (full width, sidebars overlay on top) */}
+      <div className="w-full h-full flex flex-col blueprint-grid-dark">
          {/* PDF Viewer */}
          <div className="flex-1 relative overflow-hidden">
             {selectedFile ? (
@@ -970,6 +974,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     fileLoadError={fileLoadError}
                     highlightedBounds={highlightedPointer?.bounds}
                     refreshTrigger={hierarchyRefresh}
+                    leftSidebarWidth={leftSidebarWidth}
+                    rightSidebarWidth={rightSidebarWidth}
                 />
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-fade-in">
@@ -983,7 +989,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
       </div>
 
-      {/* Context Panel */}
+      {/* Context Panel (absolute positioned overlay) */}
       <CollapsiblePanel
         side="right"
         defaultWidth={400}
@@ -992,6 +998,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         collapsedIcon={<Layers size={20} />}
         collapsedLabel="Context"
         className="border-l border-slate-800/50 glass-panel"
+        onWidthChange={setRightSidebarWidth}
       >
         <div className="flex flex-col h-full">
            <div className="p-4 border-b border-white/5">
