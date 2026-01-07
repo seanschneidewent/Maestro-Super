@@ -147,8 +147,8 @@ export function useCreatePointer(projectId: string) {
         });
       }
 
-      // Still invalidate to ensure consistency with backend (will refetch in background)
-      queryClient.invalidateQueries({ queryKey: ['hierarchy', projectId] });
+      // Note: We intentionally don't invalidate here to avoid race conditions
+      // when creating multiple pointers. The optimistic update above is sufficient.
 
       // Call success callback if provided (for auto-expand, focus, etc.)
       variables.onCreated?.(created);
