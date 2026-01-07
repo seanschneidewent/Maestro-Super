@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
+import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
@@ -19,6 +20,45 @@ import {
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useSession } from '../../hooks/useSession';
+
+/**
+ * Extract pointer data (including bboxes) from the query trace.
+ * The select_pointers tool_result contains full pointer info.
+ */
+function extractPointerDataFromTrace(
+  trace: QueryTraceStep[] | undefined
+): Map<string, { title: string; bboxX: number; bboxY: number; bboxWidth: number; bboxHeight: number }> {
+  const pointerMap = new Map<string, { title: string; bboxX: number; bboxY: number; bboxWidth: number; bboxHeight: number }>();
+
+  if (!trace) return pointerMap;
+
+  for (const step of trace) {
+    if (step.type === 'tool_result' && step.tool === 'select_pointers') {
+      const result = step.result as { pointers?: Array<{
+        pointer_id: string;
+        title: string;
+        bbox_x: number;
+        bbox_y: number;
+        bbox_width: number;
+        bbox_height: number;
+      }> } | undefined;
+
+      if (result?.pointers) {
+        for (const p of result.pointers) {
+          pointerMap.set(p.pointer_id, {
+            title: p.title || '',
+            bboxX: p.bbox_x || 0,
+            bboxY: p.bbox_y || 0,
+            bboxWidth: p.bbox_width || 0,
+            bboxHeight: p.bbox_height || 0,
+          });
+        }
+      }
+    }
+  }
+
+  return pointerMap;
+}
 
 interface UseModeProps {
   mode: AppMode;
@@ -137,7 +177,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     queryPagesCache.clear();
     queryTraceCache.clear();
     for (const q of queries) {
-      // Cache pages
+      // Extract pointer data (including bboxes) from trace
+      const pointerData = extractPointerDataFromTrace(q.trace);
+
+      // Cache pages with full pointer data
       if (q.pages && q.pages.length > 0) {
         const queryPages: AgentSelectedPage[] = q.pages
           .sort((a, b) => a.pageOrder - b.pageOrder)
@@ -146,14 +189,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
             pageName: p.pageName || '',
             filePath: p.filePath || '',
             disciplineId: p.disciplineId || '',
-            pointers: (p.pointersShown || []).map((ptr) => ({
-              pointerId: ptr.pointerId,
-              title: '',
-              bboxX: 0,
-              bboxY: 0,
-              bboxWidth: 0,
-              bboxHeight: 0,
-            })),
+            pointers: (p.pointersShown || []).map((ptr) => {
+              const ptrInfo = pointerData.get(ptr.pointerId);
+              return {
+                pointerId: ptr.pointerId,
+                title: ptrInfo?.title || '',
+                bboxX: ptrInfo?.bboxX || 0,
+                bboxY: ptrInfo?.bboxY || 0,
+                bboxWidth: ptrInfo?.bboxWidth || 0,
+                bboxHeight: ptrInfo?.bboxHeight || 0,
+              };
+            }),
           }));
         queryPagesCache.set(q.id, queryPages);
       }
