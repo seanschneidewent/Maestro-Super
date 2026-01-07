@@ -274,7 +274,7 @@ def get_project_hierarchy(
 
     return JSONResponse(
         content=jsonable_encoder(result),
-        headers={"Cache-Control": "private, max-age=30"},  # 30s browser cache
+        headers={"Cache-Control": "no-store"},  # Disable caching to prevent stale page IDs
     )
 
 

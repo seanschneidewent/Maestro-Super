@@ -33,6 +33,7 @@ def get_engine() -> Engine:
     return create_engine(
         url,
         pool_pre_ping=True,
+        pool_recycle=300,  # Recycle connections every 5 min to prevent stale state
         pool_size=5,
         max_overflow=10,
         echo=False,

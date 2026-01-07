@@ -73,6 +73,8 @@ def get_page(
     """Get a specific page."""
     page = db.query(Page).filter(Page.id == page_id).first()
     if not page:
+        # Log 404s to help debug connection pool / data consistency issues
+        logger.warning(f"Page not found: {page_id}")
         raise HTTPException(status_code=404, detail="Page not found")
     return page
 

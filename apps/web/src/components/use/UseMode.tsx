@@ -4,8 +4,9 @@ import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
-import { api } from '../../lib/api';
+import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
+import { useToast } from '../ui/Toast';
 import {
   ActiveQueryBubble,
   QueryInput,
@@ -27,6 +28,8 @@ interface UseModeProps {
 }
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) => {
+  const { showError } = useToast();
+
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
@@ -196,7 +199,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
 
   // Handle page selection from PlansPanel
   // Resets to fresh session state and loads page into agent viewer
-  const handlePageSelect = async (pageId: string, disciplineId: string, _pageName: string) => {
+  const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
     // Reset session state (like handleNewSession but skip clearSession API call)
     resetStream();
     setQueryInput('');
@@ -210,9 +213,23 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSelectedPageId(pageId);
     setSelectedDisciplineId(disciplineId);
 
+    // Helper to fetch page with retry on 404 (connection pool stale state fix)
+    const fetchPageWithRetry = async (retries = 1): Promise<typeof api.pages.get extends (id: string) => Promise<infer R> ? R : never> => {
+      try {
+        return await api.pages.get(pageId);
+      } catch (err) {
+        if (isNotFoundError(err) && retries > 0) {
+          // Wait 500ms and retry - connection pool might have stale state
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return fetchPageWithRetry(retries - 1);
+        }
+        throw err;
+      }
+    };
+
     // Fetch page data (skip pointers - not shown for file tree navigation)
     try {
-      const pageData = await api.pages.get(pageId);
+      const pageData = await fetchPageWithRetry();
 
       // Load into viewer without pointers (clean sheet browsing)
       loadPages([{
@@ -224,6 +241,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       }]);
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
+      if (isNotFoundError(err)) {
+        showError(`Page "${pageName}" not found. Try refreshing the page list.`);
+      } else {
+        showError('Failed to load page. Please try again.');
+      }
     }
   };
 
