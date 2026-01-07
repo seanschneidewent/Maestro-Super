@@ -11,7 +11,7 @@ export function NewSessionButton({ onClick, disabled }: NewSessionButtonProps) {
       onClick={onClick}
       disabled={disabled}
       className={`
-        w-11 h-11 rounded-full
+        w-14 h-14 rounded-full
         flex items-center justify-center
         bg-white/90 backdrop-blur-md
         border border-cyan-300/40
@@ -24,7 +24,7 @@ export function NewSessionButton({ onClick, disabled }: NewSessionButtonProps) {
       `}
       title="New conversation"
     >
-      <Plus size={20} className="text-slate-600" />
+      <Plus size={24} className="text-slate-600" />
     </button>
   )
 }

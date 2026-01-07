@@ -132,20 +132,20 @@ export function QueryInput({
   }
 
   // Button size matches the pill height for seamless integration
-  const buttonSize = 44
+  const buttonSize = 52
 
   // Determine button state and icon
   const getButtonContent = () => {
     if (isProcessing) {
-      return <Loader2 size={20} className="text-slate-400 animate-spin" />
+      return <Loader2 size={24} className="text-slate-400 animate-spin" />
     }
     if (isRecording) {
-      return <Square size={16} className="text-white fill-white" />
+      return <Square size={18} className="text-white fill-white" />
     }
     if (hasText) {
-      return <Send size={18} className="text-white" />
+      return <Send size={22} className="text-white" />
     }
-    return <Mic size={20} className="text-slate-500" />
+    return <Mic size={24} className="text-slate-500" />
   }
 
   const getButtonStyle = () => {
@@ -167,7 +167,7 @@ export function QueryInput({
         transition-all duration-150
         ${isRecording ? 'ring-2 ring-red-500' : ''}
       `}
-      style={{ paddingLeft: 16, paddingRight: 4, paddingTop: 4, paddingBottom: 4 }}
+      style={{ paddingLeft: 20, paddingRight: 5, paddingTop: 5, paddingBottom: 5 }}
     >
       {/* Text input */}
       <input
@@ -180,7 +180,7 @@ export function QueryInput({
         disabled={isProcessing}
         className={`
           flex-1 bg-transparent text-slate-800 placeholder:text-slate-400
-          outline-none text-sm min-w-0
+          outline-none text-base min-w-0
           ${isRecording ? 'placeholder:text-red-400' : ''}
         `}
       />
