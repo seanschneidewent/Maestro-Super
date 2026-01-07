@@ -488,7 +488,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       )}
 
       {/* Toolbar - Single rectangle toggle button */}
-      <div className="absolute top-4 right-4 z-20 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
+      <div className="absolute top-4 right-4 z-40 glass rounded-xl p-1.5 toolbar-float animate-fade-in">
         <button
           onClick={() => setIsDrawingEnabled(!isDrawingEnabled)}
           className={`p-2.5 rounded-lg transition-all ${
