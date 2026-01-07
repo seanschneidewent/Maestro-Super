@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, ChevronRight, MessageSquare, FileText, Layers } from 'lucide-react'
+import { X, ChevronRight, MessageSquare, FileText, Layers, Trash2, Loader2 } from 'lucide-react'
 import { api, SessionResponse, SessionWithQueriesResponse, QueryResponse } from '../../lib/api'
 
 interface QueryHistoryPanelProps {
@@ -54,6 +54,14 @@ export function QueryHistoryPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Delete confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'session' | 'query';
+    id: string;
+    title: string;
+  } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Load sessions when panel opens
   useEffect(() => {
@@ -111,6 +119,57 @@ export function QueryHistoryPanel({
     onClose()
   }
 
+  // Delete a session (hard delete with cascade)
+  const handleDeleteSession = async (sessionId: string) => {
+    setIsDeleting(true)
+    try {
+      await api.sessions.delete(sessionId)
+      setSessions(prev => prev.filter(s => s.id !== sessionId))
+      if (expandedSessionId === sessionId) {
+        setExpandedSessionId(null)
+        setExpandedSessionData(null)
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err)
+    } finally {
+      setIsDeleting(false)
+      setDeleteTarget(null)
+    }
+  }
+
+  // Hide a query (soft delete)
+  const handleHideQuery = async (queryId: string) => {
+    setIsDeleting(true)
+    try {
+      await api.queries.hide(queryId)
+      if (expandedSessionData) {
+        const updatedQueries = expandedSessionData.queries.filter(q => q.id !== queryId)
+        setExpandedSessionData({ ...expandedSessionData, queries: updatedQueries })
+        // If no queries left, remove session from list
+        if (updatedQueries.length === 0) {
+          setSessions(prev => prev.filter(s => s.id !== expandedSessionData.id))
+          setExpandedSessionId(null)
+          setExpandedSessionData(null)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to hide query:', err)
+    } finally {
+      setIsDeleting(false)
+      setDeleteTarget(null)
+    }
+  }
+
+  // Confirm deletion
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return
+    if (deleteTarget.type === 'session') {
+      handleDeleteSession(deleteTarget.id)
+    } else {
+      handleHideQuery(deleteTarget.id)
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -152,34 +211,52 @@ export function QueryHistoryPanel({
               return (
                 <div key={session.id}>
                   {/* Session header */}
-                  <button
-                    onClick={() => handleExpandSession(session.id)}
+                  <div
                     className={`
-                      w-full px-4 py-3 text-left transition-colors
+                      w-full px-4 py-3 transition-colors group
                       ${isExpanded ? 'bg-cyan-50' : 'hover:bg-slate-50'}
                     `}
                   >
                     <div className="flex items-center gap-3">
-                      <ChevronRight
-                        size={16}
-                        className={`
-                          text-slate-400 transition-transform
-                          ${isExpanded ? 'rotate-90' : ''}
-                        `}
-                      />
-                      <Layers size={16} className="text-cyan-500" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-700 truncate">
-                          {isExpanded && expandedSessionData
-                            ? getSessionTitle(expandedSessionData)
-                            : (session.title || 'Session')}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {formatTimeAgo(session.createdAt)}
-                        </p>
-                      </div>
+                      <button
+                        onClick={() => handleExpandSession(session.id)}
+                        className="flex-1 flex items-center gap-3 text-left"
+                      >
+                        <ChevronRight
+                          size={16}
+                          className={`
+                            text-slate-400 transition-transform
+                            ${isExpanded ? 'rotate-90' : ''}
+                          `}
+                        />
+                        <Layers size={16} className="text-cyan-500" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">
+                            {isExpanded && expandedSessionData
+                              ? getSessionTitle(expandedSessionData)
+                              : (session.title || 'Session')}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {formatTimeAgo(session.createdAt)}
+                          </p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDeleteTarget({
+                            type: 'session',
+                            id: session.id,
+                            title: session.title || 'this session',
+                          })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
+                        title="Delete session"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  </button>
+                  </div>
 
                   {/* Expanded session content */}
                   {isExpanded && (
@@ -196,45 +273,63 @@ export function QueryHistoryPanel({
                             </div>
                           ) : (
                             expandedSessionData.queries.map((query, idx) => (
-                              <button
+                              <div
                                 key={query.id}
-                                onClick={() => handleRestoreQuery(query)}
-                                className="w-full px-4 py-3 text-left hover:bg-white transition-colors group"
+                                className="w-full px-4 py-3 hover:bg-white transition-colors group flex items-start"
                               >
-                                <div className="flex items-start gap-3 pl-6">
-                                  <div className="flex-shrink-0 mt-0.5">
-                                    <div className="w-5 h-5 rounded-full bg-cyan-100 flex items-center justify-center">
-                                      <span className="text-xs font-medium text-cyan-600">
-                                        {idx + 1}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-slate-700 leading-snug">
-                                      {query.displayTitle || truncateText(query.queryText, 50)}
-                                    </p>
-                                    {query.responseText && (
-                                      <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
-                                        {truncateText(query.responseText, 80)}
-                                      </p>
-                                    )}
-
-                                    {/* Page sequence */}
-                                    {query.pages && query.pages.length > 0 && (
-                                      <div className="flex items-center gap-1 mt-2">
-                                        <FileText size={12} className="text-slate-400" />
-                                        <span className="text-xs text-slate-400">
-                                          {query.pages.length} page{query.pages.length !== 1 ? 's' : ''}
+                                <button
+                                  onClick={() => handleRestoreQuery(query)}
+                                  className="flex-1 text-left"
+                                >
+                                  <div className="flex items-start gap-3 pl-6">
+                                    <div className="flex-shrink-0 mt-0.5">
+                                      <div className="w-5 h-5 rounded-full bg-cyan-100 flex items-center justify-center">
+                                        <span className="text-xs font-medium text-cyan-600">
+                                          {idx + 1}
                                         </span>
                                       </div>
-                                    )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-slate-700 leading-snug">
+                                        {query.displayTitle || truncateText(query.queryText, 50)}
+                                      </p>
+                                      {query.responseText && (
+                                        <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+                                          {truncateText(query.responseText, 80)}
+                                        </p>
+                                      )}
+
+                                      {/* Page sequence */}
+                                      {query.pages && query.pages.length > 0 && (
+                                        <div className="flex items-center gap-1 mt-2">
+                                          <FileText size={12} className="text-slate-400" />
+                                          <span className="text-xs text-slate-400">
+                                            {query.pages.length} page{query.pages.length !== 1 ? 's' : ''}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <MessageSquare
+                                      size={14}
+                                      className="text-slate-300 group-hover:text-cyan-500 transition-colors mt-1"
+                                    />
                                   </div>
-                                  <MessageSquare
-                                    size={14}
-                                    className="text-slate-300 group-hover:text-cyan-500 transition-colors mt-1"
-                                  />
-                                </div>
-                              </button>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDeleteTarget({
+                                      type: 'query',
+                                      id: query.id,
+                                      title: query.displayTitle || 'this query',
+                                    })
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all mt-1"
+                                  title="Delete query"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
                             ))
                           )}
                         </div>
@@ -251,6 +346,50 @@ export function QueryHistoryPanel({
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-full bg-red-500/20">
+                <Trash2 size={20} className="text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">
+                Delete {deleteTarget.type === 'session' ? 'Session' : 'Query'}
+              </h3>
+            </div>
+            <p className="text-slate-300 mb-6">
+              {deleteTarget.type === 'session'
+                ? `Delete "${deleteTarget.title}" and all its queries? This cannot be undone.`
+                : `Delete "${deleteTarget.title}"? This cannot be undone.`}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

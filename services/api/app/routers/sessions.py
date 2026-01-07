@@ -127,3 +127,29 @@ def get_session_with_queries(
         raise HTTPException(status_code=404, detail="Session not found")
 
     return session
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a session and all its queries (cascade)."""
+    session = (
+        db.query(SessionModel)
+        .filter(SessionModel.id == session_id)
+        .filter(SessionModel.user_id == user.id)
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    db.delete(session)
+    db.commit()
+
+    logger.info(f"Deleted session {session_id} for user {user.id}")

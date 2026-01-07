@@ -520,6 +520,8 @@ export const api = {
       request<SessionResponse>(`/projects/${projectId}/sessions`, { method: 'POST' }),
     get: (sessionId: string) =>
       request<SessionWithQueriesResponse>(`/sessions/${sessionId}`),
+    delete: (sessionId: string) =>
+      request<void>(`/sessions/${sessionId}`, { method: 'DELETE' }),
   },
 
   processing: {
