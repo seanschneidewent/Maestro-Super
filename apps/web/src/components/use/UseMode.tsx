@@ -8,14 +8,13 @@ import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import {
-  ActiveQueryBubble,
   QueryInput,
   SessionControls,
   useFieldStream,
   QueryHistoryPanel,
   AgentSelectedPage,
   NewSessionButton,
-  QueryStack,
+  QueryBubbleStack,
   CompletedQuery,
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
@@ -353,30 +352,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           </button>
         )}
 
-        {/* Query history stack - shows previous queries (not the active one) */}
-        {sessionQueries.length > 1 && (
-          <div className="absolute bottom-32 left-4 z-30">
-            <QueryStack
+        {/* Query bubble stack - unified list of all queries */}
+        {(isStreaming || sessionQueries.length > 0) && (
+          <div className="absolute bottom-20 left-4 z-30">
+            <QueryBubbleStack
               queries={sessionQueries}
               activeQueryId={activeQueryId}
               onSelectQuery={handleSelectQuery}
-            />
-          </div>
-        )}
-
-        {/* Active query bubble - shows streaming state, then transforms into completed response */}
-        {(isStreaming || sessionQueries.length > 0) && (
-          <div className="absolute bottom-20 left-4 z-30">
-            <ActiveQueryBubble
               isStreaming={isStreaming}
               thinkingText={thinkingText}
-              displayTitle={displayTitle}
-              finalAnswer={finalAnswer}
-              activeQuery={
-                activeQueryId
-                  ? sessionQueries.find(q => q.id === activeQueryId) ?? null
-                  : sessionQueries[sessionQueries.length - 1] ?? null
-              }
+              streamingDisplayTitle={displayTitle}
+              streamingFinalAnswer={finalAnswer}
             />
           </div>
         )}
