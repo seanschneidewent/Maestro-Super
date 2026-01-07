@@ -1,5 +1,6 @@
 """Pointer CRUD endpoints with AI analysis."""
 
+import asyncio
 import logging
 import uuid
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.dependencies import get_current_user
 from app.auth.schemas import User
-from app.database.session import get_db
+from app.database.session import get_db, SessionLocal
 from app.dependencies.rate_limit import check_rate_limit
 from app.models.discipline import Discipline
 from app.models.page import Page
@@ -29,6 +30,31 @@ from app.services.voyage import embed_pointer as generate_embedding
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["pointers"])
+
+
+async def _generate_embedding_background(
+    pointer_id: str,
+    title: str,
+    description: str,
+    text_spans: list[str],
+) -> None:
+    """Background task to generate embedding without blocking the response."""
+    try:
+        embedding = await generate_embedding(title, description, text_spans)
+
+        # Update pointer in a new DB session
+        db = SessionLocal()
+        try:
+            pointer = db.query(Pointer).filter(Pointer.id == pointer_id).first()
+            if pointer:
+                pointer.embedding = embedding
+                pointer.needs_embedding = False
+                db.commit()
+                logger.info(f"Background embedding completed for pointer {pointer_id}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Background embedding failed for {pointer_id}: {e}")
 
 
 def verify_page_exists(page_id: str, db: Session) -> Page:
@@ -179,20 +205,21 @@ async def create_pointer(
         UsageService.increment_pointers(db, user.id)
         UsageService.increment_request(db, user.id)
 
-        # 11. Generate embedding - graceful failure, flag for retry
-        try:
-            embedding = await generate_embedding(
+        # 11. Generate embedding in background (non-blocking for faster response)
+        # Pointer starts with needs_embedding=True, background task will update
+        pointer.needs_embedding = True
+        db.commit()
+
+        # Fire-and-forget: don't await, let it run in background
+        asyncio.create_task(
+            _generate_embedding_background(
+                pointer_id,
                 pointer.title,
                 pointer.description,
-                pointer.text_spans,
+                pointer.text_spans or [],
             )
-            pointer.embedding = embedding
-            db.commit()
-            logger.info(f"Generated embedding for pointer {pointer_id}")
-        except Exception as e:
-            logger.warning(f"Failed to generate embedding for {pointer_id}, flagging for retry: {e}")
-            pointer.needs_embedding = True
-            db.commit()
+        )
+        logger.info(f"Scheduled background embedding for pointer {pointer_id}")
 
         return PointerResponse.from_orm_with_embedding_check(pointer)
 

@@ -5,6 +5,7 @@ Supabase Storage service for file operations.
 import asyncio
 import logging
 
+from cachetools import TTLCache
 from supabase import create_client
 
 from app.config import get_settings
@@ -13,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 # Storage bucket name (matches frontend)
 BUCKET_NAME = "project-files"
+
+# PDF cache: stores downloaded PDFs for 5 minutes to avoid re-downloading
+# when creating multiple pointers on the same page
+_pdf_cache: TTLCache[str, bytes] = TTLCache(maxsize=50, ttl=300)
+_cache_lock = asyncio.Lock()
 
 
 def _get_supabase_client():
@@ -25,7 +31,10 @@ def _get_supabase_client():
 
 async def download_file(storage_path: str, timeout: float = 60.0) -> bytes:
     """
-    Download a file from Supabase Storage with timeout.
+    Download a file from Supabase Storage with timeout and caching.
+
+    Uses a TTL cache to avoid re-downloading the same file when creating
+    multiple pointers on the same page. Cache entries expire after 5 minutes.
 
     Args:
         storage_path: Path in Supabase Storage (e.g., "projects/abc-123/file.pdf")
@@ -37,22 +46,40 @@ async def download_file(storage_path: str, timeout: float = 60.0) -> bytes:
     Raises:
         TimeoutError: If download takes longer than timeout
     """
-    try:
-        supabase = _get_supabase_client()
-        # Run blocking Supabase call in thread pool with timeout
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                lambda: supabase.storage.from_(BUCKET_NAME).download(storage_path)
-            ),
-            timeout=timeout,
-        )
-        return response
-    except asyncio.TimeoutError:
-        logger.error(f"Download timed out after {timeout}s: {storage_path}")
-        raise TimeoutError(f"Download timed out after {timeout}s: {storage_path}")
-    except Exception as e:
-        logger.error(f"Failed to download file {storage_path}: {e}")
-        raise
+    # Check cache first (fast path)
+    if storage_path in _pdf_cache:
+        logger.info(f"PDF cache hit: {storage_path}")
+        return _pdf_cache[storage_path]
+
+    # Cache miss - download with lock to prevent duplicate downloads
+    async with _cache_lock:
+        # Double-check after acquiring lock (another request may have cached it)
+        if storage_path in _pdf_cache:
+            logger.info(f"PDF cache hit (after lock): {storage_path}")
+            return _pdf_cache[storage_path]
+
+        try:
+            logger.info(f"Downloading and caching: {storage_path}")
+            supabase = _get_supabase_client()
+            # Run blocking Supabase call in thread pool with timeout
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: supabase.storage.from_(BUCKET_NAME).download(storage_path)
+                ),
+                timeout=timeout,
+            )
+
+            # Cache the result
+            _pdf_cache[storage_path] = response
+            logger.info(f"Cached PDF ({len(response)} bytes): {storage_path}")
+
+            return response
+        except asyncio.TimeoutError:
+            logger.error(f"Download timed out after {timeout}s: {storage_path}")
+            raise TimeoutError(f"Download timed out after {timeout}s: {storage_path}")
+        except Exception as e:
+            logger.error(f"Failed to download file {storage_path}: {e}")
+            raise
 
 
 async def upload_pdf(
