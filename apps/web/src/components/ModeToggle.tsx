@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppMode } from '../types';
-import { Settings, Construction, LogOut } from 'lucide-react';
+import { BrainCircuit, Construction, LogOut } from 'lucide-react';
 
 interface ModeToggleProps {
   mode: AppMode;
@@ -27,7 +27,7 @@ export const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, variant =
               : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
         }`}
       >
-        <Settings size={14} /> Setup
+        <BrainCircuit size={14} /> Brain
       </button>
       <button
         onClick={() => setMode(AppMode.USE)}
@@ -41,7 +41,7 @@ export const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, variant =
               : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
         }`}
       >
-        <Construction size={14} /> Field
+        <Construction size={14} /> Agent
       </button>
       <div className={`w-px h-5 mx-0.5 ${isDark ? 'bg-white/10' : 'bg-slate-300'}`}></div>
       <button
