@@ -25,6 +25,9 @@ const App: React.FC = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [authTab, setAuthTab] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [project, setProject] = useState<Project | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
@@ -111,13 +114,30 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSignUp = async () => {
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (password !== confirmPassword) {
+      setAuthError('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthError('Password must be at least 6 characters');
+      return;
+    }
+
     setIsLoading(true);
     setAuthError(null);
 
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: name,
+        },
+      },
     });
 
     if (error) {
@@ -126,6 +146,15 @@ const App: React.FC = () => {
       setAuthError('Check your email for a confirmation link!');
     }
     setIsLoading(false);
+  };
+
+  const handleTabSwitch = (tab: 'signin' | 'signup') => {
+    setAuthTab(tab);
+    setEmail('');
+    setPassword('');
+    setName('');
+    setConfirmPassword('');
+    setAuthError(null);
   };
 
   // Show loading while checking auth
@@ -147,53 +176,102 @@ const App: React.FC = () => {
                     </h1>
                     <p className="text-slate-400 text-sm">Construction plan intelligence</p>
                 </div>
-                <form onSubmit={handleLogin} className="space-y-5">
+                {/* Tab Selector */}
+                <div className="flex mb-6 bg-slate-800/30 rounded-lg p-1">
+                    <button
+                        type="button"
+                        onClick={() => handleTabSwitch('signin')}
+                        className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
+                            authTab === 'signin'
+                                ? 'bg-slate-700 text-white'
+                                : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        Sign In
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleTabSwitch('signup')}
+                        className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
+                            authTab === 'signup'
+                                ? 'bg-slate-700 text-white'
+                                : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        Create Account
+                    </button>
+                </div>
+
+                <form onSubmit={authTab === 'signin' ? handleLogin : handleSignUp} className="space-y-5">
+                    {/* Name field - only for signup */}
+                    {authTab === 'signup' && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wider">Name</label>
+                            <input
+                                type="text"
+                                placeholder="John Smith"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
+                                required
+                            />
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wider">Email</label>
                         <input
-                          type="email"
-                          placeholder="super@site.com"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
-                          required
+                            type="email"
+                            placeholder="super@site.com"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
+                            required
                         />
                     </div>
+
                     <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wider">Password</label>
                         <input
-                          type="password"
-                          placeholder="••••••••"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
-                          required
+                            type="password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
+                            required
                         />
                     </div>
-                    {authError && (
-                      <p className={`text-sm ${authError.includes('Check your email') ? 'text-green-400' : 'text-red-400'}`}>
-                        {authError}
-                      </p>
+
+                    {/* Confirm password - only for signup */}
+                    {authTab === 'signup' && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wider">Confirm Password</label>
+                            <input
+                                type="password"
+                                placeholder="••••••••"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                className="w-full p-3.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:border-cyan-500/50 focus:bg-slate-800/70 transition-all"
+                                required
+                            />
+                        </div>
                     )}
-                    <div className="flex gap-3 mt-6">
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="flex-1 btn-primary text-white font-bold py-3.5 rounded-xl flex justify-center items-center"
-                        >
-                            {isLoading ? (
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : "Sign In"}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleSignUp}
-                            disabled={isLoading}
-                            className="flex-1 bg-slate-700/50 hover:bg-slate-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-all border border-slate-600/50"
-                        >
-                            Sign Up
-                        </button>
-                    </div>
+
+                    {authError && (
+                        <p className={`text-sm ${authError.includes('Check your email') ? 'text-green-400' : 'text-red-400'}`}>
+                            {authError}
+                        </p>
+                    )}
+
+                    <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="w-full btn-primary text-white font-bold py-3.5 rounded-xl flex justify-center items-center mt-6"
+                    >
+                        {isLoading ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : authTab === 'signin' ? 'Sign In' : 'Create Account'}
+                    </button>
                 </form>
                 <div className="mt-8 pt-6 border-t border-white/5 text-center">
                     <button
