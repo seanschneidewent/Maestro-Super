@@ -113,10 +113,23 @@ export function useCreatePointer(projectId: string) {
     onSuccess: (created, variables, context) => {
       if (!context) return;
 
-      // Replace temp pointer with real one in cache
-      queryClient.setQueryData<PointerResponse[]>(['pointers', context.pageId], (old = []) =>
-        old.map(p => p.id === context.tempId ? created : p)
-      );
+      // Robust replacement: handle both temp-exists and temp-missing cases
+      queryClient.setQueryData<PointerResponse[]>(['pointers', context.pageId], (old = []) => {
+        // Check if temp pointer still exists in cache
+        const hasTempPointer = old.some(p => p.id === context.tempId);
+
+        if (hasTempPointer) {
+          // Normal case: replace temp with real pointer
+          return old.map(p => p.id === context.tempId ? created : p);
+        }
+
+        // Temp pointer missing (page switched, cache refreshed, etc.)
+        // Add the real pointer if not already present
+        if (old.some(p => p.id === created.id)) {
+          return old; // Already exists, no change needed
+        }
+        return [...old, created];
+      });
 
       // Optimistically update hierarchy cache to include new pointer (instant UI update)
       const previousHierarchy = queryClient.getQueryData<ProjectHierarchy>(['hierarchy', projectId]);
