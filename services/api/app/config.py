@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # AI Services (for later phases)
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
+    openrouter_api_key: str | None = None  # For Kimi K2 query agent
     voyage_api_key: str | None = None
 
     # CORS - production frontend URL

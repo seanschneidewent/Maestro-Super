@@ -1,130 +1,157 @@
-"""Query agent for navigating construction plan graph with Claude."""
+"""Query agent for navigating construction plan graph with Kimi K2 via OpenRouter."""
 
 import json
 import logging
 from typing import Any, AsyncIterator
 
-import anthropic
+import openai
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Tool definitions in Anthropic format
-# Note: project_id is injected by execute_tool(), not exposed to Claude
+# Tool definitions in OpenAI format
+# Note: project_id is injected by execute_tool(), not exposed to the model
 TOOL_DEFINITIONS = [
     {
-        "name": "search_pointers",
-        "description": "Search for relevant pointers by keyword/semantic query. Use this to find starting points for investigation.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "discipline": {
-                    "type": "string",
-                    "description": "Optional discipline filter (e.g., 'Electrical', 'Mechanical')",
+        "type": "function",
+        "function": {
+            "name": "search_pointers",
+            "description": "Search for relevant pointers by keyword/semantic query. Use this to find starting points for investigation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "discipline": {
+                        "type": "string",
+                        "description": "Optional discipline filter (e.g., 'Electrical', 'Mechanical')",
+                    },
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
                 },
-                "limit": {"type": "integer", "description": "Max results (default 10)"},
+                "required": ["query"],
             },
-            "required": ["query"],
         },
     },
     {
-        "name": "get_pointer",
-        "description": "Get full details of a specific pointer including its description, text content, and references to other pages.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pointer_id": {"type": "string", "description": "Pointer UUID"}
+        "type": "function",
+        "function": {
+            "name": "get_pointer",
+            "description": "Get full details of a specific pointer including its description, text content, and references to other pages.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pointer_id": {"type": "string", "description": "Pointer UUID"}
+                },
+                "required": ["pointer_id"],
             },
-            "required": ["pointer_id"],
         },
     },
     {
-        "name": "get_page_context",
-        "description": "Get summary of a page and all pointers on it. Use to understand what's on a specific page.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "page_id": {"type": "string", "description": "Page UUID"}
+        "type": "function",
+        "function": {
+            "name": "get_page_context",
+            "description": "Get summary of a page and all pointers on it. Use to understand what's on a specific page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id": {"type": "string", "description": "Page UUID"}
+                },
+                "required": ["page_id"],
             },
-            "required": ["page_id"],
         },
     },
     {
-        "name": "get_discipline_overview",
-        "description": "Get high-level view of a discipline including all pages and cross-references to other disciplines.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "discipline_id": {"type": "string", "description": "Discipline UUID"}
+        "type": "function",
+        "function": {
+            "name": "get_discipline_overview",
+            "description": "Get high-level view of a discipline including all pages and cross-references to other disciplines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "discipline_id": {"type": "string", "description": "Discipline UUID"}
+                },
+                "required": ["discipline_id"],
             },
-            "required": ["discipline_id"],
         },
     },
     {
-        "name": "list_project_pages",
-        "description": "List all pages in the project organized by discipline. Use to understand project structure.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
+        "type": "function",
+        "function": {
+            "name": "list_project_pages",
+            "description": "List all pages in the project organized by discipline. Use to understand project structure.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
         },
     },
     {
-        "name": "get_references_to_page",
-        "description": "Find all pointers that reference a specific page (reverse lookup). Use to discover what points TO a page.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "page_id": {"type": "string", "description": "Page UUID"}
+        "type": "function",
+        "function": {
+            "name": "get_references_to_page",
+            "description": "Find all pointers that reference a specific page (reverse lookup). Use to discover what points TO a page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id": {"type": "string", "description": "Page UUID"}
+                },
+                "required": ["page_id"],
             },
-            "required": ["page_id"],
         },
     },
     {
-        "name": "select_pages",
-        "description": "Display specific pages in the plan viewer for the user to see. Use this when the user asks to see specific pages or when you want to show them relevant plan sheets. Pages will be displayed without any pointer highlighting.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "page_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of page UUIDs to display",
-                }
+        "type": "function",
+        "function": {
+            "name": "select_pages",
+            "description": "Display specific pages in the plan viewer for the user to see. Use this when the user asks to see specific pages or when you want to show them relevant plan sheets. Pages will be displayed without any pointer highlighting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of page UUIDs to display",
+                    }
+                },
+                "required": ["page_ids"],
             },
-            "required": ["page_ids"],
         },
     },
     {
-        "name": "select_pointers",
-        "description": "Highlight specific pointers on the plan viewer to show the user which areas of the plans are relevant to their query. This also displays the pages containing those pointers. Use when you want to highlight specific details on the plans.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pointer_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of pointer UUIDs to highlight",
-                }
+        "type": "function",
+        "function": {
+            "name": "select_pointers",
+            "description": "Highlight specific pointers on the plan viewer to show the user which areas of the plans are relevant to their query. This also displays the pages containing those pointers. Use when you want to highlight specific details on the plans.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pointer_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of pointer UUIDs to highlight",
+                    }
+                },
+                "required": ["pointer_ids"],
             },
-            "required": ["pointer_ids"],
         },
     },
     {
-        "name": "set_display_title",
-        "description": "Set a short title summarizing what the user asked about. Call this ONCE before your final answer. The title should be a 2-4 word noun phrase describing the topic (e.g., 'Electrical Panels', 'Kitchen Equipment', 'Fire Sprinkler Layout').",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "A 2-4 word noun phrase summarizing the query topic",
-                }
+        "type": "function",
+        "function": {
+            "name": "set_display_title",
+            "description": "Set a short title summarizing what the user asked about. Call this ONCE before your final answer. The title should be a 2-4 word noun phrase describing the topic (e.g., 'Electrical Panels', 'Kitchen Equipment', 'Fire Sprinkler Layout').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "A 2-4 word noun phrase summarizing the query topic",
+                    }
+                },
+                "required": ["title"],
             },
-            "required": ["title"],
         },
     },
 ]
@@ -211,10 +238,10 @@ async def run_agent_query(
     query: str,
 ) -> AsyncIterator[dict]:
     """
-    Execute agent query with streaming events.
+    Execute agent query with streaming events using Kimi K2 via OpenRouter.
 
     Yields events:
-    - {"type": "text", "content": "..."} - Claude's reasoning
+    - {"type": "text", "content": "..."} - Model's reasoning
     - {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
     - {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "..."} - Final event
@@ -225,13 +252,20 @@ async def run_agent_query(
         query: User's question
     """
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        yield {"type": "error", "message": "Anthropic API key not configured"}
+    if not settings.openrouter_api_key:
+        yield {"type": "error", "message": "OpenRouter API key not configured"}
         return
 
-    # Use AsyncAnthropic for proper async streaming
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": query}]
+    # Use OpenAI client with OpenRouter base URL
+    client = openai.AsyncOpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "user", "content": query},
+    ]
     trace: list[dict] = []
     total_input_tokens = 0
     total_output_tokens = 0
@@ -239,89 +273,131 @@ async def run_agent_query(
 
     try:
         while True:
-            # Stream response from Claude (async context manager)
-            async with client.messages.stream(
-                model="claude-sonnet-4-5-20250929",
+            # Stream response from Kimi K2
+            stream = await client.chat.completions.create(
+                model="moonshotai/kimi-k2",
                 max_tokens=4096,
-                system=AGENT_SYSTEM_PROMPT,
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
-            ) as stream:
-                # Stream text chunks as they arrive
-                current_text = ""
-                async for text in stream.text_stream:
-                    yield {"type": "text", "content": text}
-                    current_text += text
+                stream=True,
+            )
 
-                # Get final message for tool uses and usage stats
-                response = await stream.get_final_message()
+            # Collect streaming response
+            current_text = ""
+            tool_calls_data: dict[int, dict] = {}  # index -> {id, name, arguments}
 
-            # Track token usage
-            total_input_tokens += response.usage.input_tokens
-            total_output_tokens += response.usage.output_tokens
+            async for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if not choice:
+                    continue
+
+                delta = choice.delta
+
+                # Stream text content
+                if delta.content:
+                    yield {"type": "text", "content": delta.content}
+                    current_text += delta.content
+
+                # Accumulate tool calls (they come in chunks)
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {
+                                "id": tc.id or "",
+                                "name": tc.function.name if tc.function and tc.function.name else "",
+                                "arguments": "",
+                            }
+                        if tc.id:
+                            tool_calls_data[idx]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_data[idx]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_data[idx]["arguments"] += tc.function.arguments
+
+                # Track usage from final chunk
+                if chunk.usage:
+                    total_input_tokens += chunk.usage.prompt_tokens or 0
+                    total_output_tokens += chunk.usage.completion_tokens or 0
 
             # Add accumulated text to trace
             if current_text:
                 trace.append({"type": "reasoning", "content": current_text})
 
-            # Process tool use blocks
-            tool_uses = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    tool_uses.append(block)
-                    tool_name = block.name
-                    tool_input = block.input
-
-                    yield {"type": "tool_call", "tool": tool_name, "input": tool_input}
-                    trace.append(
-                        {"type": "tool_call", "tool": tool_name, "input": tool_input}
-                    )
-
-            # If no tool uses, we're done
-            if not tool_uses:
+            # If no tool calls, we're done
+            if not tool_calls_data:
                 break
 
-            # Execute tools and build tool results
+            # Process tool calls
+            tool_calls_list = []
+            for idx in sorted(tool_calls_data.keys()):
+                tc_data = tool_calls_data[idx]
+                tool_name = tc_data["name"]
+                try:
+                    tool_input = json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
+                except json.JSONDecodeError:
+                    tool_input = {}
+
+                tool_calls_list.append({
+                    "id": tc_data["id"],
+                    "name": tool_name,
+                    "input": tool_input,
+                })
+
+                yield {"type": "tool_call", "tool": tool_name, "input": tool_input}
+                trace.append({"type": "tool_call", "tool": tool_name, "input": tool_input})
+
+            # Execute tools and build results
             tool_results = []
-            for block in tool_uses:
+            assistant_tool_calls = []
+
+            for tc in tool_calls_list:
+                tool_name = tc["name"]
+                tool_input = tc["input"]
+                tool_id = tc["id"]
+
                 # Handle set_display_title specially - no DB access needed
-                if block.name == "set_display_title":
-                    title = block.input.get("title", "")
-                    # Truncate to 100 chars to match DB field
+                if tool_name == "set_display_title":
+                    title = tool_input.get("title", "")
                     display_title = title[:100] if title else None
                     result = {"success": True, "title": display_title}
                     logger.info(f"Display title set to: {display_title}")
                 else:
-                    result = await execute_tool(db, project_id, block.name, block.input)
+                    result = await execute_tool(db, project_id, tool_name, tool_input)
 
-                # Tool result content must be a JSON string
                 result_json = json.dumps(result)
 
-                yield {"type": "tool_result", "tool": block.name, "result": result}
-                trace.append(
-                    {"type": "tool_result", "tool": block.name, "result": result}
-                )
+                yield {"type": "tool_result", "tool": tool_name, "result": result}
+                trace.append({"type": "tool_result", "tool": tool_name, "result": result})
 
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result_json,  # String, not object
-                    }
-                )
+                # Build assistant tool_calls for message history
+                assistant_tool_calls.append({
+                    "id": tool_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(tool_input),
+                    },
+                })
 
-            # Add assistant message and tool results for next iteration
-            # Need to serialize content blocks for messages
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": [
-                        block.model_dump() if hasattr(block, "model_dump") else block
-                        for block in response.content
-                    ],
-                }
-            )
-            messages.append({"role": "user", "content": tool_results})
+                # Build tool result message
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "content": result_json,
+                })
+
+            # Add assistant message with tool calls
+            assistant_message: dict[str, Any] = {"role": "assistant"}
+            if current_text:
+                assistant_message["content"] = current_text
+            if assistant_tool_calls:
+                assistant_message["tool_calls"] = assistant_tool_calls
+            messages.append(assistant_message)
+
+            # Add tool results
+            messages.extend(tool_results)
 
         # Final response with trace, usage, and display title
         yield {
@@ -334,8 +410,8 @@ async def run_agent_query(
             "displayTitle": display_title,
         }
 
-    except anthropic.APIError as e:
-        logger.exception(f"Anthropic API error: {e}")
+    except openai.APIError as e:
+        logger.exception(f"OpenRouter API error: {e}")
         yield {"type": "error", "message": f"API error: {str(e)}"}
     except Exception as e:
         logger.exception(f"Agent error: {e}")

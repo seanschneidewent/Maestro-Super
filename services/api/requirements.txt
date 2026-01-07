@@ -21,6 +21,7 @@ httpx>=0.26.0
 
 # AI Services
 anthropic>=0.40.0
+openai>=1.0.0  # For Kimi K2 via OpenRouter
 google-genai>=1.0.0
 voyageai>=0.2.0
 
