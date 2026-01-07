@@ -25,6 +25,7 @@ class Project(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
     created_at: Mapped[datetime] = created_at_column()

@@ -7,6 +7,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth.dependencies import get_current_user
+from app.auth.schemas import User
 from app.database.session import get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
@@ -33,10 +35,11 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(
     data: ProjectCreate,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Project:
-    """Create a new project."""
-    project = Project(name=data.name)
+    """Create a new project for the current user."""
+    project = Project(user_id=user.id, name=data.name)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -45,19 +48,24 @@ def create_project(
 
 @router.get("", response_model=list[ProjectResponse])
 def list_projects(
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Project]:
-    """List all projects."""
-    return db.query(Project).all()
+    """List all projects for the current user."""
+    return db.query(Project).filter(Project.user_id == user.id).all()
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 def get_project(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Project:
-    """Get a specific project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
+    """Get a specific project owned by the current user."""
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -67,10 +75,14 @@ def get_project(
 def update_project(
     project_id: str,
     data: ProjectUpdate,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Project:
-    """Update a project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
+    """Update a project owned by the current user."""
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -86,10 +98,14 @@ def update_project(
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    """Delete a project and all related data (cascades)."""
-    project = db.query(Project).filter(Project.id == project_id).first()
+    """Delete a project owned by the current user (cascades to all related data)."""
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -100,6 +116,7 @@ def delete_project(
 @router.post("/upload", response_model=BulkUploadResponse, status_code=status.HTTP_201_CREATED)
 def bulk_upload(
     data: BulkUploadRequest,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -107,7 +124,7 @@ def bulk_upload(
     Files must already be uploaded to Supabase Storage.
     """
     # Create project
-    project = Project(name=data.project_name)
+    project = Project(user_id=user.id, name=data.project_name)
     db.add(project)
     db.flush()  # Get project ID without committing
 
@@ -169,13 +186,14 @@ def bulk_upload(
 @router.get("/{project_id}/full", response_model=BulkUploadResponse)
 def get_project_full(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Get a project with full hierarchy (disciplines and pages)."""
     project = (
         db.query(Project)
         .options(joinedload(Project.disciplines).joinedload(Discipline.pages))
-        .filter(Project.id == project_id)
+        .filter(Project.id == project_id, Project.user_id == user.id)
         .first()
     )
 
@@ -215,6 +233,7 @@ def get_project_full(
 @router.get("/{project_id}/hierarchy", response_model=ProjectHierarchyResponse)
 def get_project_hierarchy(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     """Get project with full hierarchy including pointers and processing states.
@@ -234,7 +253,7 @@ def get_project_hierarchy(
             .joinedload(Discipline.pages)
             .joinedload(Page.pointers)
         )
-        .filter(Project.id == project_id)
+        .filter(Project.id == project_id, Project.user_id == user.id)
         .first()
     )
 
@@ -281,6 +300,7 @@ def get_project_hierarchy(
 @router.post("/{project_id}/backfill-embeddings")
 async def backfill_embeddings(
     project_id: str,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Backfill embeddings for all pointers with null embedding.
@@ -288,8 +308,11 @@ async def backfill_embeddings(
     Processes all pointers in the project that don't have embeddings yet.
     Useful for existing pointers created before embedding was integrated.
     """
-    # Verify project exists
-    project = db.query(Project).filter(Project.id == project_id).first()
+    # Verify project exists and user owns it
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -330,6 +353,7 @@ async def search_project(
     q: str,
     discipline: str | None = None,
     limit: int = 10,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Search pointers in a project using hybrid keyword + vector search.
@@ -343,8 +367,11 @@ async def search_project(
     Returns:
         Search results with relevance scores
     """
-    # Verify project exists
-    project = db.query(Project).filter(Project.id == project_id).first()
+    # Verify project exists and user owns it
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
