@@ -87,11 +87,11 @@ export function QueryBubbleStack({
     return result
   }
 
-  const visibleQueries = isHistoryExpanded
-    ? sortedQueries
-    : getCollapsedQueries()
+  const collapsedQueries = getCollapsedQueries()
+  const visibleQueries = isHistoryExpanded ? sortedQueries : collapsedQueries
 
-  const hasMoreHistory = sortedQueries.length > visibleQueries.length
+  // Show expand/collapse toggle when there are more queries than the collapsed view shows
+  const hasMoreHistory = sortedQueries.length > collapsedQueries.length
 
   // Handle click on a query bubble
   const handleBubbleClick = (queryId: string) => {
