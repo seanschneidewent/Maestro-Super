@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     frontend_url: str | None = None  # Set to Vercel URL in production
 
     # Rate Limiting
-    max_requests_per_day: int = 100
+    max_requests_per_day: int = 1000
     max_tokens_per_day: int = 5000000  # 5 million
     max_pointers_per_project: int = 1000
 
