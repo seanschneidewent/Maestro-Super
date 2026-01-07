@@ -56,6 +56,7 @@ const App: React.FC = () => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
+        setProject(null); // Clear project to force re-fetch for new user
         setMode(AppMode.USE);
       } else if (event === 'SIGNED_OUT') {
         setMode(AppMode.LOGIN);
