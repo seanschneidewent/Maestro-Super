@@ -193,9 +193,11 @@ RESPONSE STYLE:
 - Be direct and concise - superintendents are busy
 - Don't list what a page "typically contains" - just confirm you found it
 
-REASONING:
-- Think through each step briefly
-- Note when you have enough information to answer"""
+THINKING OUT LOUD:
+- ALWAYS verbalize your reasoning before each tool call
+- Say what you're about to do: "Searching for electrical panels...", "Found 3 results, examining the first one...", "This references page E-2.1, let me check that..."
+- Keep status updates brief (1 sentence) but always present
+- This helps the user follow along with your investigation"""
 
 
 async def execute_tool(
