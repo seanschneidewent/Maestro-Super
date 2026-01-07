@@ -126,21 +126,45 @@ export function QueryBubbleStack({
         const isExpanded = query.id === expandedQueryId
         const responseText = query.responseText
 
+        // Non-active: small compact style
+        if (!isActive) {
+          return (
+            <button
+              key={query.id}
+              onClick={() => handleBubbleClick(query.id)}
+              className="
+                flex items-center gap-2 px-3 py-1.5
+                rounded-lg bg-white/80 backdrop-blur-sm
+                border border-slate-200/50
+                hover:bg-slate-50 hover:border-cyan-300 hover:shadow-sm
+                transition-all duration-200
+                text-left
+              "
+            >
+              <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center">
+                <span className="text-[10px] font-medium text-slate-500">
+                  {query.pages?.length ?? 0}
+                </span>
+              </div>
+              <span className="text-xs font-medium text-slate-600 truncate max-w-[200px]">
+                {getDisplayTitle(query)}
+              </span>
+            </button>
+          )
+        }
+
+        // Active: large expandable style
         return (
           <div
             key={query.id}
             className={`
-              bg-white/95 backdrop-blur-md border
+              bg-white/95 backdrop-blur-md border border-cyan-400 ring-2 ring-cyan-200/50
               rounded-2xl rounded-bl-sm shadow-lg
               transition-all duration-200
-              ${isActive
-                ? 'border-cyan-400 ring-2 ring-cyan-200/50'
-                : 'border-slate-200/50 hover:border-slate-300'
-              }
               ${isExpanded ? 'max-w-lg' : 'max-w-xs'}
             `}
           >
-            {/* Header - clickable */}
+            {/* Header - clickable to expand/collapse */}
             <button
               onClick={() => handleBubbleClick(query.id)}
               className="
@@ -149,40 +173,23 @@ export function QueryBubbleStack({
                 transition-colors duration-200
               "
             >
-              <div className={`
-                w-6 h-6 rounded-full flex items-center justify-center shadow-sm flex-shrink-0
-                ${isActive
-                  ? 'bg-gradient-to-br from-cyan-500 to-blue-500'
-                  : 'bg-slate-100'
-                }
-              `}>
-                {isActive ? (
-                  <MessageCircle size={12} className="text-white" />
-                ) : (
-                  <span className="text-[10px] font-medium text-slate-500">
-                    {query.pages?.length ?? 0}
-                  </span>
-                )}
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center shadow-sm flex-shrink-0">
+                <MessageCircle size={12} className="text-white" />
               </div>
-              <span className={`
-                flex-1 text-sm text-left truncate
-                ${isActive ? 'font-medium text-slate-700' : 'text-slate-600'}
-              `}>
+              <span className="flex-1 text-sm font-medium text-slate-700 text-left truncate">
                 {getDisplayTitle(query)}
               </span>
-              {isActive && (
-                <ChevronDown
-                  size={16}
-                  className={`
-                    text-slate-400 transition-transform duration-200 flex-shrink-0
-                    ${isExpanded ? 'rotate-180' : ''}
-                  `}
-                />
-              )}
+              <ChevronDown
+                size={16}
+                className={`
+                  text-slate-400 transition-transform duration-200 flex-shrink-0
+                  ${isExpanded ? 'rotate-180' : ''}
+                `}
+              />
             </button>
 
-            {/* Expanded response content - only for active + expanded */}
-            {isActive && isExpanded && responseText && (
+            {/* Expanded response content */}
+            {isExpanded && responseText && (
               <div className="px-4 pb-3 pt-1 border-t border-slate-100">
                 <div className="text-sm text-slate-700 leading-relaxed max-h-64 overflow-y-auto">
                   <ReactMarkdown
