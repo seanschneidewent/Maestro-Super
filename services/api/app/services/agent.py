@@ -392,6 +392,10 @@ async def run_agent_query(
                 # Handle set_display_title specially - no DB access needed
                 if tool_name == "set_display_title":
                     title = tool_input.get("title", "")
+                    # Clean up the title - strip leading colons, quotes, and whitespace
+                    # (Kimi K2 sometimes outputs `: "Title"` instead of just `Title`)
+                    if title:
+                        title = title.strip().lstrip(':').strip().strip('"').strip("'").strip()
                     display_title = title[:100] if title else None
                     result = {"success": True, "title": display_title}
                     logger.info(f"Display title set to: {display_title}")
