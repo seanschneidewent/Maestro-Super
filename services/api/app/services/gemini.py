@@ -100,7 +100,6 @@ async def analyze_page_pass_1(
 
 async def analyze_pointer(
     image_bytes: bytes,
-    ocr_spans: list[dict],
     page_context: str,
     all_page_names: list[str],
 ) -> dict:
@@ -109,7 +108,6 @@ async def analyze_pointer(
 
     Args:
         image_bytes: Cropped region PNG bytes
-        ocr_spans: OCR text with positions [{text, x, y, w, h, confidence}]
         page_context: Initial context from Pass 1
         all_page_names: List of all page names in project for reference matching
 
@@ -118,18 +116,12 @@ async def analyze_pointer(
         - title: short descriptive title
         - description: 1-2 paragraph description
         - references: [{target_page, justification}]
-        - text_spans: list of main text elements
+        - text_spans: list of extracted text elements
     """
     try:
         client = _get_gemini_client()
 
-        # Format OCR text for prompt
-        ocr_text = "\n".join([s["text"] for s in ocr_spans]) if ocr_spans else "(No text detected)"
-
         prompt = f"""Analyze this detail from a construction drawing.
-
-OCR-extracted text from this region:
-{ocr_text}
 
 Context about this page (from Pass 1 analysis):
 {page_context or "(No context available)"}
@@ -142,7 +134,7 @@ Tasks:
 3. Identify ALL references to other pages (e.g., "See S2.01", "Detail 3/A1.02", "Refer to Structural")
    - For each reference, provide the target page name and the text that justifies it
    - Only include references if the target page exists in the project list
-4. List the main text elements as individual spans
+4. Extract ALL visible text from the image as individual text spans
 
 Return JSON:
 {{
@@ -151,7 +143,7 @@ Return JSON:
   "references": [
     {{"target_page": "page_name", "justification": "the text mentioning this reference"}}
   ],
-  "text_spans": ["text1", "text2", "text3"]
+  "text_spans": ["all", "visible", "text", "elements"]
 }}"""
 
         response = client.models.generate_content(
@@ -180,7 +172,7 @@ Return JSON:
             "title": "Analysis Failed",
             "description": f"Unable to analyze this region. Error: {str(e)}",
             "references": [],
-            "text_spans": [s["text"] for s in ocr_spans] if ocr_spans else [],
+            "text_spans": [],
         }
 
 

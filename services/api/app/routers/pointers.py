@@ -21,7 +21,7 @@ from app.schemas.pointer import (
     PointerUpdate,
 )
 from app.services.gemini import analyze_pointer
-from app.services.ocr import crop_pdf_region, extract_text_with_positions
+from app.services.ocr import crop_pdf_region
 from app.services.storage import download_file, upload_snapshot
 from app.services.usage import UsageService
 from app.services.voyage import embed_pointer as generate_embedding
@@ -90,16 +90,7 @@ async def create_pointer(
             h_norm=bbox.height,
         )
 
-        # 4. Run Tesseract OCR - graceful failure
-        logger.info("Running Tesseract OCR")
-        try:
-            ocr_spans = extract_text_with_positions(cropped_png)
-            logger.info(f"OCR found {len(ocr_spans)} text spans")
-        except Exception as e:
-            logger.warning(f"OCR failed, continuing with empty spans: {e}")
-            ocr_spans = []
-
-        # 5. Get page context and all page names in project
+        # 4. Get page context and all page names in project
         page_context = page.initial_context or ""
 
         # Get all page names in the same project
@@ -117,12 +108,11 @@ async def create_pointer(
         all_page_names = [p.page_name for p in all_pages]
         logger.info(f"Project has {len(all_page_names)} pages for reference matching")
 
-        # 6. Analyze with Gemini - graceful failure
+        # 5. Analyze with Gemini - graceful failure
         logger.info("Sending to Gemini for analysis")
         try:
             analysis = await analyze_pointer(
                 cropped_png,
-                ocr_spans,
                 page_context,
                 all_page_names,
             )
@@ -136,7 +126,7 @@ async def create_pointer(
                 "references": [],
             }
 
-        # 7. Upload cropped PNG to Supabase
+        # 6. Upload cropped PNG to Supabase
         pointer_id = str(uuid.uuid4())
         png_path = await upload_snapshot(
             cropped_png,
@@ -145,14 +135,14 @@ async def create_pointer(
         )
         logger.info(f"Uploaded snapshot to {png_path}")
 
-        # 8. Create Pointer record
+        # 7. Create Pointer record
         pointer = Pointer(
             id=pointer_id,
             page_id=page_id,
             title=analysis["title"],
             description=analysis["description"],
             text_spans=analysis.get("text_spans", []),
-            ocr_data=ocr_spans,  # Full OCR data with word positions
+            ocr_data=None,  # OCR removed - Gemini extracts text directly
             bbox_x=bbox.x,
             bbox_y=bbox.y,
             bbox_width=bbox.width,
