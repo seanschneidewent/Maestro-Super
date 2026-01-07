@@ -349,17 +349,17 @@ export function QueryHistoryPanel({
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-full bg-red-500/20">
-                <Trash2 size={20} className="text-red-400" />
+              <div className="p-2 rounded-full bg-red-100">
+                <Trash2 size={20} className="text-red-500" />
               </div>
-              <h3 className="text-lg font-semibold text-white">
+              <h3 className="text-lg font-semibold text-slate-800">
                 Delete {deleteTarget.type === 'session' ? 'Session' : 'Query'}
               </h3>
             </div>
-            <p className="text-slate-300 mb-6">
+            <p className="text-slate-600 mb-6">
               {deleteTarget.type === 'session'
                 ? `Delete "${deleteTarget.title}" and all its queries? This cannot be undone.`
                 : `Delete "${deleteTarget.title}"? This cannot be undone.`}
@@ -368,7 +368,7 @@ export function QueryHistoryPanel({
               <button
                 onClick={() => setDeleteTarget(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition-all disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
