@@ -30,6 +30,7 @@ export interface CompletedQuery {
   displayTitle: string | null
   pages: AgentSelectedPage[]
   finalAnswer: string
+  trace: AgentTraceStep[]
 }
 
 interface UseFieldStreamOptions {
@@ -53,7 +54,7 @@ interface UseFieldStreamReturn {
   error: string | null
   reset: () => void
   abort: () => void
-  restore: (trace: AgentTraceStep[], finalAnswer: string, pages?: AgentSelectedPage[]) => void
+  restore: (trace: AgentTraceStep[], finalAnswer: string, displayTitle: string | null, pages?: AgentSelectedPage[]) => void
   loadPages: (pages: AgentSelectedPage[]) => void
 }
 
@@ -500,6 +501,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             displayTitle: eventDisplayTitle,
             pages: [...selectedPagesRef.current],
             finalAnswer: extractedAnswer,
+            trace: [...agentMessage.trace],
           })
         }
         break
@@ -530,11 +532,17 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setError(null)
   }, [abort])
 
-  const restore = useCallback((restoredTrace: AgentTraceStep[], restoredFinalAnswer: string, pages?: AgentSelectedPage[]) => {
+  const restore = useCallback((
+    restoredTrace: AgentTraceStep[],
+    restoredFinalAnswer: string,
+    restoredDisplayTitle: string | null,
+    pages?: AgentSelectedPage[]
+  ) => {
     abort()
     setIsStreaming(false)
     setThinkingText('')
     setFinalAnswer(restoredFinalAnswer)
+    setDisplayTitle(restoredDisplayTitle)
     setTrace(restoredTrace)
     setSelectedPages(pages || [])
     selectedPagesRef.current = pages || []

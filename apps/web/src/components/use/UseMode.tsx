@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages } from '../../types';
+import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
@@ -56,6 +56,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
   // Store full page data for each query so we can restore it
   const [queryPagesCache] = useState<Map<string, AgentSelectedPage[]>>(new Map());
+  // Store trace data for each query so we can restore thinking section
+  const [queryTraceCache] = useState<Map<string, AgentTraceStep[]>>(new Map());
 
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
@@ -75,12 +77,13 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       createdAt: new Date().toISOString(),
     };
 
-    // Cache the full page data for restoration
+    // Cache the full page data and trace for restoration
     queryPagesCache.set(query.queryId, query.pages);
+    queryTraceCache.set(query.queryId, query.trace);
 
     setSessionQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [currentSession?.id, sessionQueries.length, queryPagesCache]);
+  }, [currentSession?.id, sessionQueries.length, queryPagesCache, queryTraceCache]);
 
   // Field stream hook
   const {
@@ -130,9 +133,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       createdAt: q.createdAt,
     }));
 
-    // Cache pages for all queries in the session
+    // Cache pages and traces for all queries in the session
     queryPagesCache.clear();
+    queryTraceCache.clear();
     for (const q of queries) {
+      // Cache pages
       if (q.pages && q.pages.length > 0) {
         const queryPages: AgentSelectedPage[] = q.pages
           .sort((a, b) => a.pageOrder - b.pageOrder)
@@ -152,6 +157,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
           }));
         queryPagesCache.set(q.id, queryPages);
       }
+      // Cache trace
+      if (q.trace && q.trace.length > 0) {
+        queryTraceCache.set(q.id, q.trace as AgentTraceStep[]);
+      }
     }
 
     // Update state
@@ -163,16 +172,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSubmittedQuery(selectedQuery?.queryText ?? null);
     setIsQueryExpanded(false);
 
-    // Reset stream state BEFORE loading pages (resetStream clears selectedPages)
-    resetStream();
+    // Restore stream state with full query data (trace, response, pages)
     setQueryInput('');
     setShowHistory(false);
 
-    // Load pages for the selected query from cache (must be AFTER resetStream)
     const cachedPages = queryPagesCache.get(selectedQueryId);
-    if (cachedPages) {
-      loadPages(cachedPages);
-    }
+    restore(
+      (selectedQuery?.trace || []) as AgentTraceStep[],
+      selectedQuery?.responseText || '',
+      selectedQuery?.displayTitle || null,
+      cachedPages
+    );
   };
 
   // Handle visible page change from scrolling in multi-page mode
@@ -207,6 +217,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
+    queryTraceCache.clear();
 
     // Set sidebar highlighting
     setSelectedPageId(pageId);
@@ -258,6 +269,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
+    queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
   };
 
@@ -270,12 +282,16 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setSubmittedQuery(query.queryText);
     setIsQueryExpanded(false);
 
-    // Restore pages from cache
+    // Restore full query data (trace, response, pages) from cache
     const cachedPages = queryPagesCache.get(queryId);
-    if (cachedPages) {
-      loadPages(cachedPages);
-    }
-  }, [sessionQueries, queryPagesCache, loadPages]);
+    const cachedTrace = queryTraceCache.get(queryId);
+    restore(
+      cachedTrace || [],
+      query.responseText || '',
+      query.displayTitle || null,
+      cachedPages
+    );
+  }, [sessionQueries, queryPagesCache, queryTraceCache, restore]);
 
 
   // Handle navigation from thinking section
