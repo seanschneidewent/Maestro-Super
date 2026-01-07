@@ -422,6 +422,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
           // Signal to scroll/center on the new pointer
           setFocusPointerId(created.id);
+
+          // Refresh hierarchy to update file tree pointer counts
+          setHierarchyRefresh(h => h + 1);
         },
       });
 

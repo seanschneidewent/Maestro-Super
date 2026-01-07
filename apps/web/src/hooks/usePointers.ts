@@ -118,7 +118,23 @@ export function useCreatePointer(projectId: string) {
         old.map(p => p.id === context.tempId ? created : p)
       );
 
-      // Invalidate hierarchy to update pointer counts in tree/mindmap
+      // Optimistically update hierarchy cache to include new pointer (instant UI update)
+      const previousHierarchy = queryClient.getQueryData<ProjectHierarchy>(['hierarchy', projectId]);
+      if (previousHierarchy) {
+        queryClient.setQueryData<ProjectHierarchy>(['hierarchy', projectId], {
+          ...previousHierarchy,
+          disciplines: previousHierarchy.disciplines.map(d => ({
+            ...d,
+            pages: d.pages.map(p => p.id === variables.pageId ? {
+              ...p,
+              pointerCount: p.pointerCount + 1,
+              pointers: [...p.pointers, { id: created.id, title: created.title }],
+            } : p),
+          })),
+        });
+      }
+
+      // Still invalidate to ensure consistency with backend (will refetch in background)
       queryClient.invalidateQueries({ queryKey: ['hierarchy', projectId] });
 
       // Call success callback if provided (for auto-expand, focus, etc.)
