@@ -26,6 +26,81 @@ from app.schemas.tools import (
 from app.services.search import search_pointers  # Re-export existing search
 
 
+async def search_pages(
+    db: Session,
+    query: str,
+    project_id: str,
+    discipline: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Search pages by name or context content.
+
+    Args:
+        db: Database session
+        query: Search query (matches page_name, initial_context, full_context)
+        project_id: Project UUID
+        discipline: Optional discipline filter (e.g., "Electrical")
+        limit: Max results (default 10)
+
+    Returns:
+        List of matching pages with id, name, discipline, and context snippet
+    """
+    from sqlalchemy import or_, func
+
+    # Build base query
+    base_query = (
+        db.query(Page)
+        .join(Page.discipline)
+        .join(Discipline.project)
+        .filter(Project.id == project_id)
+    )
+
+    # Add discipline filter if provided
+    if discipline:
+        base_query = base_query.filter(
+            func.lower(Discipline.display_name).contains(discipline.lower())
+        )
+
+    # Search in page_name, initial_context, and full_context
+    search_pattern = f"%{query}%"
+    base_query = base_query.filter(
+        or_(
+            Page.page_name.ilike(search_pattern),
+            Page.initial_context.ilike(search_pattern),
+            Page.full_context.ilike(search_pattern),
+        )
+    )
+
+    pages = base_query.limit(limit).all()
+
+    results = []
+    for page in pages:
+        # Find a relevant snippet from context
+        context = page.full_context or page.initial_context or ""
+        snippet = ""
+        if context:
+            # Try to find the query term and extract surrounding text
+            lower_context = context.lower()
+            lower_query = query.lower()
+            idx = lower_context.find(lower_query)
+            if idx >= 0:
+                start = max(0, idx - 50)
+                end = min(len(context), idx + len(query) + 100)
+                snippet = ("..." if start > 0 else "") + context[start:end] + ("..." if end < len(context) else "")
+            else:
+                snippet = context[:150] + "..." if len(context) > 150 else context
+
+        results.append({
+            "page_id": str(page.id),
+            "page_name": page.page_name,
+            "discipline": page.discipline.display_name,
+            "context_snippet": snippet,
+        })
+
+    return results
+
+
 async def get_pointer(db: Session, pointer_id: str) -> PointerDetail | None:
     """
     Get full pointer data including references.
@@ -335,6 +410,7 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
 # All tools take (db: Session, ...) as first argument and are async
 TOOL_REGISTRY: dict[str, Callable] = {
     "search_pointers": search_pointers,
+    "search_pages": search_pages,
     "get_pointer": get_pointer,
     "get_page_context": get_page_context,
     "get_discipline_overview": get_discipline_overview,

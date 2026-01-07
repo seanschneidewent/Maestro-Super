@@ -18,11 +18,30 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_pointers",
-            "description": "Search for relevant pointers by keyword/semantic query. Use this to find starting points for investigation.",
+            "description": "Search for relevant pointers (detailed annotations on pages) by keyword/semantic query. Returns pointers with their page info. Use this to find specific details, callouts, or annotations.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
+                    "discipline": {
+                        "type": "string",
+                        "description": "Optional discipline filter (e.g., 'Electrical', 'Mechanical')",
+                    },
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_pages",
+            "description": "Search for pages/sheets by name or content. Use this to find specific sheets (e.g., 'E-2.1', 'panel schedule') or pages containing certain content. Returns page names with context snippets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (matches page name or context)"},
                     "discipline": {
                         "type": "string",
                         "description": "Optional discipline filter (e.g., 'Electrical', 'Mechanical')",
@@ -159,7 +178,8 @@ TOOL_DEFINITIONS = [
 AGENT_SYSTEM_PROMPT = """You are a construction plan analysis agent. You help superintendents find information across construction documents by navigating a graph of pages and details (pointers).
 
 You have access to these tools:
-- search_pointers: Find relevant starting points by keyword/semantic search
+- search_pointers: Find relevant pointers (annotations/details) by keyword/semantic search
+- search_pages: Find pages/sheets by name or content (e.g., "E-2.1", "panel schedule")
 - get_pointer: Get full details of a specific pointer including references to other pages
 - get_page_context: Get summary of a page and all pointers on it
 - get_discipline_overview: Get high-level view of a discipline (architectural, structural, etc.)
@@ -215,7 +235,7 @@ async def execute_tool(
 
     try:
         # Inject project_id for tools that need it
-        if tool_name == "search_pointers":
+        if tool_name in ("search_pointers", "search_pages"):
             result = await tool_fn(db, project_id=project_id, **tool_input)
         elif tool_name == "list_project_pages":
             result = await tool_fn(db, project_id=project_id)
