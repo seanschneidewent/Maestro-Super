@@ -70,7 +70,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
-  const fileLoadAbortRef = useRef<AbortController | null>(null);
   // Pipeline progress with 2 progress bars (upload + PNG rendering)
   const [uploadProgress, setUploadProgress] = useState<{
     upload: { current: number; total: number };
@@ -252,83 +251,58 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   // Fetch file from storage when page is selected
   useEffect(() => {
-    // Cancel any in-flight request to prevent race conditions
-    fileLoadAbortRef.current?.abort();
-    fileLoadAbortRef.current = new AbortController();
-    const signal = fileLoadAbortRef.current.signal;
-
     if (!selectedFile || selectedFile.file || selectedFile.type === FileType.FOLDER) {
       setFileLoadError(null);
       setIsLoadingFile(false);
       return;
     }
 
-    // Capture the current file ID to detect stale updates
-    const currentFileId = selectedFile.id;
-    const currentFileName = selectedFile.name;
-    const currentStoragePath = selectedFile.storagePath;
-
     async function fetchFile() {
       try {
         setIsLoadingFile(true);
         setFileLoadError(null);
 
-        // Check if aborted before proceeding
-        if (signal.aborted) return;
-
         // First check if we have it in local memory (from current session upload)
-        const localFile = localFileMapRef.current.get(currentFileId);
+        const localFile = localFileMapRef.current.get(selectedFile.id);
         if (localFile) {
-          // Guard: only update if still the current selection
-          setSelectedFile(prev => prev?.id === currentFileId ? { ...prev, file: localFile } : prev);
-          setUploadedFiles(prev => updateFileInTree(prev, currentFileId, { file: localFile }));
+          // Update the selectedFile with the File object
+          setSelectedFile(prev => prev ? { ...prev, file: localFile } : null);
+
+          // Also update in the tree
+          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file: localFile }));
           setIsLoadingFile(false);
           return;
         }
 
-        if (signal.aborted) return;
-
         // Otherwise, try to fetch from storage (for previously uploaded files)
         // Use the storagePath from the ProjectFile if available, or fetch page info
-        let storagePath = currentStoragePath;
+        let storagePath = selectedFile.storagePath;
         if (!storagePath) {
-          const pageInfo = await api.pages.get(currentFileId);
-          if (signal.aborted) return;
+          const pageInfo = await api.pages.get(selectedFile.id);
           storagePath = pageInfo.filePath;
         }
 
-        if (signal.aborted) return;
-
         if (storagePath) {
           const blob = await downloadFile(storagePath);
-          if (signal.aborted) return;
+          const file = blobToFile(blob, selectedFile.name);
 
-          const file = blobToFile(blob, currentFileName);
+          // Update the selectedFile with the File object
+          setSelectedFile(prev => prev ? { ...prev, file, storagePath } : null);
 
-          // Guard: only update if still the current selection
-          setSelectedFile(prev => prev?.id === currentFileId ? { ...prev, file, storagePath } : prev);
-          setUploadedFiles(prev => updateFileInTree(prev, currentFileId, { file, storagePath }));
+          // Also update in the tree
+          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file, storagePath }));
         } else {
-          if (signal.aborted) return;
           // Page exists in DB but not uploaded to storage
           setFileLoadError('File not found in cloud storage. This may happen if the browser was refreshed during upload. Please re-upload the file.');
         }
       } catch (err) {
-        if (signal.aborted) return;
         console.error('Failed to fetch file:', err);
         setFileLoadError('Failed to load file. Please try again.');
       } finally {
-        if (!signal.aborted) {
-          setIsLoadingFile(false);
-        }
+        setIsLoadingFile(false);
       }
     }
     fetchFile();
-
-    // Cleanup: abort on unmount or when effect re-runs
-    return () => {
-      fileLoadAbortRef.current?.abort();
-    };
   }, [selectedFile?.id]);
 
   // Helper to update a file in the tree structure
