@@ -223,10 +223,16 @@ DON'T:
 - List things formally: "These are: K-212, K-201, K-211" ❌
 - Repeat what the user asked for: "You asked about equipment floor plans and I found equipment floor plans" ❌
 
-THINKING OUT LOUD:
-- ALWAYS verbalize your reasoning before each tool call
-- Keep it casual: "Let me check the kitchen sheets...", "Found a few options, looking at the first one...", "This references E-2.1, checking that..."
-- Brief status updates help the user follow along"""
+THINKING OUT LOUD (during tool calls only):
+- Verbalize your reasoning BEFORE each tool call: "Let me check the kitchen sheets...", "Found a few options, looking at the first one..."
+- Brief status updates help the user follow along
+
+FINAL ANSWER (after all tools are done):
+- Jump straight into your response - NO preamble, NO reasoning, NO "let me now..."
+- Your final answer should start with the actual information, not with what you're about to do
+- WRONG: "Good, I found the pages. Now let me give you a brief answer. K-201 is your overview..."
+- RIGHT: "K-201 is your overview, with K-211 and K-212 showing the enlarged sections."
+- The user sees your tool calls, so don't narrate what just happened"""
 
 
 async def execute_tool(
