@@ -275,9 +275,9 @@ async def run_agent_query(
 
     try:
         while True:
-            # Stream response from Kimi K2
+            # Stream response from Kimi K2 Thinking (with native reasoning)
             stream = await client.chat.completions.create(
-                model="moonshotai/kimi-k2",
+                model="moonshotai/kimi-k2-thinking",
                 max_tokens=4096,
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
@@ -286,6 +286,7 @@ async def run_agent_query(
 
             # Collect streaming response
             current_text = ""
+            current_reasoning = ""
             tool_calls_data: dict[int, dict] = {}  # index -> {id, name, arguments}
 
             async for chunk in stream:
@@ -295,7 +296,14 @@ async def run_agent_query(
 
                 delta = choice.delta
 
-                # Stream text content
+                # Stream native reasoning from Kimi K2 Thinking
+                if hasattr(delta, 'model_extra') and delta.model_extra:
+                    reasoning = delta.model_extra.get('reasoning')
+                    if reasoning:
+                        yield {"type": "text", "content": reasoning}
+                        current_reasoning += reasoning
+
+                # Stream text content (final answer)
                 if delta.content:
                     yield {"type": "text", "content": delta.content}
                     current_text += delta.content
@@ -323,9 +331,11 @@ async def run_agent_query(
                     total_input_tokens += chunk.usage.prompt_tokens or 0
                     total_output_tokens += chunk.usage.completion_tokens or 0
 
-            # Add accumulated text to trace
+            # Add accumulated reasoning and text to trace
+            if current_reasoning:
+                trace.append({"type": "reasoning", "content": current_reasoning})
             if current_text:
-                trace.append({"type": "reasoning", "content": current_text})
+                trace.append({"type": "response", "content": current_text})
 
             # If no tool calls, we're done
             if not tool_calls_data:
@@ -392,8 +402,10 @@ async def run_agent_query(
 
             # Add assistant message with tool calls
             assistant_message: dict[str, Any] = {"role": "assistant"}
-            if current_text:
-                assistant_message["content"] = current_text
+            # Combine reasoning and content for message history
+            combined_content = current_reasoning + current_text
+            if combined_content:
+                assistant_message["content"] = combined_content
             if assistant_tool_calls:
                 assistant_message["tool_calls"] = assistant_tool_calls
             messages.append(assistant_message)
