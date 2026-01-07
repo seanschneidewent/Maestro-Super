@@ -34,16 +34,16 @@ const WELCOME_GREETINGS = [
   "What do you need to see?",
   "Where should we look?",
   "What are we solving today?",
-  "I'm ready - ask away",
-  "Go ahead, I'm listening",
-  "Fire away",
+  "I'm ready - ask away.",
+  "Go ahead, I'm listening.",
+  "Fire away.",
   "What are we hunting for?",
-  "Point me at a problem",
-  "Let's find it",
+  "Point me at a problem.",
+  "Let's find it.",
   "I've got the plans - what do you need?",
-  "Ask me to pull something up",
-  "Tell me what you're working on",
-  "Ready when you are",
+  "Ask me to pull something up.",
+  "Tell me what you're working on.",
+  "Ready when you are.",
   "What can I help you find?",
 ];
 
@@ -370,7 +370,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // =====================================
   return (
     <div className="flex-1 flex items-center justify-center h-full bg-slate-100">
-      <p className="text-slate-500 text-lg">{greeting}</p>
+      <p className="text-black text-2xl">{greeting}</p>
     </div>
   );
 };
