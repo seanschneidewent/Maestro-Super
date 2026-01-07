@@ -111,13 +111,13 @@ export function QueryBubbleStack({
   }
 
   return (
-    <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div className="flex flex-col items-start gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
       {/* "See all" toggle at top when collapsed with hidden items */}
       {!isHistoryExpanded && hasMoreHistory && (
         <button
           onClick={() => setIsHistoryExpanded(true)}
           className="
-            flex items-center gap-1.5 px-3 py-1.5
+            w-fit flex items-center gap-1.5 px-3 py-1.5
             rounded-lg bg-slate-100/80 backdrop-blur-sm
             border border-slate-200/50
             hover:bg-slate-200/80 hover:border-slate-300
@@ -136,7 +136,7 @@ export function QueryBubbleStack({
         <button
           onClick={() => setIsHistoryExpanded(false)}
           className="
-            flex items-center gap-1.5 px-3 py-1.5
+            w-fit flex items-center gap-1.5 px-3 py-1.5
             rounded-lg bg-slate-100/80 backdrop-blur-sm
             border border-slate-200/50
             hover:bg-slate-200/80 hover:border-slate-300
@@ -163,7 +163,7 @@ export function QueryBubbleStack({
               key={query.id}
               onClick={() => handleBubbleClick(query.id)}
               className="
-                flex items-center gap-2 px-3 py-1.5
+                w-fit flex items-center gap-2 px-3 py-1.5
                 rounded-lg bg-white/80 backdrop-blur-sm
                 border border-slate-200/50
                 hover:bg-slate-50 hover:border-cyan-300 hover:shadow-sm
