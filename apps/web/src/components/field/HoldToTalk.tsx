@@ -161,9 +161,9 @@ export function QueryInput({
       className={`
         flex items-center
         bg-white/90 backdrop-blur-md
-        border border-slate-200/50
+        border border-cyan-300/40
         rounded-full
-        shadow-lg
+        shadow-glow-cyan animate-glow-pulse
         transition-all duration-150
         ${isRecording ? 'ring-2 ring-red-500' : ''}
       `}
