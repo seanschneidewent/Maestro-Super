@@ -233,7 +233,14 @@ FINAL ANSWER (after all tools are done):
 - Your final answer should start with the actual information, not with what you're about to do
 - WRONG: "Good, I found the pages. Now let me give you a brief answer. K-201 is your overview..."
 - RIGHT: "K-201 is your overview, with K-211 and K-212 showing the enlarged sections."
-- The user sees your tool calls, so don't narrate what just happened"""
+- The user sees your tool calls, so don't narrate what just happened
+
+CONVERSATION CONTEXT:
+If there are previous messages in this conversation, use that context to:
+- Understand pronouns and references (e.g., "those panels", "the second one", "what about floor 2?")
+- Avoid repeating searches you've already done unless the user asks for fresh results
+- Build on previous findings rather than starting from scratch
+- Remember what pages/pointers you've already shown"""
 
 
 async def execute_tool(
@@ -274,6 +281,7 @@ async def run_agent_query(
     db: Session,
     project_id: str,
     query: str,
+    history_messages: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
@@ -302,8 +310,15 @@ async def run_agent_query(
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-        {"role": "user", "content": query},
     ]
+
+    # Add history messages if this is a multi-turn conversation
+    if history_messages:
+        messages.extend(history_messages)
+        logger.info(f"Added {len(history_messages)} history messages to conversation")
+
+    # Add current user query
+    messages.append({"role": "user", "content": query})
     trace: list[dict] = []
     total_input_tokens = 0
     total_output_tokens = 0

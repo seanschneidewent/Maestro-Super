@@ -17,6 +17,7 @@ from app.models.query_page import QueryPage
 from app.models.session import Session as SessionModel
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
+from app.services.session_memory import fetch_session_history
 from app.services.usage import UsageService
 
 logger = logging.getLogger(__name__)
@@ -255,6 +256,19 @@ async def stream_query(
     # Increment request count
     UsageService.increment_request(db, user.id)
 
+    # Fetch session history for multi-turn conversations
+    history_messages: list[dict] = []
+    if session_id:
+        try:
+            history_messages = fetch_session_history(
+                db=db,
+                session_id=session_id,
+                exclude_query_id=query_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load session history: {e}")
+            # Continue without history - don't fail the query
+
     async def event_generator():
         total_tokens = 0
         response_text = ""
@@ -262,7 +276,9 @@ async def stream_query(
         referenced_pointers = []
         stored_trace = []
         try:
-            async for event in run_agent_query(db, project_id, data.query):
+            async for event in run_agent_query(
+                db, project_id, data.query, history_messages=history_messages
+            ):
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
                     usage = event.get("usage", {})
