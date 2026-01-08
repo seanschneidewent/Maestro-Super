@@ -23,16 +23,19 @@ import { useSession } from '../../hooks/useSession';
 
 /**
  * Extract final answer text from the query trace.
- * Collects reasoning content after the last tool_result.
+ * Looks for 'response' type step (old format) or 'reasoning' after last tool_result (new format).
  */
 function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): string {
   if (!trace || trace.length === 0) return '';
 
-  // Debug: log trace structure
-  console.log('[extractFinalAnswer] Trace types:', trace.map(s => s.type));
-  console.log('[extractFinalAnswer] Last 3 steps:', trace.slice(-3).map(s => ({ type: s.type, hasContent: !!s.content, contentPreview: s.content?.slice(0, 50) })));
+  // First, check for 'response' type step (contains the final answer directly)
+  for (const step of trace) {
+    if (step.type === 'response' && step.content) {
+      return step.content;
+    }
+  }
 
-  // Find index of last tool_result
+  // Fallback: collect reasoning content after last tool_result (new format)
   let lastToolResultIdx = -1;
   for (let i = trace.length - 1; i >= 0; i--) {
     if (trace[i].type === 'tool_result') {
@@ -41,9 +44,6 @@ function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): strin
     }
   }
 
-  console.log('[extractFinalAnswer] lastToolResultIdx:', lastToolResultIdx, 'trace.length:', trace.length);
-
-  // Collect reasoning content after last tool_result
   const parts: string[] = [];
   for (let i = lastToolResultIdx + 1; i < trace.length; i++) {
     const step = trace[i];
@@ -52,7 +52,6 @@ function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): strin
     }
   }
 
-  console.log('[extractFinalAnswer] Extracted parts count:', parts.length);
   return parts.join('');
 }
 

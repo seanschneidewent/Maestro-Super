@@ -325,7 +325,7 @@ export interface PointerResponse {
 
 // Query types (matching backend schema)
 export interface QueryTraceStep {
-  type: 'reasoning' | 'tool_call' | 'tool_result';
+  type: 'reasoning' | 'tool_call' | 'tool_result' | 'response';
   content?: string;
   tool?: string;
   input?: Record<string, unknown>;
