@@ -95,9 +95,12 @@ export function QueryBubbleStack({
 
   // Handle click on a query bubble
   const handleBubbleClick = (queryId: string) => {
+    console.log('[QueryBubbleStack] Click:', queryId, 'activeQueryId:', activeQueryId, 'expandedQueryId:', expandedQueryId)
     if (activeQueryId === queryId) {
       // Already active - toggle expand
-      setExpandedQueryId(expandedQueryId === queryId ? null : queryId)
+      const newExpanded = expandedQueryId === queryId ? null : queryId
+      console.log('[QueryBubbleStack] Setting expandedQueryId to:', newExpanded)
+      setExpandedQueryId(newExpanded)
     } else {
       // Not active - select it (collapse any expanded)
       setExpandedQueryId(null)
@@ -156,6 +159,9 @@ export function QueryBubbleStack({
         const isExpanded = query.id === expandedQueryId
         // For active query, prefer streamingFinalAnswer (set by restore) over stored responseText
         const responseText = isActive ? (streamingFinalAnswer || query.responseText) : query.responseText
+        if (isActive) {
+          console.log('[QueryBubbleStack] Active query render:', query.id, 'isExpanded:', isExpanded, 'streamingFinalAnswer:', streamingFinalAnswer?.slice(0, 50), 'query.responseText:', query.responseText?.slice(0, 50), 'responseText:', responseText?.slice(0, 50))
+        }
 
         // Non-active: small compact style
         if (!isActive) {
