@@ -176,21 +176,29 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     const checkPreRendered = async () => {
       try {
         const pageData = await api.pages.get(fileId);
+        console.log('[PdfViewer] Page data:', fileId, {
+          pageImageReady: pageData.pageImageReady,
+          pageImagePath: pageData.pageImagePath,
+          filePath: pageData.filePath,
+        });
+
         if (pageData.pageImageReady && pageData.pageImagePath) {
           // Use pre-rendered PNG
           const url = getPublicUrl(pageData.pageImagePath);
+          console.log('[PdfViewer] Using pre-rendered PNG:', url);
           setPreRenderedImageUrl(url);
           setUsePreRendered(true);
           setNumPages(1); // Single-page PDFs for now
           setIsLoadingPdf(false);
         } else {
           // Fall back to PDF.js rendering
+          console.log('[PdfViewer] No PNG available, falling back to PDF.js');
           setPreRenderedImageUrl(null);
           setUsePreRendered(false);
         }
       } catch (err) {
         // Page data not available, fall back to PDF.js
-        console.log('Pre-rendered check failed, using PDF.js:', err);
+        console.log('[PdfViewer] Pre-rendered check failed:', err);
         setPreRenderedImageUrl(null);
         setUsePreRendered(false);
       }
@@ -240,10 +248,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     // Case 1: Using pre-rendered PNG
     if (usePreRendered && preRenderedImageUrl) {
       setIsRenderingPage(true);
+      console.log('[PdfViewer] Loading pre-rendered PNG image');
 
       // Load pre-rendered PNG
       const img = new Image();
       img.onload = () => {
+        console.log('[PdfViewer] PNG loaded:', img.naturalWidth, 'x', img.naturalHeight);
         const pageImage: PageImage = {
           dataUrl: preRenderedImageUrl,
           width: img.naturalWidth,
@@ -252,8 +262,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         setCurrentPageImage(pageImage);
         setIsRenderingPage(false);
       };
-      img.onerror = () => {
-        console.error('Failed to load pre-rendered PNG, falling back to PDF.js');
+      img.onerror = (err) => {
+        console.error('[PdfViewer] PNG load failed:', err);
         setUsePreRendered(false);
         setPreRenderedImageUrl(null);
         setIsRenderingPage(false);

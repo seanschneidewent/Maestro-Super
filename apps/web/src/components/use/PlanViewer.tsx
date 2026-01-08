@@ -51,7 +51,10 @@ const WELCOME_GREETINGS = [
 async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
   // Check cache first
   const cached = pageImageCache.get(page.pageId);
-  if (cached) return cached;
+  if (cached) {
+    console.log('[PlanViewer] Cache hit:', page.pageId);
+    return cached;
+  }
 
   // Check if already loading
   const existing = loadingPromises.get(page.pageId);
@@ -60,13 +63,18 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
   // Start loading
   const promise = (async () => {
     try {
+      console.log('[PlanViewer] Loading page:', page.pageId, 'filePath:', page.filePath);
+
       // Check if it's a PNG (pre-rendered) - use public URL for fast loading
       // This matches how PdfViewer loads pre-rendered PNGs
       if (page.filePath.endsWith('.png')) {
+        console.log('[PlanViewer] PNG detected, using getPublicUrl');
         const url = getPublicUrl(page.filePath);
+        console.log('[PlanViewer] Public URL:', url);
         const img = new Image();
         img.src = url;
         await img.decode();
+        console.log('[PlanViewer] PNG loaded:', page.pageId, img.naturalWidth, 'x', img.naturalHeight);
 
         const pageImage: PageImage = {
           dataUrl: url,
@@ -79,6 +87,7 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
       }
 
       // PDF fallback - download and render via PDF.js
+      console.log('[PlanViewer] PDF detected, using PDF.js fallback');
       const blob = await downloadFile(page.filePath);
       const arrayBuffer = await blob.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
@@ -205,12 +214,13 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   const [agentPageImage, setAgentPageImage] = useState<PageImage | null>(null);
   const [isLoadingAgentPage, setIsLoadingAgentPage] = useState(false);
 
-  // Prefetch ALL pages when selectedPages changes (eager loading)
+  // Prefetch first 3 pages when selectedPages changes (limit for iPad memory)
   useEffect(() => {
     if (selectedPages.length === 0) return;
 
-    // Load all pages in parallel
-    const pagesToLoad = selectedPages.filter(p => !pageImageCache.has(p.pageId));
+    // Only prefetch first 3 pages to avoid iPad memory issues
+    const pagesToPrefetch = selectedPages.slice(0, 3);
+    const pagesToLoad = pagesToPrefetch.filter(p => !pageImageCache.has(p.pageId));
     if (pagesToLoad.length > 0) {
       Promise.all(pagesToLoad.map(page => loadPageImage(page)));
     }
