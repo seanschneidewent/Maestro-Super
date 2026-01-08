@@ -196,9 +196,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
             filePath: p.filePath || '',
             disciplineId: p.disciplineId || '',
             pointers: (p.pointersShown || []).map((ptr) => {
-              const ptrInfo = pointerData.get(ptr.pointerId);
+              // Backend sends pointer_id (snake_case), not pointerId (camelCase)
+              const ptrId = (ptr as { pointer_id?: string; pointerId?: string }).pointer_id || ptr.pointerId;
+              const ptrInfo = pointerData.get(ptrId);
               return {
-                pointerId: ptr.pointerId,
+                pointerId: ptrId,
                 title: ptrInfo?.title || '',
                 bboxX: ptrInfo?.bboxX || 0,
                 bboxY: ptrInfo?.bboxY || 0,
