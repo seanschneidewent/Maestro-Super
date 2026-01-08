@@ -538,7 +538,6 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     restoredDisplayTitle: string | null,
     pages?: AgentSelectedPage[]
   ) => {
-    console.log('[restore] Called with pages:', pages?.length, pages?.map(p => p.pointers.length))
     abort()
     setIsStreaming(false)
     setThinkingText('')

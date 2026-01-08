@@ -135,10 +135,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
     }
   }, [selectedPages.length]); // Only trigger on length change to avoid infinite loop
 
-  // Debug logging for session restoration
-  console.log('[PlanViewer] selectedPages:', selectedPages.length, 'showPointers:', showPointers, 'agentPageIndex:', agentPageIndex);
-  console.log('[PlanViewer] currentPage pointers:', selectedPages[agentPageIndex]?.pointers?.length);
-
   // Navigate between agent-selected pages
   const goToPrevAgentPage = useCallback(() => {
     if (selectedPages.length === 0) return;

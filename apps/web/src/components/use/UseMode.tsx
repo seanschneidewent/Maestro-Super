@@ -215,14 +215,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     queryPagesCache.clear();
     queryTraceCache.clear();
     for (const q of queries) {
-      // Debug: Log trace and page data for session restoration
-      console.log('[Restore] Query ID:', q.id);
-      console.log('[Restore] Trace exists:', !!q.trace, 'Length:', q.trace?.length);
-      console.log('[Restore] Pages:', q.pages?.length, 'PointersShown:', q.pages?.map(p => p.pointersShown?.length));
-
       // Extract pointer data (including bboxes) from trace
       const pointerData = extractPointerDataFromTrace(q.trace);
-      console.log('[Restore] Extracted pointers from trace:', pointerData.size, [...pointerData.entries()]);
 
       // Cache pages with full pointer data
       if (q.pages && q.pages.length > 0) {
@@ -247,11 +241,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
               };
             }),
           }));
-        console.log('[Restore] Built queryPages:', queryPages.map(p => ({
-          pageId: p.pageId,
-          pointerCount: p.pointers.length,
-          firstPointerBbox: p.pointers[0] ? { x: p.pointers[0].bboxX, y: p.pointers[0].bboxY, w: p.pointers[0].bboxWidth, h: p.pointers[0].bboxHeight } : null
-        })));
         queryPagesCache.set(q.id, queryPages);
       }
       // Cache trace
@@ -276,13 +265,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     const cachedPages = queryPagesCache.get(selectedQueryId);
     // Use API responseText, or extract from trace as fallback
     const selectedResponseText = selectedQuery?.responseText || extractFinalAnswerFromTrace(selectedQuery?.trace) || '';
-    console.log('[Restore] Selected query:', selectedQueryId);
-    console.log('[Restore] cachedPages for selected:', cachedPages?.length, cachedPages?.map(p => ({
-      pageId: p.pageId,
-      pointers: p.pointers.length,
-      bbox0: p.pointers[0] ? `${p.pointers[0].bboxX},${p.pointers[0].bboxY},${p.pointers[0].bboxWidth},${p.pointers[0].bboxHeight}` : 'none'
-    })));
-    console.log('[Restore] selectedResponseText length:', selectedResponseText.length);
     restore(
       (selectedQuery?.trace || []) as AgentTraceStep[],
       selectedResponseText,
