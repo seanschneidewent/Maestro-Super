@@ -28,6 +28,10 @@ import { useSession } from '../../hooks/useSession';
 function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): string {
   if (!trace || trace.length === 0) return '';
 
+  // Debug: log trace structure
+  console.log('[extractFinalAnswer] Trace types:', trace.map(s => s.type));
+  console.log('[extractFinalAnswer] Last 3 steps:', trace.slice(-3).map(s => ({ type: s.type, hasContent: !!s.content, contentPreview: s.content?.slice(0, 50) })));
+
   // Find index of last tool_result
   let lastToolResultIdx = -1;
   for (let i = trace.length - 1; i >= 0; i--) {
@@ -36,6 +40,8 @@ function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): strin
       break;
     }
   }
+
+  console.log('[extractFinalAnswer] lastToolResultIdx:', lastToolResultIdx, 'trace.length:', trace.length);
 
   // Collect reasoning content after last tool_result
   const parts: string[] = [];
@@ -46,6 +52,7 @@ function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): strin
     }
   }
 
+  console.log('[extractFinalAnswer] Extracted parts count:', parts.length);
   return parts.join('');
 }
 
