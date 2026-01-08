@@ -359,7 +359,7 @@ async def select_pages(db: Session, page_ids: list[str]) -> dict:
             {
                 "page_id": str(p.id),
                 "page_name": p.page_name,
-                "file_path": p.file_path,
+                "file_path": p.page_image_path or p.file_path,  # Prefer PNG, fall back to PDF
                 "discipline_id": str(p.discipline_id) if p.discipline_id else None,
                 "discipline_name": p.discipline.display_name if p.discipline else None,
             }
@@ -394,7 +394,7 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
                 "title": p.title,
                 "page_id": str(p.page_id),
                 "page_name": p.page.page_name if p.page else None,
-                "file_path": p.page.file_path if p.page else None,
+                "file_path": (p.page.page_image_path or p.page.file_path) if p.page else None,  # Prefer PNG
                 "discipline_id": str(p.page.discipline_id) if p.page else None,
                 "bbox_x": p.bbox_x,
                 "bbox_y": p.bbox_y,

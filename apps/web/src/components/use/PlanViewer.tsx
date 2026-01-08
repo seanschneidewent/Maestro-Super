@@ -61,6 +61,26 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
   const promise = (async () => {
     try {
       const blob = await downloadFile(page.filePath);
+
+      // Check if it's already a PNG (pre-rendered) - much faster to load, no PDF.js overhead
+      if (page.filePath.endsWith('.png') || blob.type === 'image/png') {
+        // Direct PNG - just create object URL and decode
+        const dataUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+
+        const pageImage: PageImage = {
+          dataUrl,
+          width: img.naturalWidth / RENDER_SCALE,
+          height: img.naturalHeight / RENDER_SCALE,
+        };
+
+        pageImageCache.set(page.pageId, pageImage);
+        return pageImage;
+      }
+
+      // PDF - render to canvas (fallback for pages without pre-rendered PNG)
       const arrayBuffer = await blob.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
       const pdfPage = await pdf.getPage(1);
