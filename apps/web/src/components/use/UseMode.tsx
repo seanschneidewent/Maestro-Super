@@ -234,6 +234,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setShowHistory(false);
 
     const cachedPages = queryPagesCache.get(selectedQueryId);
+    console.log('[Restore] Selected query:', selectedQueryId);
+    console.log('[Restore] cachedPages for selected:', cachedPages?.length, cachedPages?.map(p => ({
+      pageId: p.pageId,
+      pointers: p.pointers.length,
+      bbox0: p.pointers[0] ? `${p.pointers[0].bboxX},${p.pointers[0].bboxY},${p.pointers[0].bboxWidth},${p.pointers[0].bboxHeight}` : 'none'
+    })));
     restore(
       (selectedQuery?.trace || []) as AgentTraceStep[],
       selectedQuery?.responseText || '',
