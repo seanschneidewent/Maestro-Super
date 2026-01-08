@@ -330,10 +330,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
       const pageData = await fetchPageWithRetry();
 
       // Load into viewer without pointers (clean sheet browsing)
+      // Use pre-rendered PNG if available, fall back to PDF
       loadPages([{
         pageId,
         pageName: pageData.pageName,
-        filePath: pageData.filePath,
+        filePath: pageData.pageImagePath || pageData.filePath,
         disciplineId,
         pointers: [], // Empty - pointers only shown for query results
       }]);

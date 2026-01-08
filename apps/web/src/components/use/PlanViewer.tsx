@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { downloadFile } from '../../lib/storage';
+import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 
 // Set up PDF.js worker
@@ -60,18 +60,16 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
   // Start loading
   const promise = (async () => {
     try {
-      const blob = await downloadFile(page.filePath);
-
-      // Check if it's already a PNG (pre-rendered) - much faster to load, no PDF.js overhead
-      if (page.filePath.endsWith('.png') || blob.type === 'image/png') {
-        // Direct PNG - just create object URL and decode
-        const dataUrl = URL.createObjectURL(blob);
+      // Check if it's a PNG (pre-rendered) - use public URL for fast loading
+      // This matches how PdfViewer loads pre-rendered PNGs
+      if (page.filePath.endsWith('.png')) {
+        const url = getPublicUrl(page.filePath);
         const img = new Image();
-        img.src = dataUrl;
+        img.src = url;
         await img.decode();
 
         const pageImage: PageImage = {
-          dataUrl,
+          dataUrl: url,
           width: img.naturalWidth / RENDER_SCALE,
           height: img.naturalHeight / RENDER_SCALE,
         };
@@ -80,7 +78,8 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
         return pageImage;
       }
 
-      // PDF - render to canvas (fallback for pages without pre-rendered PNG)
+      // PDF fallback - download and render via PDF.js
+      const blob = await downloadFile(page.filePath);
       const arrayBuffer = await blob.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
       const pdfPage = await pdf.getPage(1);
