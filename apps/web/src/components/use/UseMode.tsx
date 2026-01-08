@@ -22,6 +22,34 @@ import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useSession } from '../../hooks/useSession';
 
 /**
+ * Extract final answer text from the query trace.
+ * Collects reasoning content after the last tool_result.
+ */
+function extractFinalAnswerFromTrace(trace: QueryTraceStep[] | undefined): string {
+  if (!trace || trace.length === 0) return '';
+
+  // Find index of last tool_result
+  let lastToolResultIdx = -1;
+  for (let i = trace.length - 1; i >= 0; i--) {
+    if (trace[i].type === 'tool_result') {
+      lastToolResultIdx = i;
+      break;
+    }
+  }
+
+  // Collect reasoning content after last tool_result
+  const parts: string[] = [];
+  for (let i = lastToolResultIdx + 1; i < trace.length; i++) {
+    const step = trace[i];
+    if (step.type === 'reasoning' && step.content) {
+      parts.push(step.content);
+    }
+  }
+
+  return parts.join('');
+}
+
+/**
  * Extract pointer data (including bboxes) from the query trace.
  * The select_pointers tool_result contains full pointer info.
  */
@@ -154,24 +182,28 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     selectedQueryId: string
   ) => {
     // Convert QueryResponse[] to QueryWithPages[] for the QueryStack
-    const restoredQueries: QueryWithPages[] = queries.map((q, idx) => ({
-      id: q.id,
-      sessionId: q.sessionId ?? null,
-      displayTitle: q.displayTitle ?? null,
-      sequenceOrder: q.sequenceOrder ?? idx + 1,
-      queryText: q.queryText,
-      responseText: q.responseText ?? null,
-      pages: (q.pages || []).map((p: QueryPageResponse, pIdx: number) => ({
-        id: `${q.id}-page-${pIdx}`,
-        pageId: p.pageId,
-        pageOrder: p.pageOrder,
-        pointersShown: p.pointersShown || [],
-        pageName: p.pageName,
-        filePath: p.filePath,
-        disciplineId: p.disciplineId,
-      })),
-      createdAt: q.createdAt,
-    }));
+    const restoredQueries: QueryWithPages[] = queries.map((q, idx) => {
+      // Use API responseText, or extract from trace as fallback
+      const responseText = q.responseText || extractFinalAnswerFromTrace(q.trace) || null;
+      return {
+        id: q.id,
+        sessionId: q.sessionId ?? null,
+        displayTitle: q.displayTitle ?? null,
+        sequenceOrder: q.sequenceOrder ?? idx + 1,
+        queryText: q.queryText,
+        responseText,
+        pages: (q.pages || []).map((p: QueryPageResponse, pIdx: number) => ({
+          id: `${q.id}-page-${pIdx}`,
+          pageId: p.pageId,
+          pageOrder: p.pageOrder,
+          pointersShown: p.pointersShown || [],
+          pageName: p.pageName,
+          filePath: p.filePath,
+          disciplineId: p.disciplineId,
+        })),
+        createdAt: q.createdAt,
+      };
+    });
 
     // Cache pages and traces for all queries in the session
     queryPagesCache.clear();
@@ -236,15 +268,18 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
     setShowHistory(false);
 
     const cachedPages = queryPagesCache.get(selectedQueryId);
+    // Use API responseText, or extract from trace as fallback
+    const selectedResponseText = selectedQuery?.responseText || extractFinalAnswerFromTrace(selectedQuery?.trace) || '';
     console.log('[Restore] Selected query:', selectedQueryId);
     console.log('[Restore] cachedPages for selected:', cachedPages?.length, cachedPages?.map(p => ({
       pageId: p.pageId,
       pointers: p.pointers.length,
       bbox0: p.pointers[0] ? `${p.pointers[0].bboxX},${p.pointers[0].bboxY},${p.pointers[0].bboxWidth},${p.pointers[0].bboxHeight}` : 'none'
     })));
+    console.log('[Restore] selectedResponseText length:', selectedResponseText.length);
     restore(
       (selectedQuery?.trace || []) as AgentTraceStep[],
-      selectedQuery?.responseText || '',
+      selectedResponseText,
       selectedQuery?.displayTitle || null,
       cachedPages
     );
