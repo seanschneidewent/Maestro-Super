@@ -12,6 +12,8 @@ import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
+import { DriveImportButton, DriveImportFile } from './DriveImportButton';
+import { DisciplineCode, getDisciplineDisplayName } from '../../lib/disciplineClassifier';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -848,6 +850,197 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     }
   };
 
+  // Handle Drive imports (similar to folder upload but for pre-classified files)
+  const handleDriveImport = async (importedFiles: DriveImportFile[]) => {
+    if (importedFiles.length === 0) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+    let sseTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const totalFiles = importedFiles.length;
+
+      // Initialize progress and show modal
+      setUploadProgress({
+        upload: { current: 0, total: totalFiles },
+        png: { current: 0, total: totalFiles },
+      });
+      setShowProgressModal(true);
+      setPngStageComplete(false);
+      setFailedPageIds(new Set());
+
+      // Group files by discipline
+      const disciplineMap = new Map<DisciplineCode, DriveImportFile[]>();
+      for (const importedFile of importedFiles) {
+        const existing = disciplineMap.get(importedFile.discipline) || [];
+        existing.push(importedFile);
+        disciplineMap.set(importedFile.discipline, existing);
+      }
+
+      // Track uploaded file paths
+      const uploadedPaths = new Map<string, string>(); // relativePath -> storagePath
+
+      // Upload files with concurrency limit
+      const MAX_CONCURRENT = 5;
+      const semaphore = new Set<Promise<void>>();
+      let uploadedCount = 0;
+
+      for (const importedFile of importedFiles) {
+        // Generate a relative path: discipline/filename
+        const relativePath = `${importedFile.discipline}/${importedFile.file.name}`;
+
+        const promise = (async () => {
+          try {
+            const uploadResult = await uploadFile(projectId, importedFile.file, relativePath);
+            uploadedPaths.set(relativePath, uploadResult.storagePath);
+            // Store file in memory for immediate viewing
+            localFileMapRef.current.set(relativePath, importedFile.file);
+          } catch (uploadErr) {
+            console.error(`Failed to upload ${importedFile.file.name} to storage:`, uploadErr);
+          } finally {
+            uploadedCount++;
+            setUploadProgress(prev => prev ? {
+              ...prev,
+              upload: { current: uploadedCount, total: totalFiles },
+            } : null);
+          }
+        })();
+
+        semaphore.add(promise);
+        promise.finally(() => semaphore.delete(promise));
+
+        if (semaphore.size >= MAX_CONCURRENT) {
+          await Promise.race(semaphore);
+        }
+      }
+      await Promise.all(semaphore);
+
+      // Build API request
+      const disciplines: Array<{
+        code: DisciplineCode;
+        displayName: string;
+        pages: Array<{ pageName: string; fileName: string; storagePath: string }>;
+      }> = [];
+
+      for (const [code, files] of disciplineMap) {
+        const pages = files
+          .map(f => {
+            const relativePath = `${code}/${f.file.name}`;
+            const storagePath = uploadedPaths.get(relativePath);
+            if (!storagePath) return null;
+            return {
+              pageName: f.file.name.replace(/\.[^/.]+$/, ''),
+              fileName: f.file.name,
+              storagePath,
+            };
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null);
+
+        if (pages.length > 0) {
+          disciplines.push({
+            code,
+            displayName: getDisciplineDisplayName(code),
+            pages,
+          });
+        }
+      }
+
+      setIsUploading(false);
+
+      // Start processing pipeline via SSE
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+
+      const controller = new AbortController();
+      sseTimeoutId = setTimeout(() => {
+        console.log('SSE processing timeout - aborting after 15 minutes');
+        controller.abort();
+      }, 900000);
+
+      const sseResponse = await fetch(`${API_URL}/projects/${projectId}/process-uploads-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          disciplines: disciplines.map(d => ({
+            code: d.code,
+            display_name: d.displayName,
+            pages: d.pages.map(p => ({
+              page_name: p.pageName,
+              storage_path: p.storagePath,
+            })),
+          })),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!sseResponse.ok) {
+        const errorText = await sseResponse.text();
+        console.error('SSE response error:', sseResponse.status, errorText);
+        throw new Error(`Failed to start processing pipeline: ${sseResponse.status}`);
+      }
+
+      // Read the SSE stream (reuse existing stream parsing logic)
+      const reader = sseResponse.body?.getReader();
+      const decoder = new TextDecoder();
+      let receivedComplete = false;
+
+      if (reader) {
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith(':')) continue;
+            if (line.startsWith('data: ')) {
+              try {
+                const eventData = JSON.parse(line.slice(6));
+                if (eventData.type === 'png_progress') {
+                  setUploadProgress(prev => prev ? {
+                    ...prev,
+                    png: { current: eventData.current || 0, total: eventData.total || totalFiles },
+                  } : null);
+                } else if (eventData.type === 'png_failed') {
+                  if (eventData.page_id) {
+                    setFailedPageIds(prev => new Set([...prev, eventData.page_id]));
+                  }
+                } else if (eventData.type === 'complete') {
+                  receivedComplete = true;
+                  setPngStageComplete(true);
+                }
+              } catch (parseErr) {
+                console.error('Failed to parse SSE event:', line, parseErr);
+              }
+            }
+          }
+        }
+      }
+
+      if (sseTimeoutId) clearTimeout(sseTimeoutId);
+
+      // Refresh hierarchy
+      await queryClient.invalidateQueries({ queryKey: ['projectHierarchy', projectId] });
+      setHierarchyRefresh(prev => prev + 1);
+
+    } catch (err) {
+      console.error('Drive import error:', err);
+      setUploadError(err instanceof Error ? err.message : 'Drive import failed');
+    } finally {
+      setIsUploading(false);
+      if (sseTimeoutId) clearTimeout(sseTimeoutId);
+    }
+  };
+
   return (
     <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
       {/* Sidebar: File Tree (absolute positioned overlay) */}
@@ -952,6 +1145,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     <span className="group-hover:drop-shadow-[0_0_8px_rgba(6,182,212,0.5)] transition-all">+ Upload Plans</span>
                   )}
               </button>
+              <div className="mt-2">
+                <DriveImportButton
+                  disabled={isUploading}
+                  onFilesSelected={handleDriveImport}
+                />
+              </div>
           </div>
         </div>
       </CollapsiblePanel>

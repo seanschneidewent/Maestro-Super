@@ -11,6 +11,7 @@ export type DisciplineCode =
   | 'kitchen'
   | 'vapor_mitigation'
   | 'canopy'
+  | 'general'
   | 'unknown';
 
 export type ClassificationConfidence = 'high' | 'needs_review';
@@ -44,6 +45,7 @@ const DISCIPLINE_DISPLAY_NAMES: Record<DisciplineCode, string> = {
   kitchen: 'Kitchen',
   vapor_mitigation: 'Vapor Mitigation',
   canopy: 'Canopy',
+  general: 'General',
   unknown: 'Unknown',
 };
 
@@ -66,6 +68,7 @@ const PREFIX_PATTERNS: Array<{ prefixes: string[]; discipline: DisciplineCode }>
   { prefixes: ['M', 'E', 'P'], discipline: 'mep' },
   { prefixes: ['C'], discipline: 'civil' },
   { prefixes: ['K'], discipline: 'kitchen' },
+  { prefixes: ['G'], discipline: 'general' },
   // Note: 'canopy' has no prefix pattern - folder only
 ];
 
