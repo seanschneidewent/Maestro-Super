@@ -239,6 +239,8 @@ const App: React.FC = () => {
     try {
       // Clear the pending login flag so we can go back to demo
       pendingLoginRef.current = false;
+      // Reset tutorial so it shows again
+      localStorage.removeItem('maestro-tutorial-completed');
       // Sign in anonymously for demo mode
       await signInAnonymously();
       setMode(AppMode.DEMO);
