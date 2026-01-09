@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useState, useCallback, ReactNode } from 'react';
 import { TutorialStep } from '../../types';
 
 const STORAGE_KEY = 'maestro-tutorial-completed';
@@ -16,20 +16,21 @@ export const TutorialContext = createContext<TutorialContextValue | null>(null);
 
 const STEP_ORDER: NonNullable<TutorialStep>[] = ['welcome', 'sidebar', 'viewer', 'query', 'complete'];
 
-export const TutorialProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentStep, setCurrentStep] = useState<TutorialStep>(null);
-  const [isActive, setIsActive] = useState(false);
-  const [hasCompleted, setHasCompleted] = useState(false);
+// Check localStorage synchronously to avoid flash of wrong state
+const getInitialTutorialState = () => {
+  const completed = localStorage.getItem(STORAGE_KEY) === 'true';
+  return {
+    hasCompleted: completed,
+    isActive: !completed,
+    currentStep: completed ? null : ('welcome' as TutorialStep),
+  };
+};
 
-  // Check localStorage on mount
-  useEffect(() => {
-    const completed = localStorage.getItem(STORAGE_KEY) === 'true';
-    setHasCompleted(completed);
-    if (!completed) {
-      setIsActive(true);
-      setCurrentStep('welcome');
-    }
-  }, []);
+export const TutorialProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const initialState = getInitialTutorialState();
+  const [currentStep, setCurrentStep] = useState<TutorialStep>(initialState.currentStep);
+  const [isActive, setIsActive] = useState(initialState.isActive);
+  const [hasCompleted, setHasCompleted] = useState(initialState.hasCompleted);
 
   const advanceStep = useCallback(() => {
     setCurrentStep(prev => {
