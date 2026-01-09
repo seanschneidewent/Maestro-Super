@@ -20,6 +20,7 @@ import {
   NewSessionButton,
   QueryBubbleStack,
   CompletedQuery,
+  SuggestedPrompts,
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useSession } from '../../hooks/useSession';
@@ -106,7 +107,7 @@ interface UseModeProps {
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const { showError } = useToast();
-  const { currentStep, completeStep, isActive: tutorialActive } = useTutorial();
+  const { currentStep, completeStep, isActive: tutorialActive, hasCompleted } = useTutorial();
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -188,6 +189,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     contextPointers,
     onQueryComplete: handleQueryComplete,
   });
+
+  // Handle suggested prompt selection - auto-submit
+  const handleSuggestedPrompt = useCallback((prompt: string) => {
+    if (isStreaming) return;
+    setSubmittedQuery(prompt);
+    setIsQueryExpanded(false);
+    submitQuery(prompt, currentSession?.id);
+  }, [isStreaming, currentSession?.id, submitQuery]);
 
   // Handle restoring a previous session from history
   const handleRestoreSession = (
@@ -504,6 +513,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
+          {/* Suggested prompts - show when tutorial complete and no active query */}
+          {(!tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
+            <SuggestedPrompts
+              onSelectPrompt={handleSuggestedPrompt}
+              disabled={isStreaming}
+            />
+          )}
+
           {/* User query bubble - appears above input when query is active */}
           {submittedQuery && (isStreaming || activeQueryId) && (() => {
             const words = submittedQuery.split(/\s+/);
