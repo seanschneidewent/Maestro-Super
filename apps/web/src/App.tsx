@@ -431,6 +431,7 @@ const App: React.FC = () => {
   }
 
   // Demo mode - field only with demo header in sidebar
+  console.log('[App] Mode check:', { mode, hasProject: !!project, projectId: project?.id, isDemoMode: mode === AppMode.DEMO });
   if (mode === AppMode.DEMO && project) {
     console.log('[App] Rendering DEMO mode with TutorialProvider');
     return (
@@ -469,6 +470,7 @@ const App: React.FC = () => {
     );
   }
 
+  console.log('[App] Falling through to default return (USE/SETUP mode)');
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
