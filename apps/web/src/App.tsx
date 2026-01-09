@@ -10,6 +10,7 @@ import { AppMode, Project } from './types';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { api } from './lib/api';
 import { supabase, signInAnonymously, isAnonymousUser } from './lib/supabase';
+import { TutorialProvider, TutorialOverlay } from './components/tutorial';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -435,12 +436,15 @@ const App: React.FC = () => {
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <ErrorBoundary>
-            <UseMode
-              mode={mode}
-              setMode={setMode}
-              projectId={project.id}
-              onGetStarted={handleGetStarted}
-            />
+            <TutorialProvider>
+              <TutorialOverlay />
+              <UseMode
+                mode={mode}
+                setMode={setMode}
+                projectId={project.id}
+                onGetStarted={handleGetStarted}
+              />
+            </TutorialProvider>
           </ErrorBoundary>
         </ToastProvider>
       </QueryClientProvider>

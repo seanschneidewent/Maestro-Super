@@ -9,6 +9,8 @@ import { DemoHeader } from '../DemoHeader';
 import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { useTutorial } from '../../hooks/useTutorial';
+import { TutorialBubble } from '../tutorial';
 import {
   QueryInput,
   SessionControls,
@@ -104,6 +106,7 @@ interface UseModeProps {
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const { showError } = useToast();
+  const { currentStep, completeStep, isActive: tutorialActive } = useTutorial();
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -296,9 +299,26 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     loadHierarchy();
   }, [projectId]);
 
+  // Tutorial: collapse sidebar when tutorial starts at 'welcome' step
+  useEffect(() => {
+    if (tutorialActive && currentStep === 'welcome') {
+      setIsSidebarCollapsed(true);
+    }
+  }, [tutorialActive, currentStep]);
+
+  // Tutorial: detect sidebar expand to complete 'welcome' step
+  useEffect(() => {
+    if (!isSidebarCollapsed && tutorialActive && currentStep === 'welcome') {
+      completeStep('welcome');
+    }
+  }, [isSidebarCollapsed, tutorialActive, currentStep, completeStep]);
+
   // Handle page selection from PlansPanel
   // Resets to fresh session state and loads page into agent viewer
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
+    // Tutorial: complete 'sidebar' step when user selects a page
+    completeStep('sidebar');
+
     // Reset session state (like handleNewSession but skip clearSession API call)
     resetStream();
     setQueryInput('');
@@ -459,6 +479,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             onClick={() => setIsSidebarCollapsed(false)}
             className="absolute top-20 left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors"
             title="Expand sidebar"
+            data-tutorial="sidebar-expand"
           >
             <PanelLeft size={20} />
           </button>
@@ -524,6 +545,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   }
                 }}
                 isProcessing={isStreaming}
+                onFocus={() => completeStep('query')}
               />
             </div>
             <NewSessionButton
@@ -538,6 +560,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           onToggleHistory={() => setShowHistory(!showHistory)}
           isHistoryOpen={showHistory}
         />
+
+        {/* Tutorial bubble - shows for post-page steps */}
+        <TutorialBubble />
 
         {/* Error display */}
         {error && (

@@ -7,9 +7,10 @@ interface PageNodeProps {
   page: PageInHierarchy;
   isSelected: boolean;
   onSelect: (page: PageInHierarchy) => void;
+  dataTutorial?: string;
 }
 
-const PageNode: React.FC<PageNodeProps> = ({ page, isSelected, onSelect }) => {
+const PageNode: React.FC<PageNodeProps> = ({ page, isSelected, onSelect, dataTutorial }) => {
   return (
     <button
       onClick={() => onSelect(page)}
@@ -18,6 +19,7 @@ const PageNode: React.FC<PageNodeProps> = ({ page, isSelected, onSelect }) => {
           ? 'bg-cyan-50 border-l-2 border-cyan-500 text-cyan-700 font-medium'
           : 'border-l-2 border-transparent hover:bg-slate-100 text-slate-600 hover:text-slate-800'
       }`}
+      data-tutorial={dataTutorial}
     >
       <FileText size={14} className={isSelected ? 'text-cyan-500' : 'text-slate-400'} />
       <span className="truncate">{page.pageName}</span>
@@ -30,6 +32,7 @@ interface DisciplineNodeProps {
   selectedPageId: string | null;
   onPageSelect: (page: PageInHierarchy, disciplineId: string) => void;
   defaultExpanded?: boolean;
+  firstPageTutorial?: string; // data-tutorial attribute for the first page in this discipline
 }
 
 const DisciplineNode: React.FC<DisciplineNodeProps> = ({
@@ -37,6 +40,7 @@ const DisciplineNode: React.FC<DisciplineNodeProps> = ({
   selectedPageId,
   onPageSelect,
   defaultExpanded = false,
+  firstPageTutorial,
 }) => {
   const [isOpen, setIsOpen] = useState(defaultExpanded);
 
@@ -69,12 +73,13 @@ const DisciplineNode: React.FC<DisciplineNodeProps> = ({
 
       {isOpen && discipline.pages.length > 0 && (
         <div className="ml-6 mt-1 space-y-0.5 animate-fade-in">
-          {discipline.pages.map(page => (
+          {discipline.pages.map((page, pageIndex) => (
             <PageNode
               key={page.id}
               page={page}
               isSelected={selectedPageId === page.id}
               onSelect={(p) => onPageSelect(p, discipline.id)}
+              dataTutorial={pageIndex === 0 ? firstPageTutorial : undefined}
             />
           ))}
         </div>
@@ -161,6 +166,7 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
           selectedPageId={selectedPageId}
           onPageSelect={handlePageSelect}
           defaultExpanded={index === 0} // Expand first discipline by default
+          firstPageTutorial={index === 0 ? 'first-page' : undefined} // Tutorial highlights first page
         />
       ))}
     </div>

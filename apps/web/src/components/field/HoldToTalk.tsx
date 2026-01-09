@@ -7,6 +7,7 @@ interface QueryInputProps {
   onSubmit: () => void
   isProcessing: boolean
   placeholder?: string
+  onFocus?: () => void
 }
 
 // Get the SpeechRecognition constructor (browser-specific)
@@ -18,6 +19,7 @@ export function QueryInput({
   onSubmit,
   isProcessing,
   placeholder = 'Ask about your plans...',
+  onFocus,
 }: QueryInputProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [isSupported, setIsSupported] = useState(true)
@@ -176,6 +178,7 @@ export function QueryInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
+        onFocus={onFocus}
         placeholder={isRecording ? 'Listening...' : placeholder}
         disabled={isProcessing}
         className={`

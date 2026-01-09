@@ -253,3 +253,6 @@ export interface FieldResponse {
   displayTitle: string | null
   pages: FieldPage[]
 }
+
+// Tutorial types
+export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | 'complete' | null;
