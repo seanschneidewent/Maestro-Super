@@ -1,7 +1,8 @@
 export enum AppMode {
   SETUP = 'SETUP',
   USE = 'USE',
-  LOGIN = 'LOGIN'
+  LOGIN = 'LOGIN',
+  DEMO = 'DEMO'
 }
 
 export enum FileType {

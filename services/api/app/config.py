@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     max_tokens_per_day: int = 5000000  # 5 million
     max_pointers_per_project: int = 1000
 
+    # Demo Project (for anonymous landing page demo)
+    demo_project_id: str | None = None
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""

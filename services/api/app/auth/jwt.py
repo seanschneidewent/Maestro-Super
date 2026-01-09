@@ -54,6 +54,7 @@ def validate_supabase_jwt(token: str) -> TokenPayload:
                 sub=payload["sub"],
                 email=payload.get("email"),
                 exp=payload["exp"],
+                is_anonymous=payload.get("is_anonymous", False),
             )
         except jwt.exceptions.PyJWTError as e:
             # Log but continue to try HS256 fallback
@@ -77,6 +78,7 @@ def validate_supabase_jwt(token: str) -> TokenPayload:
             sub=payload["sub"],
             email=payload.get("email"),
             exp=payload["exp"],
+            is_anonymous=payload.get("is_anonymous", False),
         )
     except jwt.exceptions.PyJWTError:
         raise HTTPException(

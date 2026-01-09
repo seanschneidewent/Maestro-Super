@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.auth.schemas import User
+from app.config import get_settings
 from app.database.session import get_db
-from app.dependencies.rate_limit import check_rate_limit
+from app.dependencies.rate_limit import check_rate_limit, check_rate_limit_or_anon
 from app.models.project import Project
 from app.models.query import Query
 from app.models.query_page import QueryPage
@@ -196,7 +197,7 @@ def hide_query(
 async def stream_query(
     project_id: str,
     data: AgentQueryRequest,
-    user: User = Depends(check_rate_limit),
+    user: User = Depends(check_rate_limit_or_anon),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """
@@ -212,6 +213,15 @@ async def stream_query(
     - data: {"type": "error", "message": "..."} - Error event
     """
     verify_project_exists(project_id, db)
+
+    # Anonymous users can only query the demo project
+    settings = get_settings()
+    if user.is_anonymous and str(project_id) != str(settings.demo_project_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anonymous users can only access the demo project"
+        )
+
     logger.info(f"Starting query stream for user {user.id} on project {project_id}")
 
     # Validate session if provided

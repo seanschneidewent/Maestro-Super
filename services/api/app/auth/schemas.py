@@ -8,6 +8,7 @@ class User(BaseModel):
 
     id: str
     email: str | None = None
+    is_anonymous: bool = False
 
 
 class TokenPayload(BaseModel):
@@ -16,3 +17,4 @@ class TokenPayload(BaseModel):
     sub: str  # user_id
     email: str | None = None
     exp: int
+    is_anonymous: bool = False

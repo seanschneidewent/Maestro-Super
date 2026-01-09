@@ -76,3 +76,35 @@ def get_current_user_optional(
         return User(id=token_payload.sub, email=token_payload.email)
     except HTTPException:
         return None
+
+
+def get_current_user_or_anon(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> User:
+    """
+    Get current user from JWT, allowing anonymous Supabase users.
+
+    - If DEV_USER_ID is set: return mock user
+    - If valid JWT with 'is_anonymous' claim: return anonymous user
+    - If valid JWT without 'is_anonymous': return regular user
+    - If no token: raise 401
+    """
+    settings = get_settings()
+
+    if settings.dev_user_id:
+        return User(id=settings.dev_user_id, email="dev@local.test", is_anonymous=False)
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_payload = validate_supabase_jwt(credentials.credentials)
+    return User(
+        id=token_payload.sub,
+        email=token_payload.email,
+        is_anonymous=token_payload.is_anonymous,
+    )

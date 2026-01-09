@@ -4,7 +4,7 @@ import logging
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_current_user_or_anon
 from app.auth.schemas import User
 from app.database.session import get_db
 from app.services.usage import UsageService
@@ -42,6 +42,27 @@ async def check_rate_limit(
 
     if not allowed:
         logger.warning(f"Rate limit exceeded for user {user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=error_info,
+            headers={"Retry-After": str(error_info.get("retry_after", 3600))},
+        )
+
+    return user
+
+
+async def check_rate_limit_or_anon(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_or_anon),
+) -> User:
+    """
+    Rate limit check that allows anonymous users.
+    Same logic as check_rate_limit but accepts anonymous JWT tokens.
+    """
+    allowed, error_info = UsageService.check_rate_limit(db, user.id)
+
+    if not allowed:
+        logger.warning(f"Rate limit exceeded for user {user.id} (anonymous={user.is_anonymous})")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=error_info,

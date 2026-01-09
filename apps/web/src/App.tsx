@@ -9,7 +9,8 @@ import { queryClient } from './lib/queryClient';
 import { AppMode, Project } from './types';
 import { Settings, Loader2 } from 'lucide-react';
 import { api } from './lib/api';
-import { supabase } from './lib/supabase';
+import { supabase, signInAnonymously, isAnonymousUser } from './lib/supabase';
+import { DemoHeader } from './components/DemoHeader';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -33,6 +34,9 @@ const App: React.FC = () => {
   const [projectError, setProjectError] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // Track when we intentionally want to show login (not auto-sign-in anonymously)
+  const pendingLoginRef = useRef(false);
+
   // Persistent state for Setup mode (survives mode switches)
   const localFileMapRef = useRef<Map<string, File>>(new Map());
   const [setupState, setSetupState] = useState<SetupState>({
@@ -42,25 +46,52 @@ const App: React.FC = () => {
     expandedNodes: [],
   });
 
-  // Check for existing session on mount
+  // Initialize auth - check session or sign in anonymously
   useEffect(() => {
-    async function checkSession() {
+    async function initAuth() {
       const { data: { session } } = await supabase.auth.getSession();
+
       if (session) {
-        setMode(AppMode.USE);
+        if (isAnonymousUser(session)) {
+          setMode(AppMode.DEMO);
+        } else {
+          setMode(AppMode.USE);
+        }
+      } else {
+        // No session - sign in anonymously for demo mode
+        try {
+          await signInAnonymously();
+          setMode(AppMode.DEMO);
+        } catch (err) {
+          console.error('Failed to sign in anonymously:', err);
+          setMode(AppMode.LOGIN);
+        }
       }
       setCheckingAuth(false);
     }
-    checkSession();
+    initAuth();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        setProject(null); // Clear project to force re-fetch for new user
-        setMode(AppMode.USE);
+        if (isAnonymousUser(session)) {
+          setMode(AppMode.DEMO);
+        } else {
+          setProject(null); // Clear to force re-fetch for new user
+          setMode(AppMode.USE);
+        }
       } else if (event === 'SIGNED_OUT') {
-        setMode(AppMode.LOGIN);
         setProject(null);
+        // Check if this is intentional (user clicked "Get Started")
+        if (pendingLoginRef.current) {
+          pendingLoginRef.current = false;
+          setMode(AppMode.LOGIN);
+        } else {
+          // After sign out, try anonymous sign-in for demo mode
+          signInAnonymously()
+            .then(() => setMode(AppMode.DEMO))
+            .catch(() => setMode(AppMode.LOGIN));
+        }
       }
     });
 
@@ -70,6 +101,22 @@ const App: React.FC = () => {
   // Load or create default project when authenticated
   useEffect(() => {
     if (mode === AppMode.LOGIN || checkingAuth) return;
+
+    // Demo mode uses demo project ID from env
+    if (mode === AppMode.DEMO) {
+      const demoProjectId = import.meta.env.VITE_DEMO_PROJECT_ID;
+      if (demoProjectId) {
+        setProject({
+          id: demoProjectId,
+          name: 'Demo Project',
+          status: 'ready' as const,
+          createdAt: new Date().toISOString()
+        });
+      }
+      setProjectLoading(false);
+      return;
+    }
+
     if (project) return; // Already have project, skip loading
 
     async function loadProject() {
@@ -175,6 +222,11 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
     // Note: OAuth redirects, so we don't need to set loading to false on success
+  };
+
+  const handleGetStarted = async () => {
+    pendingLoginRef.current = true;
+    await supabase.auth.signOut();
   };
 
   // Show loading while checking auth
@@ -357,6 +409,24 @@ const App: React.FC = () => {
           <p className="text-slate-400 text-sm">Loading project...</p>
         </div>
       </div>
+    );
+  }
+
+  // Demo mode - field only with demo header
+  if (mode === AppMode.DEMO && project) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <ErrorBoundary>
+            <DemoHeader onGetStarted={handleGetStarted} />
+            <UseMode
+              mode={mode}
+              setMode={setMode}
+              projectId={project.id}
+            />
+          </ErrorBoundary>
+        </ToastProvider>
+      </QueryClientProvider>
     );
   }
 
