@@ -72,35 +72,26 @@ const App: React.FC = () => {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('[AUTH DEBUG] onAuthStateChange fired:', event, 'session:', session ? 'exists' : 'null', 'isAnonymous:', session?.user?.is_anonymous);
-      console.log('[AUTH DEBUG] pendingLoginRef.current =', pendingLoginRef.current);
-
       if (event === 'SIGNED_IN' && session) {
         if (isAnonymousUser(session)) {
           // Don't switch to DEMO if we're transitioning to LOGIN
           // (Supabase auto-signs-in anonymously after signOut)
           if (pendingLoginRef.current) {
-            console.log('[AUTH DEBUG] SIGNED_IN with anonymous user but pendingLoginRef is TRUE, ignoring');
             return;
           }
-          console.log('[AUTH DEBUG] SIGNED_IN with anonymous user, setting DEMO mode');
           setMode(AppMode.DEMO);
         } else {
-          console.log('[AUTH DEBUG] SIGNED_IN with real user, setting USE mode');
           pendingLoginRef.current = false; // Clear flag on real login
           setProject(null); // Clear to force re-fetch for new user
           setMode(AppMode.USE);
         }
       } else if (event === 'SIGNED_OUT') {
-        console.log('[AUTH DEBUG] SIGNED_OUT event received');
         setProject(null);
         // Check if this is intentional (user clicked "Get Started")
         if (pendingLoginRef.current) {
-          console.log('[AUTH DEBUG] pendingLoginRef is TRUE, setting LOGIN mode');
           // Don't reset pendingLoginRef here - keep it true to block auto-anonymous-signin
           setMode(AppMode.LOGIN);
         } else {
-          console.log('[AUTH DEBUG] pendingLoginRef is FALSE, signing in anonymously');
           // After sign out, try anonymous sign-in for demo mode
           signInAnonymously()
             .then(() => setMode(AppMode.DEMO))
@@ -239,11 +230,8 @@ const App: React.FC = () => {
   };
 
   const handleGetStarted = async () => {
-    console.log('[AUTH DEBUG] handleGetStarted called, setting pendingLoginRef to true');
     pendingLoginRef.current = true;
-    console.log('[AUTH DEBUG] pendingLoginRef.current =', pendingLoginRef.current);
-    const result = await supabase.auth.signOut();
-    console.log('[AUTH DEBUG] signOut completed, result:', result);
+    await supabase.auth.signOut();
   };
 
   const handleBackToDemo = async () => {
