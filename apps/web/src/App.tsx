@@ -77,10 +77,17 @@ const App: React.FC = () => {
 
       if (event === 'SIGNED_IN' && session) {
         if (isAnonymousUser(session)) {
+          // Don't switch to DEMO if we're transitioning to LOGIN
+          // (Supabase auto-signs-in anonymously after signOut)
+          if (pendingLoginRef.current) {
+            console.log('[AUTH DEBUG] SIGNED_IN with anonymous user but pendingLoginRef is TRUE, ignoring');
+            return;
+          }
           console.log('[AUTH DEBUG] SIGNED_IN with anonymous user, setting DEMO mode');
           setMode(AppMode.DEMO);
         } else {
           console.log('[AUTH DEBUG] SIGNED_IN with real user, setting USE mode');
+          pendingLoginRef.current = false; // Clear flag on real login
           setProject(null); // Clear to force re-fetch for new user
           setMode(AppMode.USE);
         }
@@ -90,7 +97,7 @@ const App: React.FC = () => {
         // Check if this is intentional (user clicked "Get Started")
         if (pendingLoginRef.current) {
           console.log('[AUTH DEBUG] pendingLoginRef is TRUE, setting LOGIN mode');
-          pendingLoginRef.current = false;
+          // Don't reset pendingLoginRef here - keep it true to block auto-anonymous-signin
           setMode(AppMode.LOGIN);
         } else {
           console.log('[AUTH DEBUG] pendingLoginRef is FALSE, signing in anonymously');
@@ -241,9 +248,9 @@ const App: React.FC = () => {
 
   const handleBackToDemo = async () => {
     try {
-      // Sign out first to clear any existing session
-      await supabase.auth.signOut();
-      // Then sign in anonymously for demo mode
+      // Clear the pending login flag so we can go back to demo
+      pendingLoginRef.current = false;
+      // Sign in anonymously for demo mode
       await signInAnonymously();
       setMode(AppMode.DEMO);
     } catch (err) {
