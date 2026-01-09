@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
@@ -299,16 +299,22 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     loadHierarchy();
   }, [projectId]);
 
+  // Track if tutorial has collapsed the sidebar (to detect manual expand)
+  const tutorialCollapsedSidebarRef = useRef(false);
+
   // Tutorial: collapse sidebar when tutorial starts at 'welcome' step
   useEffect(() => {
-    if (tutorialActive && currentStep === 'welcome') {
+    if (tutorialActive && currentStep === 'welcome' && !isSidebarCollapsed) {
+      tutorialCollapsedSidebarRef.current = true;
       setIsSidebarCollapsed(true);
     }
-  }, [tutorialActive, currentStep]);
+  }, [tutorialActive, currentStep, isSidebarCollapsed]);
 
   // Tutorial: detect sidebar expand to complete 'welcome' step
+  // Only triggers when user manually expands after tutorial collapsed it
   useEffect(() => {
-    if (!isSidebarCollapsed && tutorialActive && currentStep === 'welcome') {
+    if (!isSidebarCollapsed && tutorialActive && currentStep === 'welcome' && tutorialCollapsedSidebarRef.current) {
+      tutorialCollapsedSidebarRef.current = false;
       completeStep('welcome');
     }
   }, [isSidebarCollapsed, tutorialActive, currentStep, completeStep]);
