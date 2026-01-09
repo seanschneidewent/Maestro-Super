@@ -5,6 +5,7 @@ import { PlansPanel } from './PlansPanel';
 import { PlanViewer } from './PlanViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
+import { DemoHeader } from '../DemoHeader';
 import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -98,9 +99,10 @@ interface UseModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
   projectId: string;
+  onGetStarted?: () => void;
 }
 
-export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) => {
+export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const { showError } = useToast();
 
   // Selected page state
@@ -395,9 +397,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId }) =>
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
-            {mode !== AppMode.DEMO && (
+            {mode === AppMode.DEMO && onGetStarted ? (
+              <DemoHeader onGetStarted={onGetStarted} />
+            ) : mode !== AppMode.DEMO ? (
               <ModeToggle mode={mode} setMode={setMode} variant="light" />
-            )}
+            ) : null}
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="font-bold text-lg text-slate-800">

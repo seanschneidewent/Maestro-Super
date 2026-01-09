@@ -10,7 +10,6 @@ import { AppMode, Project } from './types';
 import { Settings, Loader2 } from 'lucide-react';
 import { api } from './lib/api';
 import { supabase, signInAnonymously, isAnonymousUser } from './lib/supabase';
-import { DemoHeader } from './components/DemoHeader';
 
 // Types for setup mode state persistence
 interface SetupState {
@@ -412,17 +411,17 @@ const App: React.FC = () => {
     );
   }
 
-  // Demo mode - field only with demo header
+  // Demo mode - field only with demo header in sidebar
   if (mode === AppMode.DEMO && project) {
     return (
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <ErrorBoundary>
-            <DemoHeader onGetStarted={handleGetStarted} />
             <UseMode
               mode={mode}
               setMode={setMode}
               projectId={project.id}
+              onGetStarted={handleGetStarted}
             />
           </ErrorBoundary>
         </ToastProvider>
