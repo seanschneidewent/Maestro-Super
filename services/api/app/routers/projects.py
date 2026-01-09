@@ -7,8 +7,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_current_user_or_anon
 from app.auth.schemas import User
+from app.config import get_settings
 from app.database.session import get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
@@ -233,7 +234,7 @@ def get_project_full(
 @router.get("/{project_id}/hierarchy", response_model=ProjectHierarchyResponse)
 def get_project_hierarchy(
     project_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_anon),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     """Get project with full hierarchy including pointers and processing states.
@@ -244,18 +245,40 @@ def get_project_hierarchy(
     - Pages with pointer counts and processing states
     - Pointer titles for each page
 
-    Response is cached for 30 seconds (private cache, per-user).
+    Anonymous users can only access the demo project.
     """
-    project = (
-        db.query(Project)
-        .options(
-            joinedload(Project.disciplines)
-            .joinedload(Discipline.pages)
-            .joinedload(Page.pointers)
+    settings = get_settings()
+
+    # Anonymous users can only access the demo project
+    if user.is_anonymous:
+        if not settings.demo_project_id or str(project_id) != str(settings.demo_project_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anonymous users can only access the demo project"
+            )
+        # For demo project, don't filter by user_id
+        project = (
+            db.query(Project)
+            .options(
+                joinedload(Project.disciplines)
+                .joinedload(Discipline.pages)
+                .joinedload(Page.pointers)
+            )
+            .filter(Project.id == project_id)
+            .first()
         )
-        .filter(Project.id == project_id, Project.user_id == user.id)
-        .first()
-    )
+    else:
+        # Regular users: filter by ownership
+        project = (
+            db.query(Project)
+            .options(
+                joinedload(Project.disciplines)
+                .joinedload(Discipline.pages)
+                .joinedload(Page.pointers)
+            )
+            .filter(Project.id == project_id, Project.user_id == user.id)
+            .first()
+        )
 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -353,7 +376,7 @@ async def search_project(
     q: str,
     discipline: str | None = None,
     limit: int = 10,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_anon),
     db: Session = Depends(get_db),
 ) -> dict:
     """Search pointers in a project using hybrid keyword + vector search.
@@ -366,12 +389,27 @@ async def search_project(
 
     Returns:
         Search results with relevance scores
+
+    Anonymous users can only search the demo project.
     """
-    # Verify project exists and user owns it
-    project = db.query(Project).filter(
-        Project.id == project_id,
-        Project.user_id == user.id,
-    ).first()
+    settings = get_settings()
+
+    # Anonymous users can only access the demo project
+    if user.is_anonymous:
+        if not settings.demo_project_id or str(project_id) != str(settings.demo_project_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anonymous users can only access the demo project"
+            )
+        # For demo project, don't filter by user_id
+        project = db.query(Project).filter(Project.id == project_id).first()
+    else:
+        # Verify project exists and user owns it
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.user_id == user.id,
+        ).first()
+
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
