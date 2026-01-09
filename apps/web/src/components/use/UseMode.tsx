@@ -117,7 +117,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [queryInput, setQueryInput] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Start with sidebar collapsed if tutorial is on welcome step
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
+    tutorialActive && currentStep === 'welcome'
+  );
 
   // Hierarchy data
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
@@ -300,15 +303,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   }, [projectId]);
 
   // Track if tutorial has collapsed the sidebar (to detect manual expand)
-  const tutorialCollapsedSidebarRef = useRef(false);
-
-  // Tutorial: collapse sidebar when tutorial starts at 'welcome' step
-  useEffect(() => {
-    if (tutorialActive && currentStep === 'welcome' && !isSidebarCollapsed) {
-      tutorialCollapsedSidebarRef.current = true;
-      setIsSidebarCollapsed(true);
-    }
-  }, [tutorialActive, currentStep, isSidebarCollapsed]);
+  // Initialize to true if sidebar starts collapsed due to tutorial
+  const tutorialCollapsedSidebarRef = useRef(tutorialActive && currentStep === 'welcome');
 
   // Tutorial: detect sidebar expand to complete 'welcome' step
   // Only triggers when user manually expands after tutorial collapsed it
