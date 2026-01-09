@@ -108,6 +108,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const { showError } = useToast();
   const { currentStep, completeStep, isActive: tutorialActive } = useTutorial();
 
+  console.log('[UseMode] Tutorial state:', { currentStep, tutorialActive });
+
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);

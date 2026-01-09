@@ -432,6 +432,7 @@ const App: React.FC = () => {
 
   // Demo mode - field only with demo header in sidebar
   if (mode === AppMode.DEMO && project) {
+    console.log('[App] Rendering DEMO mode with TutorialProvider');
     return (
       <QueryClientProvider client={queryClient}>
         <ToastProvider>

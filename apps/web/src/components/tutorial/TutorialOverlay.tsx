@@ -27,6 +27,8 @@ export const TutorialOverlay: React.FC = () => {
 
   const config = currentStep ? STEP_CONFIG[currentStep] : null;
 
+  console.log('[TutorialOverlay] Render:', { currentStep, isActive, hasConfig: !!config });
+
   // Find and track target element
   useEffect(() => {
     if (!config?.targetSelector) {

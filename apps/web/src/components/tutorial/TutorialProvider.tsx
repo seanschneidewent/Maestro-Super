@@ -19,11 +19,13 @@ const STEP_ORDER: NonNullable<TutorialStep>[] = ['welcome', 'sidebar', 'viewer',
 // Check localStorage synchronously to avoid flash of wrong state
 const getInitialTutorialState = () => {
   const completed = localStorage.getItem(STORAGE_KEY) === 'true';
-  return {
+  const state = {
     hasCompleted: completed,
     isActive: !completed,
     currentStep: completed ? null : ('welcome' as TutorialStep),
   };
+  console.log('[TutorialProvider] getInitialTutorialState:', state);
+  return state;
 };
 
 export const TutorialProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -60,15 +62,19 @@ export const TutorialProvider: React.FC<{ children: ReactNode }> = ({ children }
     setCurrentStep(null);
   }, []);
 
+  const contextValue = {
+    currentStep,
+    isActive,
+    hasCompleted,
+    advanceStep,
+    skipTutorial,
+    completeStep,
+  };
+
+  console.log('[TutorialProvider] Rendering with value:', { currentStep, isActive, hasCompleted });
+
   return (
-    <TutorialContext.Provider value={{
-      currentStep,
-      isActive,
-      hasCompleted,
-      advanceStep,
-      skipTutorial,
-      completeStep,
-    }}>
+    <TutorialContext.Provider value={contextValue}>
       {children}
     </TutorialContext.Provider>
   );
