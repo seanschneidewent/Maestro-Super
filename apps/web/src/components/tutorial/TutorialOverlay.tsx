@@ -27,8 +27,6 @@ export const TutorialOverlay: React.FC = () => {
 
   const config = currentStep ? STEP_CONFIG[currentStep] : null;
 
-  console.log('[TutorialOverlay] Render:', { currentStep, isActive, hasConfig: !!config });
-
   // Find and track target element
   useEffect(() => {
     if (!config?.targetSelector) {
@@ -73,8 +71,8 @@ export const TutorialOverlay: React.FC = () => {
         Skip Tutorial
       </button>
 
-      {/* Semi-transparent backdrop */}
-      <div className="fixed inset-0 z-[45] bg-slate-900/20 pointer-events-none" />
+      {/* Semi-transparent backdrop - more opaque to hide underlying content */}
+      <div className="fixed inset-0 z-[45] bg-slate-100/80 backdrop-blur-sm pointer-events-none" />
 
       {/* Center text */}
       <div className="fixed inset-0 z-[50] pointer-events-none flex items-center justify-center">

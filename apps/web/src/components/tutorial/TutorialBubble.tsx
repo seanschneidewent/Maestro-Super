@@ -24,18 +24,18 @@ export const TutorialBubble: React.FC = () => {
     }
   }, [text]);
 
-  // Auto-advance after 3 seconds for 'viewer' step
+  // Auto-advance after 4 seconds for 'viewer' step (give user time to read)
   useEffect(() => {
     if (currentStep === 'viewer') {
-      const timer = setTimeout(advanceStep, 3000);
+      const timer = setTimeout(advanceStep, 4000);
       return () => clearTimeout(timer);
     }
   }, [currentStep, advanceStep]);
 
-  // Auto-end tutorial after 'complete' step shows briefly
+  // Auto-end tutorial after 'complete' step shows for 3 seconds
   useEffect(() => {
     if (currentStep === 'complete') {
-      const timer = setTimeout(advanceStep, 2500);
+      const timer = setTimeout(advanceStep, 3000);
       return () => clearTimeout(timer);
     }
   }, [currentStep, advanceStep]);
