@@ -72,20 +72,28 @@ const App: React.FC = () => {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[AUTH DEBUG] onAuthStateChange fired:', event, 'session:', session ? 'exists' : 'null', 'isAnonymous:', session?.user?.is_anonymous);
+      console.log('[AUTH DEBUG] pendingLoginRef.current =', pendingLoginRef.current);
+
       if (event === 'SIGNED_IN' && session) {
         if (isAnonymousUser(session)) {
+          console.log('[AUTH DEBUG] SIGNED_IN with anonymous user, setting DEMO mode');
           setMode(AppMode.DEMO);
         } else {
+          console.log('[AUTH DEBUG] SIGNED_IN with real user, setting USE mode');
           setProject(null); // Clear to force re-fetch for new user
           setMode(AppMode.USE);
         }
       } else if (event === 'SIGNED_OUT') {
+        console.log('[AUTH DEBUG] SIGNED_OUT event received');
         setProject(null);
         // Check if this is intentional (user clicked "Get Started")
         if (pendingLoginRef.current) {
+          console.log('[AUTH DEBUG] pendingLoginRef is TRUE, setting LOGIN mode');
           pendingLoginRef.current = false;
           setMode(AppMode.LOGIN);
         } else {
+          console.log('[AUTH DEBUG] pendingLoginRef is FALSE, signing in anonymously');
           // After sign out, try anonymous sign-in for demo mode
           signInAnonymously()
             .then(() => setMode(AppMode.DEMO))
@@ -224,8 +232,11 @@ const App: React.FC = () => {
   };
 
   const handleGetStarted = async () => {
+    console.log('[AUTH DEBUG] handleGetStarted called, setting pendingLoginRef to true');
     pendingLoginRef.current = true;
-    await supabase.auth.signOut();
+    console.log('[AUTH DEBUG] pendingLoginRef.current =', pendingLoginRef.current);
+    const result = await supabase.auth.signOut();
+    console.log('[AUTH DEBUG] signOut completed, result:', result);
   };
 
   const handleBackToDemo = async () => {
