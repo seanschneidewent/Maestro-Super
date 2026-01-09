@@ -230,6 +230,9 @@ const App: React.FC = () => {
 
   const handleBackToDemo = async () => {
     try {
+      // Sign out first to clear any existing session
+      await supabase.auth.signOut();
+      // Then sign in anonymously for demo mode
       await signInAnonymously();
       setMode(AppMode.DEMO);
     } catch (err) {
