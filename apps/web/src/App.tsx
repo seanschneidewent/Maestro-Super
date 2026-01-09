@@ -7,7 +7,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
 import { queryClient } from './lib/queryClient';
 import { AppMode, Project } from './types';
-import { Settings, Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import { api } from './lib/api';
 import { supabase, signInAnonymously, isAnonymousUser } from './lib/supabase';
 
@@ -228,6 +228,15 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
   };
 
+  const handleBackToDemo = async () => {
+    try {
+      await signInAnonymously();
+      setMode(AppMode.DEMO);
+    } catch (err) {
+      console.error('Failed to return to demo:', err);
+    }
+  };
+
   // Show loading while checking auth
   if (checkingAuth) {
     return (
@@ -387,11 +396,11 @@ const App: React.FC = () => {
                 </div>
                 <div className="mt-8 pt-6 border-t border-white/5 text-center">
                     <button
-                      onClick={() => setMode(AppMode.SETUP)}
+                      onClick={handleBackToDemo}
                       className="text-xs text-slate-500 hover:text-cyan-400 transition-colors flex items-center gap-2 mx-auto"
                     >
-                        <Settings size={12} />
-                        Switch to Setup Mode (Admin)
+                        <ArrowLeft size={12} />
+                        Back to Demo
                     </button>
                 </div>
             </div>
