@@ -249,6 +249,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'tool_call':
         if (typeof data.tool === 'string') {
           // Set current tool for status display
+          console.log('[useFieldStream] tool_call event, setting currentTool:', data.tool)
           setCurrentTool(data.tool)
 
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
@@ -300,6 +301,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'tool_result':
         if (typeof data.tool === 'string') {
           // Clear current tool since result arrived
+          console.log('[useFieldStream] tool_result event, clearing currentTool (was:', data.tool, ')')
           setCurrentTool(null)
 
           const newStep: AgentTraceStep = {

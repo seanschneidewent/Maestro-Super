@@ -214,8 +214,11 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
   // Update tool status when currentTool changes
   useEffect(() => {
+    console.log('[PlanViewer] currentTool changed:', currentTool);
     if (currentTool) {
-      setToolStatus(getToolStatusMessage(currentTool));
+      const statusMsg = getToolStatusMessage(currentTool);
+      console.log('[PlanViewer] Setting toolStatus to:', statusMsg);
+      setToolStatus(statusMsg);
     } else {
       setToolStatus(null);
     }
@@ -475,6 +478,16 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // =====================================
   // Show tool status during streaming (always), or greeting if pages haven't been shown yet
   const displayText = tutorialText || toolStatus || (!hasEverShownPage.current ? greeting : null);
+
+  // Debug logging
+  console.log('[PlanViewer] Empty state render:', {
+    tutorialText,
+    toolStatus,
+    hasEverShownPage: hasEverShownPage.current,
+    greeting,
+    displayText,
+    selectedPagesLength: selectedPages.length,
+  });
 
   return (
     <div className="flex-1 flex items-center justify-center h-full blueprint-grid">
