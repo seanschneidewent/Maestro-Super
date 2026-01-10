@@ -6,6 +6,7 @@ import { TutorialStep } from '../../types';
 const TARGET_SELECTORS: Partial<Record<NonNullable<TutorialStep>, string>> = {
   welcome: '[data-tutorial="sidebar-expand"]',
   sidebar: '[data-tutorial="first-page"]',
+  query: '[data-tutorial="query-input"]',
 };
 
 export const TutorialOverlay: React.FC = () => {

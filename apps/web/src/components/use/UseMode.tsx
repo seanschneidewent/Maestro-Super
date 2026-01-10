@@ -570,7 +570,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           })()}
 
           <div className="flex items-center gap-3">
-            <div className="flex-1">
+            <div className="flex-1" data-tutorial="query-input">
               <QueryInput
                 value={queryInput}
                 onChange={setQueryInput}
