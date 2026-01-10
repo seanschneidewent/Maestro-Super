@@ -50,6 +50,7 @@ interface UseFieldStreamReturn {
   currentQueryId: string | null
   trace: AgentTraceStep[]
   selectedPages: AgentSelectedPage[]
+  currentTool: string | null
   response: FieldResponse | null
   error: string | null
   reset: () => void
@@ -77,6 +78,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   const [currentQueryId, setCurrentQueryId] = useState<string | null>(null)
   const [trace, setTrace] = useState<AgentTraceStep[]>([])
   const [selectedPages, setSelectedPages] = useState<AgentSelectedPage[]>([])
+  const [currentTool, setCurrentTool] = useState<string | null>(null)
   const [response, setResponse] = useState<FieldResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -246,6 +248,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_call':
         if (typeof data.tool === 'string') {
+          // Set current tool for status display
+          setCurrentTool(data.tool)
+
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
           const newStep: AgentTraceStep = {
             type: 'tool_call',
@@ -294,6 +299,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_result':
         if (typeof data.tool === 'string') {
+          // Clear current tool since result arrived
+          setCurrentTool(null)
+
           const newStep: AgentTraceStep = {
             type: 'tool_result',
             tool: data.tool,
@@ -582,6 +590,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setCurrentQueryId(null)
     setTrace([])
     setSelectedPages([])
+    setCurrentTool(null)
     selectedPagesRef.current = []
     currentQueryRef.current = null
     pageDataCache.current.clear()
@@ -622,6 +631,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     currentQueryId,
     trace,
     selectedPages,
+    currentTool,
     response,
     error,
     reset,

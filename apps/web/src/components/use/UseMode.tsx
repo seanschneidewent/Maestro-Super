@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
@@ -177,6 +177,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     currentQueryId,
     trace,
     selectedPages,
+    currentTool,
     error,
     reset: resetStream,
     restore,
@@ -188,29 +189,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     contextPointers,
     onQueryComplete: handleQueryComplete,
   });
-
-  // Derive current tool from trace (for status display in PlanViewer)
-  const currentTool = useMemo(() => {
-    console.log('[UseMode] currentTool useMemo running - isStreaming:', isStreaming, 'trace.length:', trace.length);
-    if (!isStreaming || trace.length === 0) return undefined;
-
-    // Find the most recent tool_call that doesn't have a matching tool_result yet
-    for (let i = trace.length - 1; i >= 0; i--) {
-      const step = trace[i];
-      if (step.type === 'tool_call' && step.tool) {
-        // Check if there's a tool_result after this
-        const hasResult = trace.slice(i + 1).some(
-          s => s.type === 'tool_result' && s.tool === step.tool
-        );
-        if (!hasResult) {
-          console.log('[UseMode] currentTool derived:', step.tool);
-          return step.tool;
-        }
-      }
-    }
-    console.log('[UseMode] No pending tool_call found');
-    return undefined;
-  }, [isStreaming, trace]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback((prompt: string) => {
