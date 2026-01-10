@@ -598,6 +598,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             <SuggestedPrompts
               onSelectPrompt={handleSuggestedPrompt}
               disabled={isStreaming}
+              showTutorialArrows={tutorialActive && inputHasBeenFocused && !hasCompleted}
             />
           )}
 
@@ -646,7 +647,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                 isProcessing={isStreaming}
                 onFocus={() => {
                   setInputHasBeenFocused(true);
-                  completeStep('query');
+                  // Don't advance step here - wait for agent response to complete
                 }}
               />
             </div>
