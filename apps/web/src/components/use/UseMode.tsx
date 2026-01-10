@@ -529,7 +529,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
             tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
             tutorialActive && currentStep === 'session-intro' ? "Now we're in a new session." :
-            tutorialActive && currentStep === 'history' ? "These are previous sessions" :
+            tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous sessions") :
             tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
             undefined
           }
