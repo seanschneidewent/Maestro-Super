@@ -82,6 +82,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   const abortControllerRef = useRef<AbortController | null>(null)
   const selectedPagesRef = useRef<AgentSelectedPage[]>([])
   const currentQueryRef = useRef<{ id: string; text: string } | null>(null)
+  const pageDataCache = useRef<Map<string, { filePath: string; pageName: string; disciplineId: string }>>(new Map())
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {
@@ -264,6 +265,30 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
               })
             }
           }
+
+          // Prefetch pages on select_pages tool_call using cached search_pages data
+          if (data.tool === 'select_pages') {
+            const input = data.input as { page_ids?: string[] }
+            if (input?.page_ids) {
+              const pagesToPrefetch: AgentSelectedPage[] = []
+              for (const pageId of input.page_ids) {
+                const cached = pageDataCache.current.get(pageId)
+                if (cached) {
+                  pagesToPrefetch.push({
+                    pageId,
+                    pageName: cached.pageName,
+                    filePath: cached.filePath,
+                    disciplineId: cached.disciplineId,
+                    pointers: [],
+                  })
+                }
+              }
+              if (pagesToPrefetch.length > 0) {
+                selectedPagesRef.current = pagesToPrefetch
+                setSelectedPages([...pagesToPrefetch])
+              }
+            }
+          }
         }
         break
 
@@ -276,6 +301,20 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           }
           agentMessage.trace.push(newStep)
           setTrace([...agentMessage.trace])
+
+          // Cache page data from search_pages for prefetching on select_pages tool_call
+          if (data.tool === 'search_pages') {
+            const result = data.result as { pages?: Array<{ page_id: string; page_name: string; file_path: string; discipline_id: string }> }
+            if (result?.pages) {
+              for (const p of result.pages) {
+                pageDataCache.current.set(p.page_id, {
+                  filePath: p.file_path,
+                  pageName: p.page_name,
+                  disciplineId: p.discipline_id,
+                })
+              }
+            }
+          }
 
           // Extract selected pages from select_pages tool
           if (data.tool === 'select_pages') {
@@ -545,6 +584,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     setSelectedPages([])
     selectedPagesRef.current = []
     currentQueryRef.current = null
+    pageDataCache.current.clear()
     setResponse(null)
     setError(null)
   }, [abort])
