@@ -67,6 +67,8 @@
               'slide-in-right': 'slideInRight 0.3s ease-out',
               'scale-in': 'scaleIn 0.2s ease-out',
               'glow-pulse': 'glowPulse 2s ease-in-out infinite',
+              'status-blink': 'statusBlink 1.5s ease-in-out infinite',
+              'cursor-blink': 'cursorBlink 530ms step-end infinite',
             },
             keyframes: {
               fadeIn: {
@@ -88,6 +90,14 @@
               glowPulse: {
                 '0%, 100%': { boxShadow: '0 0 25px rgba(6, 182, 212, 0.5), 0 0 50px rgba(6, 182, 212, 0.25)' },
                 '50%': { boxShadow: '0 0 35px rgba(6, 182, 212, 0.7), 0 0 70px rgba(6, 182, 212, 0.35)' },
+              },
+              statusBlink: {
+                '0%, 100%': { opacity: '1' },
+                '50%': { opacity: '0.3' },
+              },
+              cursorBlink: {
+                '0%, 100%': { opacity: '1' },
+                '50%': { opacity: '0' },
               },
             },
             backdropBlur: {

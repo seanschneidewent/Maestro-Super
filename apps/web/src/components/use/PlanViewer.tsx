@@ -4,6 +4,7 @@ import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
+import { MaestroText } from './MaestroText';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -479,7 +480,10 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   return (
     <div className="flex-1 flex items-center justify-center h-full blueprint-grid">
       {displayText && (
-        <p className="text-black text-2xl">{displayText}</p>
+        <MaestroText
+          text={displayText}
+          state={currentTool ? 'working' : 'typing'}
+        />
       )}
     </div>
   );
