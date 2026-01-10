@@ -410,15 +410,32 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 })
               }
 
-              // Merge with existing selected pages (avoid duplicates), preserving order
-              const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
-              const newPages = pageOrder
-                .map(pageId => pageMap.get(pageId)!)
-                .filter((p) => !existingPageIds.has(p.pageId)
-              )
+              // Merge pointers into existing pages OR add new pages
+              const existingPageMap = new Map(selectedPagesRef.current.map((p) => [p.pageId, p]))
+              let hasChanges = false
 
-              if (newPages.length > 0) {
-                selectedPagesRef.current = [...selectedPagesRef.current, ...newPages]
+              for (const pageId of pageOrder) {
+                const newPageData = pageMap.get(pageId)!
+                const existingPage = existingPageMap.get(pageId)
+
+                if (existingPage) {
+                  // Page already exists - merge pointers into it
+                  const existingPointerIds = new Set(existingPage.pointers.map((p) => p.pointerId))
+                  for (const pointer of newPageData.pointers) {
+                    if (!existingPointerIds.has(pointer.pointerId)) {
+                      existingPage.pointers.push(pointer)
+                      hasChanges = true
+                    }
+                  }
+                } else {
+                  // New page - add it to the list
+                  selectedPagesRef.current.push(newPageData)
+                  existingPageMap.set(pageId, newPageData)
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
                 setSelectedPages([...selectedPagesRef.current])
               }
               // Don't update thinkingText for tool results - only show reasoning in the bubble
