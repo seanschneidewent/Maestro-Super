@@ -117,6 +117,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [queryInput, setQueryInput] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
+  const [inputHasBeenFocused, setInputHasBeenFocused] = useState(false);
   // Start with sidebar collapsed if tutorial is on welcome step
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     tutorialActive && currentStep === 'welcome'
@@ -592,8 +593,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
-          {/* Suggested prompts - show in demo mode during query step or after tutorial */}
-          {mode === AppMode.DEMO && (currentStep === 'query' || !tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
+          {/* Suggested prompts - show in demo mode after input focused or after tutorial */}
+          {mode === AppMode.DEMO && (inputHasBeenFocused || !tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
             <SuggestedPrompts
               onSelectPrompt={handleSuggestedPrompt}
               disabled={isStreaming}
@@ -643,7 +644,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   }
                 }}
                 isProcessing={isStreaming}
-                onFocus={() => completeStep('query')}
+                onFocus={() => {
+                  setInputHasBeenFocused(true);
+                  completeStep('query');
+                }}
               />
             </div>
             <NewSessionButton

@@ -68,7 +68,7 @@ export const TutorialOverlay: React.FC = () => {
             }}
           />
 
-          {/* Arrow pointing to target - position below for top-of-screen elements */}
+          {/* Arrow pointing to target - position varies by step */}
           {currentStep === 'history' ? (
             // Arrow below target, pointing up
             <div
@@ -86,6 +86,32 @@ export const TutorialOverlay: React.FC = () => {
               >
                 <path
                   d="M20 35 L20 10 M12 18 L20 10 L28 18"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+          ) : currentStep === 'sidebar' ? (
+            // Arrow to the right of target, pointing left
+            <div
+              className="fixed z-[55] pointer-events-none"
+              style={{
+                left: targetRect.left + targetRect.width + 10,
+                top: targetRect.top + targetRect.height / 2 - 20,
+              }}
+            >
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 40 40"
+                className="animate-[bounce_1s_infinite] text-cyan-500"
+                style={{ animationDirection: 'alternate' }}
+              >
+                <path
+                  d="M35 20 L10 20 M18 12 L10 20 L18 28"
                   stroke="currentColor"
                   strokeWidth="3"
                   fill="none"
