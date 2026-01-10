@@ -200,9 +200,9 @@ STRATEGY:
 7. Stop when you can comprehensively answer the question
 
 DISPLAYING RESULTS:
-- Use select_pages when you want to show the user specific plan sheets without highlighting
-- Use select_pointers when you want to highlight specific details/areas on the plans
-- Always call one of these before your final answer so the user can see the relevant plans
+- PREFER select_pointers over select_pages! When you've found relevant pointers through search_pointers, use select_pointers to highlight them. This shows the user exactly where to look on the plan.
+- Only use select_pages when you're showing whole sheets without specific details to highlight (e.g., user just wants to see a sheet, or you didn't find relevant pointers).
+- Always call one of these before your final answer so the user can see the relevant plans.
 - PAGE ORDERING: Always order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3). If the user requests a specific order (e.g., "show me the detail first" or "start with the overview"), follow their preference instead.
 
 BEFORE YOUR FINAL ANSWER:
