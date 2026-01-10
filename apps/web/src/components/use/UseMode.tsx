@@ -197,11 +197,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     submitQuery(prompt, currentSession?.id);
-    // Advance from 'query' step when a prompt is selected (removes input highlight)
-    if (tutorialActive && currentStep === 'query') {
-      advanceStep();
-    }
-  }, [isStreaming, currentSession?.id, submitQuery, tutorialActive, currentStep, advanceStep]);
+  }, [isStreaming, currentSession?.id, submitQuery]);
 
   // Handle restoring a previous session from history
   const handleRestoreSession = (
@@ -647,16 +643,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                     setIsQueryExpanded(false);
                     submitQuery(queryInput.trim(), currentSession?.id);
                     setQueryInput('');
-                    // Advance from 'query' step when query submitted (removes input highlight)
-                    if (tutorialActive && currentStep === 'query') {
-                      advanceStep();
-                    }
                   }
                 }}
                 isProcessing={isStreaming}
                 onFocus={() => {
                   setInputHasBeenFocused(true);
-                  // Don't advance step here - wait for agent response to complete
+                  // Advance from 'query' step to hide the input arrow
+                  if (tutorialActive && currentStep === 'query') {
+                    advanceStep(); // → 'responding' (no arrow)
+                  }
                 }}
               />
             </div>
