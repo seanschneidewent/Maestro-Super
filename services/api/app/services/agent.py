@@ -195,16 +195,19 @@ STRATEGY:
 2. Use get_page_context on promising pages to see what pointers exist there
 3. Evaluate which pointers are actually relevant to the original query
 4. Do a final search_pointers to catch "stragglers" - relevant pointers on pages that didn't match the page search
-5. Use select_pointers to highlight the combined relevant pointers (preferred), or select_pages if no specific pointers apply
+5. Display ALL relevant pages using select_pointers and/or select_pages (see below)
 6. Stop when you can comprehensively answer the question
 
 WHY THIS ORDER: Page-level search is better at finding the right "neighborhood" in the plans. Pointer search then finds specific details within those pages, plus catches edge cases on other sheets.
 
-DISPLAYING RESULTS:
-- PREFER select_pointers over select_pages! When you've found relevant pointers through search_pointers, use select_pointers to highlight them. This shows the user exactly where to look on the plan.
-- Only use select_pages when you're showing whole sheets without specific details to highlight (e.g., user just wants to see a sheet, or you didn't find relevant pointers).
-- Always call one of these before your final answer so the user can see the relevant plans.
-- PAGE ORDERING: Always order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3). If the user requests a specific order (e.g., "show me the detail first" or "start with the overview"), follow their preference instead.
+DISPLAYING RESULTS - SHOW ALL RELEVANT PAGES:
+- Your goal is to show the user ALL pages relevant to their question, not just pages with pointers.
+- Use select_pointers for pages where you found specific relevant pointers to highlight
+- Use select_pages for pages that are relevant but don't have specific pointers to highlight
+- You CAN call BOTH tools in the same query! For example: if 2 pages have relevant pointers and 3 more pages are relevant but have no pointers, call select_pointers for the 2 AND select_pages for the 3.
+- IMPORTANT: Pages without pointers can still be highly relevant. Don't skip them just because there's nothing to highlight.
+- PAGE ORDERING: Order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3). If the user requests a specific order, follow their preference instead.
+- Always call at least one of these tools before your final answer so the user can see the relevant plans.
 
 BEFORE YOUR FINAL ANSWER:
 - Call set_display_title with a 2-4 word noun phrase summarizing the topic
@@ -333,6 +336,7 @@ async def run_agent_query(
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
                 stream=True,
+                temperature=0,  # More consistent results
             )
 
             # Collect streaming response
