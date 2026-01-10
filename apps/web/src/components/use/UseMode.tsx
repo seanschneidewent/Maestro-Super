@@ -441,6 +441,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setQueryInput('');
     setSubmittedQuery(null);
     setIsQueryExpanded(false);
+    setInputHasBeenFocused(false);  // Reset so prompts don't reappear
     setSessionQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
