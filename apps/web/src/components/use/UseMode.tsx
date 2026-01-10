@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
-import { PlanViewer } from './PlanViewer';
+import { FeedViewer, FeedItem } from './FeedViewer';
 import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
 import { DemoHeader } from '../DemoHeader';
@@ -17,7 +17,6 @@ import {
   QueryHistoryPanel,
   AgentSelectedPage,
   NewSessionButton,
-  QueryBubbleStack,
   CompletedQuery,
   SuggestedPrompts,
 } from '../field';
@@ -142,6 +141,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Store trace data for each query so we can restore thinking section
   const [queryTraceCache] = useState<Map<string, AgentTraceStep[]>>(new Map());
 
+  // Feed items for vertical scroll view
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+
+  // Track previous streaming state to detect completion
+  const wasStreamingRef = useRef(false);
+
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
@@ -191,9 +196,51 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     onQueryComplete: handleQueryComplete,
   });
 
+  // Detect streaming completion and add pages/text to feed
+  useEffect(() => {
+    // Streaming just ended (true → false)
+    if (wasStreamingRef.current && !isStreaming) {
+      // Add pages if we have them
+      if (selectedPages.length > 0) {
+        setFeedItems((prev) => [
+          ...prev,
+          {
+            type: 'pages',
+            id: crypto.randomUUID(),
+            pages: selectedPages,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      // Add text response if we have one (and no pages, or as additional response)
+      if (finalAnswer && selectedPages.length === 0) {
+        setFeedItems((prev) => [
+          ...prev,
+          {
+            type: 'text',
+            id: crypto.randomUUID(),
+            content: finalAnswer,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming, selectedPages, finalAnswer]);
+
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback((prompt: string) => {
     if (isStreaming) return;
+    // Add user query to feed
+    setFeedItems((prev) => [
+      ...prev,
+      {
+        type: 'user-query',
+        id: crypto.randomUUID(),
+        text: prompt,
+        timestamp: Date.now(),
+      },
+    ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     submitQuery(prompt, currentSession?.id);
@@ -388,6 +435,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setActiveQueryId(null);
     queryPagesCache.clear();
     queryTraceCache.clear();
+    setFeedItems([]);
 
     // Set sidebar highlighting
     setSelectedPageId(pageId);
@@ -443,6 +491,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.clear();
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
+    setFeedItems([]);  // Clear feed
 
     // Tutorial: advance from 'new-session' step
     if (tutorialActive && currentStep === 'new-session') {
@@ -519,11 +568,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       {/* Main viewer area */}
       <div className="flex-1 relative flex flex-col overflow-hidden">
         {/* PlanViewer - handles PDF rendering */}
-        <PlanViewer
+        <FeedViewer
           key={currentSession?.id}
-          selectedPages={selectedPages}
-          onVisiblePageChange={handleVisiblePageChange}
-          showPointers={isStreaming || activeQueryId !== null}
+          feedItems={feedItems}
+          isStreaming={isStreaming}
+          streamingText={finalAnswer}
           currentTool={currentTool}
           tutorialText={
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
@@ -560,26 +609,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           </button>
         )}
 
-        {/* Query bubble stack - unified list of all queries */}
-        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && (currentStep === 'viewer' || currentStep === 'query'))) && (
-          <div className="absolute bottom-20 left-4 z-30">
-            <QueryBubbleStack
-              queries={sessionQueries}
-              activeQueryId={activeQueryId}
-              onSelectQuery={handleSelectQuery}
-              isStreaming={isStreaming}
-              thinkingText={thinkingText}
-              streamingDisplayTitle={displayTitle}
-              streamingFinalAnswer={finalAnswer}
-              tutorialMessage={
-                tutorialActive && currentStep === 'viewer' ? "Pinch to zoom. Drag to pan." :
-                tutorialActive && currentStep === 'query' ? "Ask me anything about these plans." :
-                undefined
-              }
-            />
-          </div>
-        )}
-
+        
         {/* Centered sign-up button for tutorial complete step */}
         {tutorialActive && currentStep === 'complete' && onGetStarted && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
@@ -603,35 +633,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             />
           )}
 
-          {/* User query bubble - appears above input when query is active */}
-          {submittedQuery && (isStreaming || activeQueryId) && (() => {
-            const words = submittedQuery.split(/\s+/);
-            const isLong = words.length > 7;
-            const truncatedText = isLong ? words.slice(0, 7).join(' ') : submittedQuery;
-            const showFade = isLong && !isQueryExpanded;
-
-            return (
-              <div className="flex justify-end mb-2">
-                <button
-                  onClick={() => isLong && setIsQueryExpanded(!isQueryExpanded)}
-                  className={`
-                    bg-blue-600 text-white rounded-2xl px-4 py-2 text-sm shadow-lg max-w-[80%]
-                    text-left relative overflow-hidden
-                    ${isLong ? 'cursor-pointer hover:bg-blue-700' : 'cursor-default'}
-                    transition-colors
-                  `}
-                >
-                  <span className={showFade ? 'line-clamp-1' : ''}>
-                    {isQueryExpanded || !isLong ? submittedQuery : truncatedText}
-                  </span>
-                  {showFade && (
-                    <span className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-blue-600 to-transparent pointer-events-none" />
-                  )}
-                </button>
-              </div>
-            );
-          })()}
-
           <div className="flex items-center gap-3">
             <div className="flex-1" data-tutorial="query-input">
               <QueryInput
@@ -639,9 +640,20 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                 onChange={setQueryInput}
                 onSubmit={() => {
                   if (queryInput.trim() && !isStreaming) {
-                    setSubmittedQuery(queryInput.trim());
+                    const trimmedQuery = queryInput.trim();
+                    // Add user query to feed
+                    setFeedItems((prev) => [
+                      ...prev,
+                      {
+                        type: 'user-query',
+                        id: crypto.randomUUID(),
+                        text: trimmedQuery,
+                        timestamp: Date.now(),
+                      },
+                    ]);
+                    setSubmittedQuery(trimmedQuery);
                     setIsQueryExpanded(false);
-                    submitQuery(queryInput.trim(), currentSession?.id);
+                    submitQuery(trimmedQuery, currentSession?.id);
                     setQueryInput('');
                   }
                 }}
