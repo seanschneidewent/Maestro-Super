@@ -300,9 +300,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_result':
         if (typeof data.tool === 'string') {
-          // Clear current tool since result arrived
-          console.log('[useFieldStream] tool_result event, clearing currentTool (was:', data.tool, ')')
-          setCurrentTool(null)
+          // NOTE: Don't clear currentTool here - React batching causes the status to never show.
+          // Instead, clear it only when streaming ends (in 'done' case).
+          console.log('[useFieldStream] tool_result event for:', data.tool)
 
           const newStep: AgentTraceStep = {
             type: 'tool_result',
@@ -558,6 +558,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         )
         setResponse(fieldResponse)
         setIsStreaming(false)
+        setCurrentTool(null) // Clear tool status when streaming completes
 
         // Notify parent of completed query
         if (onQueryComplete && currentQueryRef.current) {
@@ -579,6 +580,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           setError('An error occurred')
         }
         setIsStreaming(false)
+        setCurrentTool(null) // Clear tool status on error
         break
     }
   }
