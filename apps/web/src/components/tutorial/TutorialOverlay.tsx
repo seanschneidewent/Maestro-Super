@@ -68,30 +68,58 @@ export const TutorialOverlay: React.FC = () => {
             }}
           />
 
-          {/* Arrow pointing to target */}
-          <div
-            className="fixed z-[55] pointer-events-none"
-            style={{
-              left: targetRect.left + targetRect.width / 2 - 20,
-              top: targetRect.top - 50,
-            }}
-          >
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 40 40"
-              className="animate-bounce text-cyan-500"
+          {/* Arrow pointing to target - position below for top-of-screen elements */}
+          {currentStep === 'history' ? (
+            // Arrow below target, pointing up
+            <div
+              className="fixed z-[55] pointer-events-none"
+              style={{
+                left: targetRect.left + targetRect.width / 2 - 20,
+                top: targetRect.top + targetRect.height + 10,
+              }}
             >
-              <path
-                d="M20 5 L20 30 M12 22 L20 30 L28 22"
-                stroke="currentColor"
-                strokeWidth="3"
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 40 40"
+                className="animate-bounce text-cyan-500"
+              >
+                <path
+                  d="M20 35 L20 10 M12 18 L20 10 L28 18"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+          ) : (
+            // Arrow above target, pointing down (default)
+            <div
+              className="fixed z-[55] pointer-events-none"
+              style={{
+                left: targetRect.left + targetRect.width / 2 - 20,
+                top: targetRect.top - 50,
+              }}
+            >
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 40 40"
+                className="animate-bounce text-cyan-500"
+              >
+                <path
+                  d="M20 5 L20 30 M12 22 L20 30 L28 22"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+          )}
         </>
       )}
     </>

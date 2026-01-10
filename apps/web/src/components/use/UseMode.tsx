@@ -526,6 +526,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           tutorialText={
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
             tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
+            tutorialActive && currentStep === 'session-intro' ? "Now we're in a new session." :
+            tutorialActive && currentStep === 'history' ? "These are previous sessions" :
+            tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
             undefined
           }
         />
@@ -556,7 +559,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         )}
 
         {/* Query bubble stack - unified list of all queries */}
-        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && ['viewer', 'query', 'session-intro', 'history', 'complete'].includes(currentStep || ''))) && (
+        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && (currentStep === 'viewer' || currentStep === 'query'))) && (
           <div className="absolute bottom-20 left-4 z-30">
             <QueryBubbleStack
               queries={sessionQueries}
@@ -569,28 +572,28 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
               tutorialMessage={
                 tutorialActive && currentStep === 'viewer' ? "Pinch to zoom. Drag to pan." :
                 tutorialActive && currentStep === 'query' ? "Ask me anything about these plans." :
-                tutorialActive && currentStep === 'session-intro' ? "Now we're in a new session." :
-                tutorialActive && currentStep === 'history' ? "These are previous sessions" :
-                tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
                 undefined
               }
             />
-            {/* Sign-up button for tutorial complete step */}
-            {tutorialActive && currentStep === 'complete' && onGetStarted && (
-              <button
-                onClick={onGetStarted}
-                className="mt-3 px-4 py-2 bg-cyan-500 text-white rounded-lg font-medium hover:bg-cyan-600 transition-colors shadow-lg"
-              >
-                Create Account
-              </button>
-            )}
+          </div>
+        )}
+
+        {/* Centered sign-up button for tutorial complete step */}
+        {tutorialActive && currentStep === 'complete' && onGetStarted && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+            <button
+              onClick={onGetStarted}
+              className="pointer-events-auto px-6 py-3 bg-cyan-500 text-white rounded-xl font-medium text-lg hover:bg-cyan-600 transition-colors shadow-xl mt-24"
+            >
+              Create Account
+            </button>
           </div>
         )}
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
-          {/* Suggested prompts - show only in demo mode when tutorial complete and no active query */}
-          {mode === AppMode.DEMO && (!tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
+          {/* Suggested prompts - show in demo mode during query step or after tutorial */}
+          {mode === AppMode.DEMO && (currentStep === 'query' || !tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
             <SuggestedPrompts
               onSelectPrompt={handleSuggestedPrompt}
               disabled={isStreaming}
