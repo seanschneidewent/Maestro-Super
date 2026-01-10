@@ -50,63 +50,6 @@ const WELCOME_GREETINGS = [
   "What can I help you find?",
 ];
 
-// Status messages for each tool type (randomly selected per call)
-const TOOL_STATUS_MESSAGES: Record<string, string[]> = {
-  search_pointers: [
-    "Searching...",
-    "Looking for details...",
-    "Hunting through the plans...",
-  ],
-  search_pages: [
-    "Checking sheets...",
-    "Scanning the plans...",
-    "Looking through pages...",
-  ],
-  get_pointer: [
-    "Looking closer...",
-    "Checking that out...",
-    "Examining...",
-  ],
-  get_page_context: [
-    "Reading the page...",
-    "Seeing what's here...",
-    "Checking this sheet...",
-  ],
-  get_discipline_overview: [
-    "Getting the overview...",
-    "Zooming out...",
-    "Getting the big picture...",
-  ],
-  get_references_to_page: [
-    "Finding references...",
-    "Tracking connections...",
-    "Following the trail...",
-  ],
-  select_pages: [
-    "Pulling up the sheets...",
-    "Loading pages...",
-    "Got it, bringing those up...",
-  ],
-  select_pointers: [
-    "Highlighting...",
-    "Marking the spots...",
-    "Found it, showing you...",
-  ],
-  list_project_pages: [
-    "Browsing the project...",
-    "Looking at what's available...",
-  ],
-};
-
-// Helper to get random status message for a tool
-function getToolStatusMessage(tool: string): string {
-  const messages = TOOL_STATUS_MESSAGES[tool];
-  if (!messages || messages.length === 0) {
-    return "Working on it...";
-  }
-  return messages[Math.floor(Math.random() * messages.length)];
-}
-
 // Reusable function to load a page image (used by both prefetch and current-page loading)
 async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
   // Check cache first
@@ -209,18 +152,6 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   const [greeting] = useState(() =>
     WELCOME_GREETINGS[Math.floor(Math.random() * WELCOME_GREETINGS.length)]
   );
-
-  // Tool status message (changes when currentTool changes)
-  const [toolStatus, setToolStatus] = useState<string | null>(null);
-
-  // Update tool status when currentTool changes
-  useEffect(() => {
-    if (currentTool) {
-      setToolStatus(getToolStatusMessage(currentTool));
-    } else {
-      setToolStatus(null);
-    }
-  }, [currentTool]);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -474,14 +405,15 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // =====================================
   // EMPTY STATE (no pages selected)
   // =====================================
-  // Show tool status during streaming (always), or greeting if pages haven't been shown yet
-  const displayText = tutorialText || toolStatus || (!hasEverShownPage.current ? greeting : null);
+  // Show tutorial text, or greeting if pages haven't been shown yet
+  // When working, MaestroText cycles through its own phrases
+  const displayText = tutorialText || (!hasEverShownPage.current ? greeting : null);
 
   return (
     <div className="flex-1 flex items-center justify-center h-full blueprint-grid">
-      {displayText && (
+      {(displayText || currentTool) && (
         <MaestroText
-          text={displayText}
+          text={displayText || ''}
           state={currentTool ? 'working' : 'typing'}
         />
       )}
