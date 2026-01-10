@@ -534,8 +534,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
-          {/* Suggested prompts - show when tutorial complete and no active query */}
-          {(!tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
+          {/* Suggested prompts - show only in demo mode when tutorial complete and no active query */}
+          {mode === AppMode.DEMO && (!tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
             <SuggestedPrompts
               onSelectPrompt={handleSuggestedPrompt}
               disabled={isStreaming}
