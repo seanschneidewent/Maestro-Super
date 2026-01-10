@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
@@ -188,6 +188,26 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     contextPointers,
     onQueryComplete: handleQueryComplete,
   });
+
+  // Derive current tool from trace (for status display in PlanViewer)
+  const currentTool = useMemo(() => {
+    if (!isStreaming || trace.length === 0) return undefined;
+
+    // Find the most recent tool_call that doesn't have a matching tool_result yet
+    for (let i = trace.length - 1; i >= 0; i--) {
+      const step = trace[i];
+      if (step.type === 'tool_call' && step.tool) {
+        // Check if there's a tool_result after this
+        const hasResult = trace.slice(i + 1).some(
+          s => s.type === 'tool_result' && s.tool === step.tool
+        );
+        if (!hasResult) {
+          return step.tool;
+        }
+      }
+    }
+    return undefined;
+  }, [isStreaming, trace]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback((prompt: string) => {
@@ -478,6 +498,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           selectedPages={selectedPages}
           onVisiblePageChange={handleVisiblePageChange}
           showPointers={isStreaming || activeQueryId !== null}
+          currentTool={currentTool}
           tutorialText={
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
             tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :

@@ -22,6 +22,7 @@ interface PlanViewerProps {
   onVisiblePageChange?: (pageId: string, disciplineId: string) => void;
   showPointers?: boolean; // Only show pointer overlays when viewing query results
   tutorialText?: string; // Override greeting with tutorial message
+  currentTool?: string; // Current tool being called during streaming
 }
 
 // Cache for rendered page images
@@ -47,6 +48,63 @@ const WELCOME_GREETINGS = [
   "Ready when you are.",
   "What can I help you find?",
 ];
+
+// Status messages for each tool type (randomly selected per call)
+const TOOL_STATUS_MESSAGES: Record<string, string[]> = {
+  search_pointers: [
+    "Searching...",
+    "Looking for details...",
+    "Hunting through the plans...",
+  ],
+  search_pages: [
+    "Checking sheets...",
+    "Scanning the plans...",
+    "Looking through pages...",
+  ],
+  get_pointer: [
+    "Looking closer...",
+    "Checking that out...",
+    "Examining...",
+  ],
+  get_page_context: [
+    "Reading the page...",
+    "Seeing what's here...",
+    "Checking this sheet...",
+  ],
+  get_discipline_overview: [
+    "Getting the overview...",
+    "Zooming out...",
+    "Getting the big picture...",
+  ],
+  get_references_to_page: [
+    "Finding references...",
+    "Tracking connections...",
+    "Following the trail...",
+  ],
+  select_pages: [
+    "Pulling up the sheets...",
+    "Loading pages...",
+    "Got it, bringing those up...",
+  ],
+  select_pointers: [
+    "Highlighting...",
+    "Marking the spots...",
+    "Found it, showing you...",
+  ],
+  list_project_pages: [
+    "Browsing the project...",
+    "Looking at what's available...",
+  ],
+};
+
+// Helper to get random status message for a tool
+function getToolStatusMessage(tool: string): string {
+  const messages = TOOL_STATUS_MESSAGES[tool];
+  if (!messages || messages.length === 0) {
+    return "Working on it...";
+  }
+  return messages[Math.floor(Math.random() * messages.length)];
+}
 
 // Reusable function to load a page image (used by both prefetch and current-page loading)
 async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
@@ -137,6 +195,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   onVisiblePageChange,
   showPointers = false,
   tutorialText,
+  currentTool,
 }) => {
   // =====================================
   // ALL HOOKS MUST BE AT THE TOP (unconditionally)
@@ -149,6 +208,18 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   const [greeting] = useState(() =>
     WELCOME_GREETINGS[Math.floor(Math.random() * WELCOME_GREETINGS.length)]
   );
+
+  // Tool status message (changes when currentTool changes)
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
+
+  // Update tool status when currentTool changes
+  useEffect(() => {
+    if (currentTool) {
+      setToolStatus(getToolStatusMessage(currentTool));
+    } else {
+      setToolStatus(null);
+    }
+  }, [currentTool]);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -403,7 +474,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // EMPTY STATE (no pages selected)
   // =====================================
   // Use tutorial text if provided, otherwise use random greeting
-  const displayText = tutorialText || greeting;
+  const displayText = tutorialText || toolStatus || greeting;
 
   return (
     <div className="flex-1 flex items-center justify-center h-full blueprint-grid">

@@ -191,13 +191,14 @@ You have access to these tools:
 - set_display_title: Set a short title for this query (REQUIRED before final answer)
 
 STRATEGY:
-1. Start by searching for relevant pointers or identifying which discipline likely contains the answer
-2. Examine promising pointers in detail
-3. When you find references to other pages, evaluate if they're relevant to the original query
-4. Follow relevant references - keep traversing until you have enough information
-5. If a reference exists but isn't relevant to the query, note it but don't follow it
-6. Use select_pages to show relevant pages, or select_pointers to highlight specific details
-7. Stop when you can comprehensively answer the question
+1. Start by searching for relevant PAGES (search_pages) - this finds the right sheets/areas broadly
+2. Use get_page_context on promising pages to see what pointers exist there
+3. Evaluate which pointers are actually relevant to the original query
+4. Do a final search_pointers to catch "stragglers" - relevant pointers on pages that didn't match the page search
+5. Use select_pointers to highlight the combined relevant pointers (preferred), or select_pages if no specific pointers apply
+6. Stop when you can comprehensively answer the question
+
+WHY THIS ORDER: Page-level search is better at finding the right "neighborhood" in the plans. Pointer search then finds specific details within those pages, plus catches edge cases on other sheets.
 
 DISPLAYING RESULTS:
 - PREFER select_pointers over select_pages! When you've found relevant pointers through search_pointers, use select_pointers to highlight them. This shows the user exactly where to look on the plan.
