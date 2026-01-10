@@ -249,7 +249,6 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'tool_call':
         if (typeof data.tool === 'string') {
           // Set current tool for status display
-          console.log('[useFieldStream] tool_call event, setting currentTool:', data.tool)
           setCurrentTool(data.tool)
 
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
@@ -302,7 +301,6 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         if (typeof data.tool === 'string') {
           // NOTE: Don't clear currentTool here - React batching causes the status to never show.
           // Instead, clear it only when streaming ends (in 'done' case).
-          console.log('[useFieldStream] tool_result event for:', data.tool)
 
           const newStep: AgentTraceStep = {
             type: 'tool_result',
