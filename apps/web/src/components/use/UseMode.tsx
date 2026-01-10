@@ -197,7 +197,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     submitQuery(prompt, currentSession?.id);
-  }, [isStreaming, currentSession?.id, submitQuery]);
+    // Advance from 'query' step when a prompt is selected (removes input highlight)
+    if (tutorialActive && currentStep === 'query') {
+      advanceStep();
+    }
+  }, [isStreaming, currentSession?.id, submitQuery, tutorialActive, currentStep, advanceStep]);
 
   // Handle restoring a previous session from history
   const handleRestoreSession = (
@@ -341,11 +345,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
   }, [tutorialActive, currentStep, advanceStep]);
 
-  // Tutorial: detect streaming end → advance to 'new-session'
+  // Tutorial: detect streaming end → advance from 'responding' to 'new-session'
   useEffect(() => {
-    // Streaming just ended (true → false) during 'query' step
-    if (prevIsStreamingRef.current && !isStreaming && tutorialActive && currentStep === 'query') {
-      // Small delay so user can see the response
+    // Streaming just ended (true → false) during 'responding' step
+    if (prevIsStreamingRef.current && !isStreaming && tutorialActive && currentStep === 'responding') {
+      // Small delay so user can see the response before showing next arrow
       const timer = setTimeout(() => advanceStep(), 1500);
       return () => clearTimeout(timer);
     }
@@ -642,6 +646,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                     setIsQueryExpanded(false);
                     submitQuery(queryInput.trim(), currentSession?.id);
                     setQueryInput('');
+                    // Advance from 'query' step when query submitted (removes input highlight)
+                    if (tutorialActive && currentStep === 'query') {
+                      advanceStep();
+                    }
                   }
                 }}
                 isProcessing={isStreaming}

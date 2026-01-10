@@ -15,7 +15,7 @@ interface TutorialContextValue {
 export const TutorialContext = createContext<TutorialContextValue | null>(null);
 
 const STEP_ORDER: NonNullable<TutorialStep>[] = [
-  'welcome', 'sidebar', 'viewer', 'query',
+  'welcome', 'sidebar', 'viewer', 'query', 'responding',
   'new-session', 'session-intro', 'history', 'complete'
 ];
 
