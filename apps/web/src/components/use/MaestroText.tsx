@@ -76,8 +76,8 @@ export function MaestroText({ text, state }: MaestroTextProps) {
       phraseIndexRef.current = (phraseIndexRef.current + 1) % WORKING_PHRASES.length;
 
       typewritePhrase(phrase, () => {
-        // Wait 1 second then start next phrase
-        timeoutRef.current = window.setTimeout(cycleNext, 1000);
+        // Wait 5 seconds then start next phrase
+        timeoutRef.current = window.setTimeout(cycleNext, 5000);
       });
     };
 
