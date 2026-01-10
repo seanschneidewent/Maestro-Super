@@ -7,6 +7,8 @@ const TARGET_SELECTORS: Partial<Record<NonNullable<TutorialStep>, string>> = {
   welcome: '[data-tutorial="sidebar-expand"]',
   sidebar: '[data-tutorial="first-page"]',
   query: '[data-tutorial="query-input"]',
+  'new-session': '[data-tutorial="new-session-btn"]',
+  'history': '[data-tutorial="history-btn"]',
 };
 
 export const TutorialOverlay: React.FC = () => {

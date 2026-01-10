@@ -8,6 +8,7 @@ interface NewSessionButtonProps {
 export function NewSessionButton({ onClick, disabled }: NewSessionButtonProps) {
   return (
     <button
+      data-tutorial="new-session-btn"
       onClick={onClick}
       disabled={disabled}
       className={`

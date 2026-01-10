@@ -30,6 +30,7 @@ export function SessionControls({
         </button>
       )}
       <button
+        data-tutorial="history-btn"
         onClick={onToggleHistory}
         className={`
           p-2 rounded-lg transition-colors

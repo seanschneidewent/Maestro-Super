@@ -315,6 +315,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Initialize to true if sidebar starts collapsed due to tutorial
   const tutorialCollapsedSidebarRef = useRef(tutorialActive && currentStep === 'welcome');
 
+  // Track previous streaming state to detect when agent finishes
+  const prevIsStreamingRef = useRef(isStreaming);
+
+  // Track if history panel was opened (for tutorial flow)
+  const historyOpenedRef = useRef(false);
+
   // Tutorial: detect sidebar expand to complete 'welcome' step
   // Only triggers when user manually expands after tutorial collapsed it
   useEffect(() => {
@@ -333,6 +339,38 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       return () => clearTimeout(timer);
     }
   }, [tutorialActive, currentStep, advanceStep]);
+
+  // Tutorial: detect streaming end → advance to 'new-session'
+  useEffect(() => {
+    // Streaming just ended (true → false) during 'query' step
+    if (prevIsStreamingRef.current && !isStreaming && tutorialActive && currentStep === 'query') {
+      // Small delay so user can see the response
+      const timer = setTimeout(() => advanceStep(), 1500);
+      return () => clearTimeout(timer);
+    }
+    prevIsStreamingRef.current = isStreaming;
+  }, [isStreaming, tutorialActive, currentStep, advanceStep]);
+
+  // Tutorial: auto-advance from 'session-intro' to 'history' after pause
+  useEffect(() => {
+    if (tutorialActive && currentStep === 'session-intro') {
+      const timer = setTimeout(() => advanceStep(), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [tutorialActive, currentStep, advanceStep]);
+
+  // Tutorial: track history panel toggle → advance from 'history' when closed after opening
+  useEffect(() => {
+    if (tutorialActive && currentStep === 'history') {
+      if (showHistory) {
+        historyOpenedRef.current = true;
+      } else if (historyOpenedRef.current) {
+        // Panel was open, now closed
+        advanceStep(); // → 'complete'
+        historyOpenedRef.current = false;
+      }
+    }
+  }, [showHistory, tutorialActive, currentStep, advanceStep]);
 
   // Handle page selection from PlansPanel
   // Resets to fresh session state and loads page into agent viewer
@@ -403,6 +441,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.clear();
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
+
+    // Tutorial: advance from 'new-session' step
+    if (tutorialActive && currentStep === 'new-session') {
+      advanceStep(); // → 'session-intro'
+    }
   };
 
   // Handle selecting a query from the QueryStack
@@ -513,7 +556,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         )}
 
         {/* Query bubble stack - unified list of all queries */}
-        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && (currentStep === 'viewer' || currentStep === 'query'))) && (
+        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && ['viewer', 'query', 'session-intro', 'history', 'complete'].includes(currentStep || ''))) && (
           <div className="absolute bottom-20 left-4 z-30">
             <QueryBubbleStack
               queries={sessionQueries}
@@ -526,9 +569,21 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
               tutorialMessage={
                 tutorialActive && currentStep === 'viewer' ? "Pinch to zoom. Drag to pan." :
                 tutorialActive && currentStep === 'query' ? "Ask me anything about these plans." :
+                tutorialActive && currentStep === 'session-intro' ? "Now we're in a new session." :
+                tutorialActive && currentStep === 'history' ? "These are previous sessions" :
+                tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
                 undefined
               }
             />
+            {/* Sign-up button for tutorial complete step */}
+            {tutorialActive && currentStep === 'complete' && onGetStarted && (
+              <button
+                onClick={onGetStarted}
+                className="mt-3 px-4 py-2 bg-cyan-500 text-white rounded-lg font-medium hover:bg-cyan-600 transition-colors shadow-lg"
+              >
+                Create Account
+              </button>
+            )}
           </div>
         )}
 
