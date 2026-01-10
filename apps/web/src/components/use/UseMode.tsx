@@ -191,6 +191,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Derive current tool from trace (for status display in PlanViewer)
   const currentTool = useMemo(() => {
+    console.log('[UseMode] currentTool useMemo running - isStreaming:', isStreaming, 'trace.length:', trace.length);
     if (!isStreaming || trace.length === 0) return undefined;
 
     // Find the most recent tool_call that doesn't have a matching tool_result yet
@@ -207,6 +208,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         }
       }
     }
+    console.log('[UseMode] No pending tool_call found');
     return undefined;
   }, [isStreaming, trace]);
 
