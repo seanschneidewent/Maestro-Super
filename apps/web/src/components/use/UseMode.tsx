@@ -202,6 +202,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           s => s.type === 'tool_result' && s.tool === step.tool
         );
         if (!hasResult) {
+          console.log('[UseMode] currentTool derived:', step.tool);
           return step.tool;
         }
       }
