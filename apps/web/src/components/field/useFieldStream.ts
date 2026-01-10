@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef } from 'react'
-import { flushSync } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { FieldResponse, ContextPointer, AgentTraceStep } from '../../types'
 import { transformAgentResponse, extractLatestThinking } from './transformResponse'
@@ -249,6 +248,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_call':
         if (typeof data.tool === 'string') {
+          // Set current tool for status display
+          setCurrentTool(data.tool)
+
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
           const newStep: AgentTraceStep = {
             type: 'tool_call',
@@ -256,13 +258,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             input: data.input as Record<string, unknown>,
           }
           agentMessage.trace.push(newStep)
-
-          // Use flushSync to force immediate render of each tool call
-          // This bypasses React 18's automatic batching so each tool appears as it streams
-          flushSync(() => {
-            setCurrentTool(data.tool as string)
-            setTrace([...agentMessage.trace])
-          })
+          setTrace([...agentMessage.trace])
 
           // Track page visits from get_page_details tool
           if (data.tool === 'get_page_details' && data.input) {
@@ -303,17 +299,16 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
       case 'tool_result':
         if (typeof data.tool === 'string') {
+          // NOTE: Don't clear currentTool here - React batching causes the status to never show.
+          // Instead, clear it only when streaming ends (in 'done' case).
+
           const newStep: AgentTraceStep = {
             type: 'tool_result',
             tool: data.tool,
             result: data.result as Record<string, unknown>,
           }
           agentMessage.trace.push(newStep)
-
-          // Use flushSync to force immediate render of each tool result
-          flushSync(() => {
-            setTrace([...agentMessage.trace])
-          })
+          setTrace([...agentMessage.trace])
 
           // Cache page data from search_pages for prefetching on select_pages tool_call
           if (data.tool === 'search_pages') {
