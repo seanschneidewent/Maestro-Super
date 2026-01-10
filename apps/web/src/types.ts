@@ -255,4 +255,4 @@ export interface FieldResponse {
 }
 
 // Tutorial types
-export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | 'complete' | null;
+export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | null;

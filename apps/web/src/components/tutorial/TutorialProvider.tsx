@@ -14,7 +14,7 @@ interface TutorialContextValue {
 
 export const TutorialContext = createContext<TutorialContextValue | null>(null);
 
-const STEP_ORDER: NonNullable<TutorialStep>[] = ['welcome', 'sidebar', 'viewer', 'query', 'complete'];
+const STEP_ORDER: NonNullable<TutorialStep>[] = ['welcome', 'sidebar', 'viewer', 'query'];
 
 // Check localStorage synchronously to avoid flash of wrong state
 const getInitialTutorialState = () => {

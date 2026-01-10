@@ -12,6 +12,8 @@ interface QueryBubbleStackProps {
   thinkingText: string
   streamingDisplayTitle: string | null
   streamingFinalAnswer: string
+  // Tutorial message (shown when no queries and not streaming)
+  tutorialMessage?: string
 }
 
 function truncateText(text: string, maxLength: number): string {
@@ -40,6 +42,7 @@ export function QueryBubbleStack({
   thinkingText,
   streamingDisplayTitle,
   streamingFinalAnswer,
+  tutorialMessage,
 }: QueryBubbleStackProps) {
   const [expandedQueryId, setExpandedQueryId] = useState<string | null>(null)
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
@@ -105,9 +108,33 @@ export function QueryBubbleStack({
     }
   }
 
-  // Don't render if no queries and not streaming
-  if (sortedQueries.length === 0 && !isStreaming) {
+  // Don't render if no queries, not streaming, and no tutorial message
+  if (sortedQueries.length === 0 && !isStreaming && !tutorialMessage) {
     return null
+  }
+
+  // Show tutorial bubble if provided and no queries yet
+  if (tutorialMessage && sortedQueries.length === 0 && !isStreaming) {
+    return (
+      <div className="flex flex-col items-start gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div
+          className="
+            max-w-xs
+            bg-white/95 backdrop-blur-md border border-cyan-400 ring-2 ring-cyan-200/50
+            rounded-2xl rounded-bl-sm shadow-lg
+          "
+        >
+          <div className="flex items-center gap-2 px-3 py-2">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center shadow-sm flex-shrink-0">
+              <MessageCircle size={12} className="text-white" />
+            </div>
+            <span className="text-sm font-medium text-slate-700">
+              {tutorialMessage}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

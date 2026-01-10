@@ -21,6 +21,7 @@ interface PlanViewerProps {
   selectedPages?: AgentSelectedPage[];
   onVisiblePageChange?: (pageId: string, disciplineId: string) => void;
   showPointers?: boolean; // Only show pointer overlays when viewing query results
+  tutorialText?: string; // Override greeting with tutorial message
 }
 
 // Cache for rendered page images
@@ -135,6 +136,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   selectedPages = [],
   onVisiblePageChange,
   showPointers = false,
+  tutorialText,
 }) => {
   // =====================================
   // ALL HOOKS MUST BE AT THE TOP (unconditionally)
@@ -400,10 +402,13 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   // =====================================
   // EMPTY STATE (no pages selected)
   // =====================================
+  // Use tutorial text if provided, otherwise use random greeting
+  const displayText = tutorialText || greeting;
+
   return (
     <div className="flex-1 flex items-center justify-center h-full blueprint-grid">
       {!hasEverShownPage.current && (
-        <p className="text-black text-2xl">{greeting}</p>
+        <p className="text-black text-2xl">{displayText}</p>
       )}
     </div>
   );

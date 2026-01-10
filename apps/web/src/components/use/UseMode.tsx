@@ -10,7 +10,6 @@ import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useTutorial } from '../../hooks/useTutorial';
-import { TutorialBubble } from '../tutorial';
 import {
   QueryInput,
   SessionControls,
@@ -107,7 +106,7 @@ interface UseModeProps {
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const { showError } = useToast();
-  const { currentStep, completeStep, isActive: tutorialActive, hasCompleted } = useTutorial();
+  const { currentStep, completeStep, advanceStep, skipTutorial, isActive: tutorialActive, hasCompleted } = useTutorial();
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -324,6 +323,16 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
   }, [isSidebarCollapsed, tutorialActive, currentStep, completeStep]);
 
+  // Tutorial: auto-advance from 'viewer' to 'query' after 4 seconds
+  useEffect(() => {
+    if (tutorialActive && currentStep === 'viewer') {
+      const timer = setTimeout(() => {
+        advanceStep();
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [tutorialActive, currentStep, advanceStep]);
+
   // Handle page selection from PlansPanel
   // Resets to fresh session state and loads page into agent viewer
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
@@ -469,6 +478,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           selectedPages={selectedPages}
           onVisiblePageChange={handleVisiblePageChange}
           showPointers={isStreaming || activeQueryId !== null}
+          tutorialText={
+            tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
+            tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
+            undefined
+          }
         />
 
         {/* Thought process dropdown - top left */}
@@ -497,7 +511,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         )}
 
         {/* Query bubble stack - unified list of all queries */}
-        {(isStreaming || sessionQueries.length > 0) && (
+        {(isStreaming || sessionQueries.length > 0 || (tutorialActive && (currentStep === 'viewer' || currentStep === 'query'))) && (
           <div className="absolute bottom-20 left-4 z-30">
             <QueryBubbleStack
               queries={sessionQueries}
@@ -507,6 +521,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
               thinkingText={thinkingText}
               streamingDisplayTitle={displayTitle}
               streamingFinalAnswer={finalAnswer}
+              tutorialMessage={
+                tutorialActive && currentStep === 'viewer' ? "Pinch to zoom. Drag to pan." :
+                tutorialActive && currentStep === 'query' ? "Ask me anything about these plans." :
+                undefined
+              }
             />
           </div>
         )}
@@ -578,10 +597,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         <SessionControls
           onToggleHistory={() => setShowHistory(!showHistory)}
           isHistoryOpen={showHistory}
+          showSkipTutorial={tutorialActive}
+          onSkipTutorial={skipTutorial}
         />
-
-        {/* Tutorial bubble - shows for post-page steps */}
-        <TutorialBubble />
 
         {/* Error display */}
         {error && (

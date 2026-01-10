@@ -3,9 +3,16 @@ import { Clock } from 'lucide-react'
 interface SessionControlsProps {
   onToggleHistory: () => void
   isHistoryOpen: boolean
+  showSkipTutorial?: boolean
+  onSkipTutorial?: () => void
 }
 
-export function SessionControls({ onToggleHistory, isHistoryOpen }: SessionControlsProps) {
+export function SessionControls({
+  onToggleHistory,
+  isHistoryOpen,
+  showSkipTutorial = false,
+  onSkipTutorial,
+}: SessionControlsProps) {
   return (
     <div
       className="
@@ -14,6 +21,14 @@ export function SessionControls({ onToggleHistory, isHistoryOpen }: SessionContr
         flex items-center gap-1 p-1
       "
     >
+      {showSkipTutorial && onSkipTutorial && (
+        <button
+          onClick={onSkipTutorial}
+          className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+        >
+          Skip
+        </button>
+      )}
       <button
         onClick={onToggleHistory}
         className={`

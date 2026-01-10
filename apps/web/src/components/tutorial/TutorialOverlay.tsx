@@ -2,40 +2,27 @@ import React, { useEffect, useState } from 'react';
 import { useTutorial } from '../../hooks/useTutorial';
 import { TutorialStep } from '../../types';
 
-interface StepConfig {
-  text: string;
-  subtitle: string;
-  targetSelector: string;
-}
-
-const STEP_CONFIG: Partial<Record<NonNullable<TutorialStep>, StepConfig>> = {
-  welcome: {
-    text: 'Welcome to Maestro Super',
-    subtitle: 'Click the sidebar icon to begin',
-    targetSelector: '[data-tutorial="sidebar-expand"]',
-  },
-  sidebar: {
-    text: 'Your plans, organized by trade',
-    subtitle: 'Select a sheet to view',
-    targetSelector: '[data-tutorial="first-page"]',
-  },
+// Target selectors for each step
+const TARGET_SELECTORS: Partial<Record<NonNullable<TutorialStep>, string>> = {
+  welcome: '[data-tutorial="sidebar-expand"]',
+  sidebar: '[data-tutorial="first-page"]',
 };
 
 export const TutorialOverlay: React.FC = () => {
-  const { currentStep, isActive, skipTutorial } = useTutorial();
+  const { currentStep, isActive } = useTutorial();
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
 
-  const config = currentStep ? STEP_CONFIG[currentStep] : null;
+  const targetSelector = currentStep ? TARGET_SELECTORS[currentStep] : null;
 
   // Find and track target element
   useEffect(() => {
-    if (!config?.targetSelector) {
+    if (!targetSelector) {
       setTargetRect(null);
       return;
     }
 
     const findTarget = () => {
-      const el = document.querySelector(config.targetSelector);
+      const el = document.querySelector(targetSelector);
       if (el) {
         setTargetRect(el.getBoundingClientRect());
       } else {
@@ -56,34 +43,13 @@ export const TutorialOverlay: React.FC = () => {
       window.removeEventListener('resize', findTarget);
       window.removeEventListener('scroll', findTarget, true);
     };
-  }, [config?.targetSelector]);
+  }, [targetSelector]);
 
   // Only show for pre-page steps (welcome, sidebar)
-  if (!isActive || !config) return null;
+  if (!isActive || !targetSelector) return null;
 
   return (
     <>
-      {/* Skip button */}
-      <button
-        onClick={skipTutorial}
-        className="fixed top-4 right-4 z-[60] px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200/50 transition-colors shadow-sm"
-      >
-        Skip Tutorial
-      </button>
-
-      {/* Semi-transparent backdrop - more opaque to hide underlying content */}
-      <div className="fixed inset-0 z-[45] bg-slate-100/80 backdrop-blur-sm pointer-events-none" />
-
-      {/* Center text */}
-      <div className="fixed inset-0 z-[50] pointer-events-none flex items-center justify-center">
-        <div className="text-center animate-fade-in">
-          <h1 className="text-3xl font-semibold text-slate-800 mb-3 drop-shadow-sm">
-            {config.text}
-          </h1>
-          <p className="text-lg text-slate-600">{config.subtitle}</p>
-        </div>
-      </div>
-
       {/* Highlight ring around target */}
       {targetRect && (
         <>
