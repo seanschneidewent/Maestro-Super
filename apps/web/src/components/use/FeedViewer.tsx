@@ -627,7 +627,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-28"
+      className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-48"
       onScroll={handleScroll}
     >
       <div className="space-y-6">
@@ -656,7 +656,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
             case 'text':
               return (
-                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2">
+                <div key={item.id} className="py-2">
                   {/* ThinkingSection for completed responses */}
                   {item.trace.length > 0 && (
                     <div className="mb-3">
@@ -695,7 +695,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
         {/* Streaming response with live ThinkingSection */}
         {isStreaming && (
-          <div className="max-w-2xl mx-auto px-4 py-2">
+          <div className="py-2">
             {/* Live ThinkingSection during streaming */}
             <div className="mb-3">
               <ThinkingSection
