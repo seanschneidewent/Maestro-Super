@@ -474,12 +474,12 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
       className="flex-1 overflow-y-auto blueprint-grid px-6 py-8"
       onScroll={handleScroll}
     >
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="space-y-6">
         {feedItems.map((item) => {
           switch (item.type) {
             case 'user-query':
               return (
-                <div key={item.id} className="flex justify-end">
+                <div key={item.id} className="flex justify-end max-w-4xl mx-auto">
                   <div className="max-w-[80%] bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-md">
                     {item.text}
                   </div>
@@ -487,6 +487,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
               );
 
             case 'pages':
+              // Pages render at full container width for maximum visibility
               return (
                 <div key={item.id} className="space-y-8">
                   {item.pages.map((page) => (
