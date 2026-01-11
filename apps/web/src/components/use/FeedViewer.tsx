@@ -64,12 +64,16 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
 
   const promise = (async () => {
     try {
+      console.log('[FeedViewer] Loading page:', page.pageId, 'filePath:', page.filePath);
+
       // PNG path - use public URL for fast loading
       if (page.filePath.endsWith('.png')) {
         const url = getPublicUrl(page.filePath);
+        console.log('[FeedViewer] PNG URL:', url);
         const img = new Image();
         img.src = url;
         await img.decode();
+        console.log('[FeedViewer] PNG loaded:', page.pageId, img.naturalWidth, 'x', img.naturalHeight);
 
         const pageImage: PageImage = {
           dataUrl: url,
@@ -82,6 +86,7 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
       }
 
       // PDF fallback - download and render via PDF.js
+      console.log('[FeedViewer] PDF fallback for:', page.pageId);
       const blob = await downloadFile(page.filePath);
       const arrayBuffer = await blob.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
@@ -113,7 +118,7 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
       pageImageCache.set(page.pageId, pageImage);
       return pageImage;
     } catch (err) {
-      console.error('Failed to load page:', page.pageId, err);
+      console.error('[FeedViewer] Failed to load page:', page.pageId, 'filePath:', page.filePath, err);
       return null;
     } finally {
       loadingPromises.delete(page.pageId);
