@@ -347,7 +347,7 @@ export interface QueryResponse {
   id: string;
   userId: string;
   projectId?: string;
-  sessionId?: string;
+  conversationId?: string;
   queryText: string;
   responseText?: string;
   displayTitle?: string;
@@ -359,8 +359,8 @@ export interface QueryResponse {
   createdAt: string;
 }
 
-// Session types (matching backend schema)
-export interface SessionResponse {
+// Conversation types (matching backend schema)
+export interface ConversationResponse {
   id: string;
   userId: string;
   projectId: string;
@@ -369,7 +369,7 @@ export interface SessionResponse {
   title?: string | null;
 }
 
-export interface SessionWithQueriesResponse extends SessionResponse {
+export interface ConversationWithQueriesResponse extends ConversationResponse {
   queries: QueryResponse[];
 }
 
@@ -513,15 +513,15 @@ export const api = {
     hide: (queryId: string) => request<void>(`/queries/${queryId}/hide`, { method: 'PATCH' }),
   },
 
-  sessions: {
+  conversations: {
     list: (projectId: string) =>
-      request<SessionResponse[]>(`/projects/${projectId}/sessions`),
+      request<ConversationResponse[]>(`/projects/${projectId}/conversations`),
     create: (projectId: string) =>
-      request<SessionResponse>(`/projects/${projectId}/sessions`, { method: 'POST' }),
-    get: (sessionId: string) =>
-      request<SessionWithQueriesResponse>(`/sessions/${sessionId}`),
-    delete: (sessionId: string) =>
-      request<void>(`/sessions/${sessionId}`, { method: 'DELETE' }),
+      request<ConversationResponse>(`/projects/${projectId}/conversations`, { method: 'POST' }),
+    get: (conversationId: string) =>
+      request<ConversationWithQueriesResponse>(`/conversations/${conversationId}`),
+    delete: (conversationId: string) =>
+      request<void>(`/conversations/${conversationId}`, { method: 'DELETE' }),
   },
 
   processing: {

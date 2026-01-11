@@ -7,7 +7,7 @@ const TARGET_SELECTORS: Partial<Record<NonNullable<TutorialStep>, string>> = {
   welcome: '[data-tutorial="sidebar-expand"]',
   sidebar: '[data-tutorial="first-page"]',
   query: '[data-tutorial="query-input"]',
-  'new-session': '[data-tutorial="new-session-btn"]',
+  'new-conversation': '[data-tutorial="new-conversation-btn"]',
   'history': '[data-tutorial="history-btn"]',
 };
 

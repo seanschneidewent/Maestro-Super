@@ -15,10 +15,10 @@ from app.dependencies.rate_limit import check_rate_limit, check_rate_limit_or_an
 from app.models.project import Project
 from app.models.query import Query
 from app.models.query_page import QueryPage
-from app.models.session import Session as SessionModel
+from app.models.conversation import Conversation
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
-from app.services.session_memory import fetch_session_history
+from app.services.conversation_memory import fetch_conversation_history
 from app.services.usage import UsageService
 
 logger = logging.getLogger(__name__)
@@ -209,7 +209,7 @@ async def stream_query(
     - data: {"type": "text", "content": "..."} - Claude's reasoning
     - data: {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
-    - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "..."} - Final event
+    - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "...", "conversationTitle": "..."} - Final event
     - data: {"type": "error", "message": "..."} - Error event
     """
     verify_project_exists(project_id, db)
@@ -224,37 +224,37 @@ async def stream_query(
 
     logger.info(f"Starting query stream for user {user.id} on project {project_id}")
 
-    # Validate session if provided
-    session_id = data.session_id
+    # Validate conversation if provided
+    conversation_id = data.conversation_id
     sequence_order = None
-    if session_id:
-        session = (
-            db.query(SessionModel)
-            .filter(SessionModel.id == session_id)
-            .filter(SessionModel.user_id == user.id)
+    if conversation_id:
+        conversation = (
+            db.query(Conversation)
+            .filter(Conversation.id == conversation_id)
+            .filter(Conversation.user_id == user.id)
             .first()
         )
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         # Compare as strings to handle UUID vs string mismatch
-        if str(session.project_id) != str(project_id):
-            raise HTTPException(status_code=400, detail="Session belongs to a different project")
+        if str(conversation.project_id) != str(project_id):
+            raise HTTPException(status_code=400, detail="Conversation belongs to a different project")
 
-        # Calculate sequence_order as count of existing queries in session + 1
+        # Calculate sequence_order as count of existing queries in conversation + 1
         existing_count = (
             db.query(Query)
-            .filter(Query.session_id == session_id)
+            .filter(Query.conversation_id == conversation_id)
             .count()
         )
         sequence_order = existing_count + 1
-        logger.info(f"Query will be #{sequence_order} in session {session_id}")
+        logger.info(f"Query will be #{sequence_order} in conversation {conversation_id}")
 
     # Create query record in database
     query_record = Query(
         user_id=user.id,
         project_id=project_id,
         query_text=data.query,
-        session_id=session_id,
+        conversation_id=conversation_id,
         sequence_order=sequence_order,
     )
     db.add(query_record)
@@ -266,23 +266,24 @@ async def stream_query(
     # Increment request count
     UsageService.increment_request(db, user.id)
 
-    # Fetch session history for multi-turn conversations
+    # Fetch conversation history for multi-turn conversations
     history_messages: list[dict] = []
-    if session_id:
+    if conversation_id:
         try:
-            history_messages = fetch_session_history(
+            history_messages = fetch_conversation_history(
                 db=db,
-                session_id=session_id,
+                conversation_id=conversation_id,
                 exclude_query_id=query_id,
             )
         except Exception as e:
-            logger.warning(f"Failed to load session history: {e}")
+            logger.warning(f"Failed to load conversation history: {e}")
             # Continue without history - don't fail the query
 
     async def event_generator():
         total_tokens = 0
         response_text = ""
         display_title = None
+        conversation_title_from_agent = None
         referenced_pointers = []
         stored_trace = []
         try:
@@ -293,8 +294,9 @@ async def stream_query(
                 if event.get("type") == "done":
                     usage = event.get("usage", {})
                     total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
-                    # Extract display_title if provided by agent
+                    # Extract titles if provided by agent
                     display_title = event.get("displayTitle")
+                    conversation_title_from_agent = event.get("conversationTitle")
                     # Extract the final response from trace
                     trace = event.get("trace", [])
                     stored_trace = trace  # Save for storage
@@ -355,6 +357,19 @@ async def stream_query(
                     logger.info(f"Tracked {total_tokens} tokens for user {user.id}")
                 except Exception as e:
                     logger.warning(f"Failed to track tokens: {e}")
+
+            # Update conversation title
+            if conversation_id and conversation_title_from_agent:
+                try:
+                    from datetime import datetime
+                    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+                    if conv:
+                        conv.title = conversation_title_from_agent
+                        conv.updated_at = datetime.utcnow()
+                        db.commit()
+                        logger.info(f"Updated conversation {conversation_id} title to: {conversation_title_from_agent}")
+                except Exception as e:
+                    logger.warning(f"Failed to update conversation title: {e}")
 
     return StreamingResponse(
         event_generator(),

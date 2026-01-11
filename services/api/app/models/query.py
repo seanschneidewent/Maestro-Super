@@ -11,7 +11,7 @@ from app.database.base import Base, JSONVariant, created_at_column
 if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.query_page import QueryPage
-    from app.models.session import Session
+    from app.models.conversation import Conversation
 
 
 class Query(Base):
@@ -40,9 +40,9 @@ class Query(Base):
         index=True,
         nullable=True,
     )
-    session_id: Mapped[Optional[UUID]] = mapped_column(
+    conversation_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("sessions.id", ondelete="SET NULL"),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
         index=True,
         nullable=True,
     )
@@ -54,7 +54,7 @@ class Query(Base):
     # Display title for UI (e.g., "Electrical panel locations")
     display_title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    # Order within session (1, 2, 3, ...)
+    # Order within conversation (1, 2, 3, ...)
     sequence_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Context used for response
@@ -82,8 +82,8 @@ class Query(Base):
         "Project",
         back_populates="queries",
     )
-    session: Mapped[Optional["Session"]] = relationship(
-        "Session",
+    conversation: Mapped[Optional["Conversation"]] = relationship(
+        "Conversation",
         back_populates="queries",
     )
     query_pages: Mapped[list["QueryPage"]] = relationship(

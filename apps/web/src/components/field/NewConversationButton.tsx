@@ -1,14 +1,14 @@
 import { Plus } from 'lucide-react'
 
-interface NewSessionButtonProps {
+interface NewConversationButtonProps {
   onClick: () => void
   disabled?: boolean
 }
 
-export function NewSessionButton({ onClick, disabled }: NewSessionButtonProps) {
+export function NewConversationButton({ onClick, disabled }: NewConversationButtonProps) {
   return (
     <button
-      data-tutorial="new-session-btn"
+      data-tutorial="new-conversation-btn"
       onClick={onClick}
       disabled={disabled}
       className={`

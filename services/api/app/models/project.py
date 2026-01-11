@@ -10,7 +10,7 @@ from app.database.base import Base, created_at_column, updated_at_column
 if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.query import Query
-    from app.models.session import Session
+    from app.models.conversation import Conversation
 
 
 class Project(Base):
@@ -44,8 +44,8 @@ class Project(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    sessions: Mapped[list["Session"]] = relationship(
-        "Session",
+    conversations: Mapped[list["Conversation"]] = relationship(
+        "Conversation",
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,

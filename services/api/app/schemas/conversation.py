@@ -1,4 +1,4 @@
-"""Session schemas."""
+"""Conversation schemas."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -10,16 +10,16 @@ if TYPE_CHECKING:
     from app.schemas.query import QueryResponse
 
 
-class SessionCreate(BaseModel):
-    """Schema for creating a session."""
+class ConversationCreate(BaseModel):
+    """Schema for creating a conversation."""
 
     project_id: str = Field(..., alias="projectId")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
-class SessionResponse(BaseModel):
-    """Schema for session response."""
+class ConversationResponse(BaseModel):
+    """Schema for conversation response."""
 
     id: str | UUID
     user_id: str = Field(alias="userId")
@@ -38,8 +38,8 @@ class SessionResponse(BaseModel):
         return str(value)
 
 
-class SessionWithQueries(SessionResponse):
-    """Session response including ordered queries."""
+class ConversationWithQueries(ConversationResponse):
+    """Conversation response including ordered queries."""
 
     queries: list["QueryResponse"] = Field(default_factory=list)
 
@@ -47,4 +47,4 @@ class SessionWithQueries(SessionResponse):
 # Avoid circular import by updating forward ref
 from app.schemas.query import QueryResponse  # noqa: E402
 
-SessionWithQueries.model_rebuild()
+ConversationWithQueries.model_rebuild()

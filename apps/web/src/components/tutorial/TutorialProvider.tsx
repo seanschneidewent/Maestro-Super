@@ -16,7 +16,7 @@ export const TutorialContext = createContext<TutorialContextValue | null>(null);
 
 const STEP_ORDER: NonNullable<TutorialStep>[] = [
   'welcome', 'sidebar', 'viewer', 'query', 'responding',
-  'new-session', 'session-intro', 'history', 'complete'
+  'new-conversation', 'conversation-intro', 'history', 'complete'
 ];
 
 // Check localStorage synchronously to avoid flash of wrong state

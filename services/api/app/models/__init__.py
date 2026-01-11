@@ -11,7 +11,7 @@ from .pointer import Pointer
 from .pointer_reference import PointerReference
 from .query import Query
 from .query_page import QueryPage
-from .session import Session
+from .conversation import Conversation
 from .usage_event import UsageEvent
 from .user_usage import UserUsage
 
@@ -29,7 +29,7 @@ __all__ = [
     "PointerReference",
     "Query",
     "QueryPage",
-    "Session",
+    "Conversation",
     "UsageEvent",
     "UserUsage",
 ]

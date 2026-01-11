@@ -15,12 +15,12 @@ import {
   useFieldStream,
   QueryHistoryPanel,
   AgentSelectedPage,
-  NewSessionButton,
+  NewConversationButton,
   CompletedQuery,
   SuggestedPrompts,
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
-import { useSession } from '../../hooks/useSession';
+import { useConversation } from '../../hooks/useConversation';
 
 /**
  * Extract final answer text from the query trace.
@@ -132,11 +132,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [pageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
   const [contextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
 
-  // Session management
-  const { currentSession, clearSession, isCreating: isCreatingSession } = useSession(projectId);
+  // Conversation management
+  const { currentConversation, clearConversation, isCreating: isCreatingConversation } = useConversation(projectId);
 
-  // Track completed queries in the current session for QueryStack
-  const [sessionQueries, setSessionQueries] = useState<QueryWithPages[]>([]);
+  // Track completed queries in the current conversation for QueryStack
+  const [conversationQueries, setConversationQueries] = useState<QueryWithPages[]>([]);
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
   // Store full page data for each query so we can restore it
   const [queryPagesCache] = useState<Map<string, AgentSelectedPage[]>>(new Map());
@@ -153,9 +153,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
       id: query.queryId,
-      sessionId: currentSession?.id ?? null,
+      conversationId: currentConversation?.id ?? null,
       displayTitle: query.displayTitle,
-      sequenceOrder: sessionQueries.length + 1,
+      sequenceOrder: conversationQueries.length + 1,
       queryText: query.queryText,
       responseText: query.finalAnswer,
       pages: query.pages.map((p, idx) => ({
@@ -171,9 +171,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.set(query.queryId, query.pages);
     queryTraceCache.set(query.queryId, query.trace);
 
-    setSessionQueries((prev) => [...prev, newQuery]);
+    setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [currentSession?.id, sessionQueries.length, queryPagesCache, queryTraceCache]);
+  }, [currentConversation?.id, conversationQueries.length, queryPagesCache, queryTraceCache]);
 
   // Field stream hook
   const {
@@ -251,12 +251,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
-    submitQuery(prompt, currentSession?.id, responseMode);
-  }, [isStreaming, currentSession?.id, submitQuery, responseMode]);
+    submitQuery(prompt, currentConversation?.id, responseMode);
+  }, [isStreaming, currentConversation?.id, submitQuery, responseMode]);
 
-  // Handle restoring a previous session from history
-  const handleRestoreSession = (
-    sessionId: string,
+  // Handle restoring a previous conversation from history
+  const handleRestoreConversation = (
+    conversationId: string,
     queries: QueryResponse[],
     selectedQueryId: string
   ) => {
@@ -266,7 +266,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       const responseText = q.responseText || extractFinalAnswerFromTrace(q.trace) || null;
       return {
         id: q.id,
-        sessionId: q.sessionId ?? null,
+        conversationId: q.conversationId ?? null,
         displayTitle: q.displayTitle ?? null,
         sequenceOrder: q.sequenceOrder ?? idx + 1,
         queryText: q.queryText,
@@ -284,7 +284,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       };
     });
 
-    // Cache pages and traces for all queries in the session
+    // Cache pages and traces for all queries in the conversation
     queryPagesCache.clear();
     queryTraceCache.clear();
     for (const q of queries) {
@@ -323,7 +323,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
 
     // Update state
-    setSessionQueries(restoredQueries);
+    setConversationQueries(restoredQueries);
     setActiveQueryId(selectedQueryId);
 
     // Set the submitted query text for the selected query
@@ -396,7 +396,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
   }, [tutorialActive, currentStep, advanceStep]);
 
-  // Tutorial: detect streaming end → advance from 'responding' to 'new-session'
+  // Tutorial: detect streaming end → advance from 'responding' to 'new-conversation'
   useEffect(() => {
     // Streaming just ended (true → false) during 'responding' step
     if (prevIsStreamingRef.current && !isStreaming && tutorialActive && currentStep === 'responding') {
@@ -407,9 +407,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     prevIsStreamingRef.current = isStreaming;
   }, [isStreaming, tutorialActive, currentStep, advanceStep]);
 
-  // Tutorial: auto-advance from 'session-intro' to 'history' after pause
+  // Tutorial: auto-advance from 'conversation-intro' to 'history' after pause
   useEffect(() => {
-    if (tutorialActive && currentStep === 'session-intro') {
+    if (tutorialActive && currentStep === 'conversation-intro') {
       const timer = setTimeout(() => advanceStep(), 2500);
       return () => clearTimeout(timer);
     }
@@ -429,17 +429,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   }, [showHistory, tutorialActive, currentStep, advanceStep]);
 
   // Handle page selection from PlansPanel
-  // Resets to fresh session state and loads page into agent viewer
+  // Resets to fresh conversation state and loads page into agent viewer
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
     // Tutorial: complete 'sidebar' step when user selects a page
     completeStep('sidebar');
 
-    // Reset session state (like handleNewSession but skip clearSession API call)
+    // Reset conversation state (like handleNewConversation but skip clearConversation API call)
     resetStream();
     setQueryInput('');
     setSubmittedQuery(null);
     setIsQueryExpanded(false);
-    setSessionQueries([]);
+    setConversationQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
     queryTraceCache.clear();
@@ -486,31 +486,31 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
   };
 
-  // Handle starting a new session (clears query stack)
-  const handleNewSession = async () => {
-    await clearSession();
+  // Handle starting a new conversation (clears query stack)
+  const handleNewConversation = async () => {
+    await clearConversation();
     resetStream();
     setQueryInput('');
     setSubmittedQuery(null);
     setIsQueryExpanded(false);
     setInputHasBeenFocused(false);  // Reset so prompts don't reappear
-    setSessionQueries([]);
+    setConversationQueries([]);
     setActiveQueryId(null);
     queryPagesCache.clear();
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
     setFeedItems([]);  // Clear feed
-    setResponseMode('pages');  // Reset to pages mode for new session
+    setResponseMode('pages');  // Reset to pages mode for new conversation
 
-    // Tutorial: advance from 'new-session' step
-    if (tutorialActive && currentStep === 'new-session') {
-      advanceStep(); // → 'session-intro'
+    // Tutorial: advance from 'new-conversation' step
+    if (tutorialActive && currentStep === 'new-conversation') {
+      advanceStep(); // → 'conversation-intro'
     }
   };
 
   // Handle selecting a query from the QueryStack
   const handleSelectQuery = useCallback((queryId: string) => {
-    const query = sessionQueries.find((q) => q.id === queryId);
+    const query = conversationQueries.find((q) => q.id === queryId);
     if (!query) return;
 
     setActiveQueryId(queryId);
@@ -526,7 +526,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       query.displayTitle || null,
       cachedPages
     );
-  }, [sessionQueries, queryPagesCache, queryTraceCache, restore]);
+  }, [conversationQueries, queryPagesCache, queryTraceCache, restore]);
 
 
   // Handle navigation from thinking section
@@ -578,7 +578,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       <div className="flex-1 relative flex flex-col overflow-hidden">
         {/* PlanViewer - handles PDF rendering */}
         <FeedViewer
-          key={currentSession?.id}
+          key={currentConversation?.id}
           feedItems={feedItems}
           isStreaming={isStreaming}
           streamingText={finalAnswer}
@@ -587,8 +587,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           tutorialText={
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
             tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
-            tutorialActive && currentStep === 'session-intro' ? "Now we're in a new session." :
-            tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous sessions") :
+            tutorialActive && currentStep === 'conversation-intro' ? "Now we're in a new conversation." :
+            tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous conversations") :
             tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
             undefined
           }
@@ -622,7 +622,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
           {/* Suggested prompts - show in demo mode after input focused or after tutorial */}
-          {mode === AppMode.DEMO && (inputHasBeenFocused || !tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && sessionQueries.length === 0 && (
+          {mode === AppMode.DEMO && (inputHasBeenFocused || !tutorialActive || hasCompleted) && !submittedQuery && !isStreaming && conversationQueries.length === 0 && (
             <SuggestedPrompts
               onSelectPrompt={handleSuggestedPrompt}
               disabled={isStreaming}
@@ -674,7 +674,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       ]);
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
-                      submitQuery(trimmedQuery, currentSession?.id, responseMode);
+                      submitQuery(trimmedQuery, currentConversation?.id, responseMode);
                       setQueryInput('');
                     }
                   }}
@@ -688,9 +688,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   }}
                 />
               </div>
-              <NewSessionButton
-                onClick={handleNewSession}
-                disabled={isStreaming || isCreatingSession}
+              <NewConversationButton
+                onClick={handleNewConversation}
+                disabled={isStreaming || isCreatingConversation}
               />
             </div>
           </div>
@@ -717,7 +717,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         projectId={projectId}
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
-        onRestoreSession={handleRestoreSession}
+        onRestoreConversation={handleRestoreConversation}
       />
     </div>
   );

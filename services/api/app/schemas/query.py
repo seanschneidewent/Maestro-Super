@@ -12,7 +12,7 @@ class QueryCreate(BaseModel):
 
     query_text: str = Field(..., min_length=1, alias="queryText")
     project_id: str | None = Field(default=None, alias="projectId")
-    session_id: str | None = Field(default=None, alias="sessionId")
+    conversation_id: str | None = Field(default=None, alias="conversationId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -21,7 +21,7 @@ class AgentQueryRequest(BaseModel):
     """Schema for streaming agent query request."""
 
     query: str = Field(..., min_length=1, description="User's question")
-    session_id: str | None = Field(default=None, alias="sessionId", description="Optional session ID to group queries")
+    conversation_id: str | None = Field(default=None, alias="conversationId", description="Optional conversation ID to group queries")
     response_mode: str = Field(default="pages", alias="responseMode", description="'pages' or 'conversational'")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -91,7 +91,7 @@ class QueryResponse(BaseModel):
     id: str | UUID
     user_id: str = Field(alias="userId")
     project_id: str | UUID | None = Field(default=None, alias="projectId")
-    session_id: str | UUID | None = Field(default=None, alias="sessionId")
+    conversation_id: str | UUID | None = Field(default=None, alias="conversationId")
     query_text: str = Field(alias="queryText")
     response_text: str | None = Field(default=None, alias="responseText")
     display_title: str | None = Field(default=None, alias="displayTitle")
@@ -109,7 +109,7 @@ class QueryResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    @field_serializer("id", "project_id", "session_id")
+    @field_serializer("id", "project_id", "conversation_id")
     def serialize_uuid(self, value: str | UUID | None) -> str | None:
         """Convert UUID to string for JSON serialization."""
         if value is None:

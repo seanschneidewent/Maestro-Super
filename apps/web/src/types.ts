@@ -81,10 +81,11 @@ export interface ChatMessage {
   }[];
 }
 
-// Session types for query grouping
-export interface Session {
+// Conversation types for query grouping
+export interface Conversation {
   id: string;
   projectId: string;
+  title?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,7 +103,7 @@ export interface QueryPage {
 
 export interface QueryWithPages {
   id: string;
-  sessionId: string | null;
+  conversationId: string | null;
   displayTitle: string | null;
   sequenceOrder: number | null;
   queryText: string;
@@ -111,7 +112,7 @@ export interface QueryWithPages {
   createdAt: string;
 }
 
-export interface SessionWithQueries extends Session {
+export interface ConversationWithQueries extends Conversation {
   queries: QueryWithPages[];
 }
 
@@ -255,4 +256,4 @@ export interface FieldResponse {
 }
 
 // Tutorial types
-export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | 'responding' | 'new-session' | 'session-intro' | 'history' | 'complete' | null;
+export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | 'responding' | 'new-conversation' | 'conversation-intro' | 'history' | 'complete' | null;

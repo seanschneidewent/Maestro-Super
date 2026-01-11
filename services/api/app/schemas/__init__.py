@@ -28,7 +28,7 @@ from app.schemas.query import (
     QueryResponse,
     QueryUpdate,
 )
-from app.schemas.session import SessionCreate, SessionResponse, SessionWithQueries
+from app.schemas.conversation import ConversationCreate, ConversationResponse, ConversationWithQueries
 from app.schemas.upload import (
     BulkUploadRequest,
     BulkUploadResponse,
@@ -67,10 +67,10 @@ __all__ = [
     "QueryPageResponse",
     "QueryResponse",
     "QueryUpdate",
-    # Session
-    "SessionCreate",
-    "SessionResponse",
-    "SessionWithQueries",
+    # Conversation
+    "ConversationCreate",
+    "ConversationResponse",
+    "ConversationWithQueries",
     # UsageEvent
     "UsageEventCreate",
     "UsageEventResponse",

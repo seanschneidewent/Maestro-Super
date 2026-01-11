@@ -21,6 +21,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 from app.routers import (
+    conversations,
     disciplines,
     health,
     pages,
@@ -28,7 +29,6 @@ from app.routers import (
     processing,
     projects,
     queries,
-    sessions,
 )
 
 settings = get_settings()
@@ -70,7 +70,7 @@ app.include_router(disciplines.router)
 app.include_router(pages.router)
 app.include_router(pointers.router)
 app.include_router(queries.router)
-app.include_router(sessions.router)
+app.include_router(conversations.router)
 app.include_router(processing.router)
 
 

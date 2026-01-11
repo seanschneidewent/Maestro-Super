@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { X, ChevronRight, MessageSquare, FileText, Layers, Trash2, Loader2 } from 'lucide-react'
-import { api, SessionResponse, SessionWithQueriesResponse, QueryResponse } from '../../lib/api'
+import { api, ConversationResponse, ConversationWithQueriesResponse, QueryResponse } from '../../lib/api'
 
 interface QueryHistoryPanelProps {
   projectId: string
   isOpen: boolean
   onClose: () => void
-  onRestoreSession: (
-    sessionId: string,
+  onRestoreConversation: (
+    conversationId: string,
     queries: QueryResponse[],
     selectedQueryId: string
   ) => void
@@ -33,104 +33,107 @@ function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + '...'
 }
 
-function getSessionTitle(session: SessionWithQueriesResponse): string {
-  // Use the first query's display title or query text
-  if (session.queries.length > 0) {
-    const firstQuery = session.queries[0]
+function getConversationTitle(conversation: ConversationWithQueriesResponse): string {
+  // Use the conversation title or fall back to first query
+  if (conversation.title) {
+    return conversation.title
+  }
+  if (conversation.queries.length > 0) {
+    const firstQuery = conversation.queries[0]
     return firstQuery.displayTitle || truncateText(firstQuery.queryText, 30)
   }
-  return 'Empty session'
+  return 'Empty conversation'
 }
 
 export function QueryHistoryPanel({
   projectId,
   isOpen,
   onClose,
-  onRestoreSession,
+  onRestoreConversation,
 }: QueryHistoryPanelProps) {
-  const [sessions, setSessions] = useState<SessionResponse[]>([])
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null)
-  const [expandedSessionData, setExpandedSessionData] = useState<SessionWithQueriesResponse | null>(null)
+  const [conversations, setConversations] = useState<ConversationResponse[]>([])
+  const [expandedConversationId, setExpandedConversationId] = useState<string | null>(null)
+  const [expandedConversationData, setExpandedConversationData] = useState<ConversationWithQueriesResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [isLoadingSession, setIsLoadingSession] = useState(false)
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: 'session' | 'query';
+    type: 'conversation' | 'query';
     id: string;
     title: string;
   } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // Load sessions when panel opens
+  // Load conversations when panel opens
   useEffect(() => {
     if (!isOpen) return
 
-    const loadSessions = async () => {
+    const loadConversations = async () => {
       setIsLoading(true)
       setError(null)
       try {
-        const data = await api.sessions.list(projectId)
-        setSessions(data)
+        const data = await api.conversations.list(projectId)
+        setConversations(data)
       } catch (err) {
-        console.error('Failed to load sessions:', err)
+        console.error('Failed to load conversations:', err)
         setError('Failed to load history')
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadSessions()
+    loadConversations()
   }, [isOpen, projectId])
 
-  // Load session details when expanded
-  const handleExpandSession = async (sessionId: string) => {
-    if (expandedSessionId === sessionId) {
+  // Load conversation details when expanded
+  const handleExpandConversation = async (conversationId: string) => {
+    if (expandedConversationId === conversationId) {
       // Collapse if already expanded
-      setExpandedSessionId(null)
-      setExpandedSessionData(null)
+      setExpandedConversationId(null)
+      setExpandedConversationData(null)
       return
     }
 
-    setExpandedSessionId(sessionId)
-    setIsLoadingSession(true)
+    setExpandedConversationId(conversationId)
+    setIsLoadingConversation(true)
 
     try {
-      const data = await api.sessions.get(sessionId)
-      setExpandedSessionData(data)
+      const data = await api.conversations.get(conversationId)
+      setExpandedConversationData(data)
     } catch (err) {
-      console.error('Failed to load session details:', err)
-      setExpandedSessionData(null)
+      console.error('Failed to load conversation details:', err)
+      setExpandedConversationData(null)
     } finally {
-      setIsLoadingSession(false)
+      setIsLoadingConversation(false)
     }
   }
 
-  // Restore a session with a specific query selected
+  // Restore a conversation with a specific query selected
   const handleRestoreQuery = (query: QueryResponse) => {
-    if (!expandedSessionData) return
+    if (!expandedConversationData) return
 
-    onRestoreSession(
-      expandedSessionData.id,
-      expandedSessionData.queries,
+    onRestoreConversation(
+      expandedConversationData.id,
+      expandedConversationData.queries,
       query.id
     )
     onClose()
   }
 
-  // Delete a session (hard delete with cascade)
-  const handleDeleteSession = async (sessionId: string) => {
+  // Delete a conversation (hard delete with cascade)
+  const handleDeleteConversation = async (conversationId: string) => {
     setIsDeleting(true)
     try {
-      await api.sessions.delete(sessionId)
-      setSessions(prev => prev.filter(s => s.id !== sessionId))
-      if (expandedSessionId === sessionId) {
-        setExpandedSessionId(null)
-        setExpandedSessionData(null)
+      await api.conversations.delete(conversationId)
+      setConversations(prev => prev.filter(c => c.id !== conversationId))
+      if (expandedConversationId === conversationId) {
+        setExpandedConversationId(null)
+        setExpandedConversationData(null)
       }
     } catch (err) {
-      console.error('Failed to delete session:', err)
+      console.error('Failed to delete conversation:', err)
     } finally {
       setIsDeleting(false)
       setDeleteTarget(null)
@@ -142,14 +145,14 @@ export function QueryHistoryPanel({
     setIsDeleting(true)
     try {
       await api.queries.hide(queryId)
-      if (expandedSessionData) {
-        const updatedQueries = expandedSessionData.queries.filter(q => q.id !== queryId)
-        setExpandedSessionData({ ...expandedSessionData, queries: updatedQueries })
-        // If no queries left, remove session from list
+      if (expandedConversationData) {
+        const updatedQueries = expandedConversationData.queries.filter(q => q.id !== queryId)
+        setExpandedConversationData({ ...expandedConversationData, queries: updatedQueries })
+        // If no queries left, remove conversation from list
         if (updatedQueries.length === 0) {
-          setSessions(prev => prev.filter(s => s.id !== expandedSessionData.id))
-          setExpandedSessionId(null)
-          setExpandedSessionData(null)
+          setConversations(prev => prev.filter(c => c.id !== expandedConversationData.id))
+          setExpandedConversationId(null)
+          setExpandedConversationData(null)
         }
       }
     } catch (err) {
@@ -163,8 +166,8 @@ export function QueryHistoryPanel({
   // Confirm deletion
   const handleConfirmDelete = () => {
     if (!deleteTarget) return
-    if (deleteTarget.type === 'session') {
-      handleDeleteSession(deleteTarget.id)
+    if (deleteTarget.type === 'conversation') {
+      handleDeleteConversation(deleteTarget.id)
     } else {
       handleHideQuery(deleteTarget.id)
     }
@@ -176,7 +179,7 @@ export function QueryHistoryPanel({
     <div className="w-96 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 flex flex-col z-20 shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50">
-        <h2 className="text-lg font-medium text-slate-800">Session History</h2>
+        <h2 className="text-lg font-medium text-slate-800">Conversation History</h2>
         <button
           onClick={onClose}
           className="p-1 rounded-lg hover:bg-slate-100 transition-colors"
@@ -189,7 +192,7 @@ export function QueryHistoryPanel({
       <div className="flex-1 overflow-y-auto">
         {isLoading && (
           <div className="p-4 text-center text-slate-500 text-sm">
-            Loading sessions...
+            Loading conversations...
           </div>
         )}
 
@@ -197,20 +200,20 @@ export function QueryHistoryPanel({
           <div className="p-4 text-center text-red-500 text-sm">{error}</div>
         )}
 
-        {!isLoading && !error && sessions.length === 0 && (
+        {!isLoading && !error && conversations.length === 0 && (
           <div className="p-4 text-center text-slate-400 text-sm">
-            No sessions yet. Start a conversation!
+            No conversations yet. Start a conversation!
           </div>
         )}
 
-        {!isLoading && !error && sessions.length > 0 && (
+        {!isLoading && !error && conversations.length > 0 && (
           <div className="divide-y divide-slate-100">
-            {sessions.map((session) => {
-              const isExpanded = expandedSessionId === session.id
+            {conversations.map((conversation) => {
+              const isExpanded = expandedConversationId === conversation.id
 
               return (
-                <div key={session.id}>
-                  {/* Session header */}
+                <div key={conversation.id}>
+                  {/* Conversation header */}
                   <div
                     className={`
                       w-full px-4 py-3 transition-colors group
@@ -219,7 +222,7 @@ export function QueryHistoryPanel({
                   >
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => handleExpandSession(session.id)}
+                        onClick={() => handleExpandConversation(conversation.id)}
                         className="flex-1 flex items-center gap-3 text-left"
                       >
                         <ChevronRight
@@ -232,12 +235,12 @@ export function QueryHistoryPanel({
                         <Layers size={16} className="text-cyan-500" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-slate-700 truncate">
-                            {isExpanded && expandedSessionData
-                              ? getSessionTitle(expandedSessionData)
-                              : (session.title || 'Session')}
+                            {isExpanded && expandedConversationData
+                              ? getConversationTitle(expandedConversationData)
+                              : (conversation.title || 'Conversation')}
                           </p>
                           <p className="text-xs text-slate-400">
-                            {formatTimeAgo(session.createdAt)}
+                            {formatTimeAgo(conversation.createdAt)}
                           </p>
                         </div>
                       </button>
@@ -245,34 +248,34 @@ export function QueryHistoryPanel({
                         onClick={(e) => {
                           e.stopPropagation()
                           setDeleteTarget({
-                            type: 'session',
-                            id: session.id,
-                            title: session.title || 'this session',
+                            type: 'conversation',
+                            id: conversation.id,
+                            title: conversation.title || 'this conversation',
                           })
                         }}
                         className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
-                        title="Delete session"
+                        title="Delete conversation"
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
 
-                  {/* Expanded session content */}
+                  {/* Expanded conversation content */}
                   {isExpanded && (
                     <div className="bg-slate-50/50 border-t border-slate-100">
-                      {isLoadingSession ? (
+                      {isLoadingConversation ? (
                         <div className="p-4 text-center text-slate-400 text-sm">
                           Loading queries...
                         </div>
-                      ) : expandedSessionData ? (
+                      ) : expandedConversationData ? (
                         <div className="divide-y divide-slate-100">
-                          {expandedSessionData.queries.length === 0 ? (
+                          {expandedConversationData.queries.length === 0 ? (
                             <div className="p-4 text-center text-slate-400 text-sm">
-                              No queries in this session
+                              No queries in this conversation
                             </div>
                           ) : (
-                            expandedSessionData.queries.map((query, idx) => (
+                            expandedConversationData.queries.map((query, idx) => (
                               <div
                                 key={query.id}
                                 className="w-full px-4 py-3 hover:bg-white transition-colors group flex items-start"
@@ -335,7 +338,7 @@ export function QueryHistoryPanel({
                         </div>
                       ) : (
                         <div className="p-4 text-center text-red-400 text-sm">
-                          Failed to load session
+                          Failed to load conversation
                         </div>
                       )}
                     </div>
@@ -356,11 +359,11 @@ export function QueryHistoryPanel({
                 <Trash2 size={20} className="text-red-500" />
               </div>
               <h3 className="text-lg font-semibold text-slate-800">
-                Delete {deleteTarget.type === 'session' ? 'Session' : 'Query'}
+                Delete {deleteTarget.type === 'conversation' ? 'Conversation' : 'Query'}
               </h3>
             </div>
             <p className="text-slate-600 mb-6">
-              {deleteTarget.type === 'session'
+              {deleteTarget.type === 'conversation'
                 ? `Delete "${deleteTarget.title}" and all its queries? This cannot be undone.`
                 : `Delete "${deleteTarget.title}"? This cannot be undone.`}
             </p>

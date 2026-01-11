@@ -1,4 +1,4 @@
-"""Session memory utilities for reconstructing conversation history."""
+"""Conversation memory utilities for reconstructing conversation history."""
 
 import hashlib
 import json
@@ -165,25 +165,25 @@ def trace_to_messages(
     return messages
 
 
-def fetch_session_history(
+def fetch_conversation_history(
     db: DbSession,
-    session_id: str,
+    conversation_id: str,
     exclude_query_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Fetch and reconstruct conversation history for a session.
+    Fetch and reconstruct conversation history for a conversation.
 
     Args:
         db: Database session
-        session_id: Session UUID
+        conversation_id: Conversation UUID
         exclude_query_id: Query ID to exclude (usually current query)
 
     Returns:
-        List of OpenAI-format messages for all previous queries in session
+        List of OpenAI-format messages for all previous queries in conversation
     """
     query = (
         db.query(Query)
-        .filter(Query.session_id == session_id)
+        .filter(Query.conversation_id == conversation_id)
         .filter(Query.hidden == False)  # noqa: E712
         .order_by(Query.sequence_order.asc())
     )
@@ -206,7 +206,7 @@ def fetch_session_history(
 
     logger.info(
         f"Loaded {len(all_messages)} history messages from {len(previous_queries)} "
-        f"previous queries in session {session_id}"
+        f"previous queries in conversation {conversation_id}"
     )
 
     return all_messages

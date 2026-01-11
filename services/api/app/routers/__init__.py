@@ -1,6 +1,7 @@
 """API routers."""
 
 from app.routers import (
+    conversations,
     disciplines,
     health,
     pages,
@@ -8,10 +9,10 @@ from app.routers import (
     processing,
     projects,
     queries,
-    sessions,
 )
 
 __all__ = [
+    "conversations",
     "health",
     "projects",
     "disciplines",
@@ -19,5 +20,4 @@ __all__ = [
     "pointers",
     "processing",
     "queries",
-    "sessions",
 ]

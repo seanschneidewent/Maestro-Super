@@ -161,16 +161,20 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "set_display_title",
-            "description": "Set a short title summarizing what the user asked about. Call this ONCE before your final answer. The title should be a 2-4 word noun phrase describing the topic (e.g., 'Electrical Panels', 'Kitchen Equipment', 'Fire Sprinkler Layout').",
+            "description": "Set titles for this chat and the overall conversation. Call this ONCE before your final answer.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {
+                    "chat_title": {
                         "type": "string",
-                        "description": "A 2-4 word noun phrase summarizing the query topic",
+                        "description": "2-4 word noun phrase for THIS query (e.g., 'Electrical Panels', 'Kitchen Equipment')",
+                    },
+                    "conversation_title": {
+                        "type": "string",
+                        "description": "2-6 word phrase summarizing the ENTIRE conversation so far",
                     }
                 },
-                "required": ["title"],
+                "required": ["chat_title", "conversation_title"],
             },
         },
     },
@@ -210,9 +214,11 @@ DISPLAYING RESULTS - SHOW ALL RELEVANT PAGES:
 - Always call at least one of these tools before your final answer so the user can see the relevant plans.
 
 BEFORE YOUR FINAL ANSWER:
-- Call set_display_title with a 2-4 word noun phrase summarizing the topic
-- Examples: "Electrical Panel Location", "Kitchen Equipment", "Grease Trap Details", "Fire Sprinkler Layout"
-- This title describes WHAT the user asked about, not what you found
+- Call set_display_title with:
+  - chat_title: 2-4 word noun phrase for THIS question (e.g., "Electrical Panels", "Kitchen Equipment")
+  - conversation_title: 2-6 word phrase summarizing ALL topics discussed in this conversation
+    - First query: same as chat_title
+    - Follow-ups: combine themes (e.g., "Kitchen & Electrical Plans", "Panel Details and Locations")
 
 RESPONSE STYLE:
 You're a helpful secondary superintendent - knowledgeable, casual, and to the point. Talk like a colleague, not a robot.
@@ -341,6 +347,7 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
     total_input_tokens = 0
     total_output_tokens = 0
     display_title: str | None = None
+    conversation_title: str | None = None
 
     try:
         while True:
@@ -430,13 +437,17 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
 
                 # Handle set_display_title specially - no DB access needed
                 if tool_name == "set_display_title":
-                    title = tool_input.get("title", "")
-                    # Clean up the title - strip leading colons, quotes, and whitespace
-                    if title:
-                        title = title.strip().lstrip(':').strip().strip('"').strip("'").strip()
-                    display_title = title[:100] if title else None
-                    result = {"success": True, "title": display_title}
-                    logger.info(f"Display title set to: {display_title}")
+                    chat_title = tool_input.get("chat_title", "")
+                    conv_title = tool_input.get("conversation_title", "")
+                    # Clean up titles - strip leading colons, quotes, and whitespace
+                    if chat_title:
+                        chat_title = chat_title.strip().lstrip(':').strip().strip('"').strip("'").strip()
+                    if conv_title:
+                        conv_title = conv_title.strip().lstrip(':').strip().strip('"').strip("'").strip()
+                    display_title = chat_title[:100] if chat_title else None
+                    conversation_title = conv_title[:200] if conv_title else display_title
+                    result = {"success": True, "chat_title": display_title, "conversation_title": conversation_title}
+                    logger.info(f"Titles set - chat: {display_title}, conversation: {conversation_title}")
                 else:
                     result = await execute_tool(db, project_id, tool_name, tool_input)
 
@@ -473,7 +484,7 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
             # Add tool results
             messages.extend(tool_results)
 
-        # Final response with trace, usage, and display title
+        # Final response with trace, usage, and titles
         yield {
             "type": "done",
             "trace": trace,
@@ -482,6 +493,7 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
                 "outputTokens": total_output_tokens,
             },
             "displayTitle": display_title,
+            "conversationTitle": conversation_title,
         }
 
     except openai.APIError as e:

@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,15 +13,16 @@ if TYPE_CHECKING:
     from app.models.query import Query
 
 
-class Session(Base):
+class Conversation(Base):
     """
-    A session groups related queries within a project.
+    A conversation groups related queries within a project.
 
-    Sessions provide continuity for multi-turn conversations
-    and allow restoring previous query states.
+    Conversations provide continuity for multi-turn chat sessions
+    and allow restoring previous query states. The title is updated
+    after each query to reflect the evolving conversation topics.
     """
 
-    __tablename__ = "sessions"
+    __tablename__ = "conversations"
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -39,6 +40,10 @@ class Session(Base):
         index=True,
         nullable=False,
     )
+    title: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()
@@ -46,11 +51,11 @@ class Session(Base):
     # Relationships
     project: Mapped["Project"] = relationship(
         "Project",
-        back_populates="sessions",
+        back_populates="conversations",
     )
     queries: Mapped[list["Query"]] = relationship(
         "Query",
-        back_populates="session",
+        back_populates="conversation",
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="Query.sequence_order",

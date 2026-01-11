@@ -14,5 +14,5 @@ export type { AgentSelectedPage, AgentSelectedPointer, CompletedQuery } from './
 export { QueryHistoryPanel } from './QueryHistoryPanel'
 export { QueryStack } from './QueryStack'
 export { QueryBubbleStack } from './QueryBubbleStack'
-export { NewSessionButton } from './NewSessionButton'
+export { NewConversationButton } from './NewConversationButton'
 export { SuggestedPrompts } from './SuggestedPrompts'
