@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { Loader2, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 import { MaestroText } from './MaestroText';
@@ -651,8 +652,22 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
             case 'text':
               return (
-                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2">
-                  <p className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2 text-slate-700 text-base leading-relaxed">
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                      strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                      ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
+                      li: ({ children }) => <li>{children}</li>,
+                      h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
+                      code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
+                    }}
+                  >
+                    {item.content}
+                  </ReactMarkdown>
                 </div>
               );
 
@@ -663,9 +678,23 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
         {/* Streaming indicator while processing */}
         {isStreaming && (
-          <div className="max-w-2xl mx-auto px-4 py-2">
+          <div className="max-w-2xl mx-auto px-4 py-2 text-slate-700 text-base leading-relaxed">
             {streamingText ? (
-              <p className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap">{streamingText}</p>
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                  strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                  ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
+                  li: ({ children }) => <li>{children}</li>,
+                  h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
+                  code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
+                }}
+              >
+                {streamingText}
+              </ReactMarkdown>
             ) : currentTool ? (
               <div className="flex items-center gap-2 text-slate-500">
                 <Loader2 size={16} className="animate-spin" />
