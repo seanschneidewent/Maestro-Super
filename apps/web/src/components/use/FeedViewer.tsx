@@ -622,7 +622,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto blueprint-grid px-6 py-8"
+      className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-28"
       onScroll={handleScroll}
     >
       <div className="space-y-6">

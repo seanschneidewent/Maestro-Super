@@ -643,32 +643,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           )}
 
           <div className="flex items-center gap-3">
-            {/* Response mode toggle */}
-            <button
-              onClick={() => setResponseMode(prev => prev === 'pages' ? 'conversational' : 'pages')}
-              disabled={isStreaming}
-              className={`
-                px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0
-                ${isStreaming ? 'opacity-50 cursor-not-allowed' : ''}
-                ${responseMode === 'pages'
-                  ? 'bg-cyan-500/20 text-cyan-600 border border-cyan-500/30'
-                  : 'bg-slate-100 text-slate-600 border border-slate-200'}
-              `}
-              title={responseMode === 'pages' ? 'Will show relevant pages' : 'Will respond conversationally'}
-            >
-              {responseMode === 'pages' ? (
-                <>
-                  <FileText size={16} />
-                  <span>Pages</span>
-                </>
-              ) : (
-                <>
-                  <MessageSquare size={16} />
-                  <span>Chat</span>
-                </>
-              )}
-            </button>
-
             <div className="flex-1" data-tutorial="query-input">
               <QueryInput
                 value={queryInput}
@@ -702,10 +676,38 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                 }}
               />
             </div>
-            <NewSessionButton
-              onClick={handleNewSession}
-              disabled={isStreaming || isCreatingSession}
-            />
+            {/* Stacked buttons: toggle above new session */}
+            <div className="flex flex-col gap-2">
+              {/* Response mode toggle */}
+              <button
+                onClick={() => setResponseMode(prev => prev === 'pages' ? 'conversational' : 'pages')}
+                disabled={isStreaming}
+                className={`
+                  px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-1.5
+                  ${isStreaming ? 'opacity-50 cursor-not-allowed' : ''}
+                  ${responseMode === 'pages'
+                    ? 'bg-cyan-500/20 text-cyan-600 border border-cyan-500/30'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'}
+                `}
+                title={responseMode === 'pages' ? 'Will show relevant pages' : 'Will respond conversationally'}
+              >
+                {responseMode === 'pages' ? (
+                  <>
+                    <FileText size={16} />
+                    <span>Pages</span>
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare size={16} />
+                    <span>Chat</span>
+                  </>
+                )}
+              </button>
+              <NewSessionButton
+                onClick={handleNewSession}
+                disabled={isStreaming || isCreatingSession}
+              />
+            </div>
           </div>
         </div>
 
