@@ -642,43 +642,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             />
           )}
 
-          <div className="flex items-center gap-3">
-            <div className="flex-1" data-tutorial="query-input">
-              <QueryInput
-                value={queryInput}
-                onChange={setQueryInput}
-                onSubmit={() => {
-                  if (queryInput.trim() && !isStreaming) {
-                    const trimmedQuery = queryInput.trim();
-                    // Add user query to feed
-                    setFeedItems((prev) => [
-                      ...prev,
-                      {
-                        type: 'user-query',
-                        id: crypto.randomUUID(),
-                        text: trimmedQuery,
-                        timestamp: Date.now(),
-                      },
-                    ]);
-                    setSubmittedQuery(trimmedQuery);
-                    setIsQueryExpanded(false);
-                    submitQuery(trimmedQuery, currentSession?.id, responseMode);
-                    setQueryInput('');
-                  }
-                }}
-                isProcessing={isStreaming}
-                onFocus={() => {
-                  setInputHasBeenFocused(true);
-                  // Advance from 'query' step to hide the input arrow
-                  if (tutorialActive && currentStep === 'query') {
-                    advanceStep(); // → 'responding' (no arrow)
-                  }
-                }}
-              />
-            </div>
-            {/* Stacked buttons: toggle above new session */}
-            <div className="flex flex-col gap-2 items-center">
-              {/* Response mode toggle - icon only to match + button */}
+          <div className="flex flex-col gap-2">
+            {/* Response mode toggle - positioned above input row, right-aligned */}
+            <div className="flex justify-end">
               <button
                 onClick={() => setResponseMode(prev => prev === 'pages' ? 'conversational' : 'pages')}
                 disabled={isStreaming}
@@ -697,6 +663,43 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   <MessageSquare size={20} />
                 )}
               </button>
+            </div>
+
+            {/* Input and new session button inline */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1" data-tutorial="query-input">
+                <QueryInput
+                  value={queryInput}
+                  onChange={setQueryInput}
+                  onSubmit={() => {
+                    if (queryInput.trim() && !isStreaming) {
+                      const trimmedQuery = queryInput.trim();
+                      // Add user query to feed
+                      setFeedItems((prev) => [
+                        ...prev,
+                        {
+                          type: 'user-query',
+                          id: crypto.randomUUID(),
+                          text: trimmedQuery,
+                          timestamp: Date.now(),
+                        },
+                      ]);
+                      setSubmittedQuery(trimmedQuery);
+                      setIsQueryExpanded(false);
+                      submitQuery(trimmedQuery, currentSession?.id, responseMode);
+                      setQueryInput('');
+                    }
+                  }}
+                  isProcessing={isStreaming}
+                  onFocus={() => {
+                    setInputHasBeenFocused(true);
+                    // Advance from 'query' step to hide the input arrow
+                    if (tutorialActive && currentStep === 'query') {
+                      advanceStep(); // → 'responding' (no arrow)
+                    }
+                  }}
+                />
+              </div>
               <NewSessionButton
                 onClick={handleNewSession}
                 disabled={isStreaming || isCreatingSession}
