@@ -219,8 +219,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           setResponseMode('conversational');
         }
       }
-      // Add text response if we have one (and no pages, or as additional response)
-      if (finalAnswer && selectedPages.length === 0) {
+      // Add text response if we have one (show below pages as conversational output)
+      if (finalAnswer) {
         setFeedItems((prev) => [
           ...prev,
           {
