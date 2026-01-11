@@ -55,7 +55,7 @@ const WELCOME_GREETINGS = [
 ];
 
 // Helper to load an image with retry logic
-async function loadImageWithRetry(url: string, maxRetries = 5): Promise<HTMLImageElement> {
+async function loadImageWithRetry(url: string, maxRetries = 3): Promise<HTMLImageElement> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -69,7 +69,7 @@ async function loadImageWithRetry(url: string, maxRetries = 5): Promise<HTMLImag
       console.log(`[FeedViewer] Image decode attempt ${attempt}/${maxRetries} failed, retrying...`);
       // Wait a bit before retrying (exponential backoff)
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 150 * attempt));
+        await new Promise(resolve => setTimeout(resolve, 100 * attempt));
       }
     }
   }
@@ -300,18 +300,19 @@ const FeedPageItem: React.FC<{
     });
   }, [page.pageId, page.filePath]);
 
-  // Calculate display dimensions - fit to container width, maintain aspect ratio
+  // Calculate display dimensions to fit container width
   const displayDimensions = pageImage
     ? (() => {
         const imgWidth = pageImage.width;
         const imgHeight = pageImage.height;
+        // Fit to container width, maintain aspect ratio
         const scale = Math.min(containerWidth / imgWidth, 1);
         return {
           width: imgWidth * scale,
           height: imgHeight * scale,
         };
       })()
-    : { width: containerWidth, height: 400 };
+    : { width: containerWidth, height: 600 };
 
   if (isLoading) {
     return (
