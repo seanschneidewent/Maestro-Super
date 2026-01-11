@@ -54,6 +54,29 @@ const WELCOME_GREETINGS = [
   "What can I help you find?",
 ];
 
+// Helper to load an image with retry logic
+async function loadImageWithRetry(url: string, maxRetries = 3): Promise<HTMLImageElement> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img;
+    } catch (err) {
+      lastError = err as Error;
+      console.log(`[FeedViewer] Image decode attempt ${attempt}/${maxRetries} failed, retrying...`);
+      // Wait a bit before retrying (exponential backoff)
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 // Reusable function to load a page image
 async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
   const cached = pageImageCache.get(page.pageId);
@@ -70,9 +93,7 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
       if (page.filePath.endsWith('.png')) {
         const url = getPublicUrl(page.filePath);
         console.log('[FeedViewer] PNG URL:', url);
-        const img = new Image();
-        img.src = url;
-        await img.decode();
+        const img = await loadImageWithRetry(url);
         console.log('[FeedViewer] PNG loaded:', page.pageId, img.naturalWidth, 'x', img.naturalHeight);
 
         const pageImage: PageImage = {
