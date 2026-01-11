@@ -651,7 +651,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
             case 'text':
               return (
-                <div key={item.id} className="max-w-2xl px-4 py-2">
+                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2">
                   <p className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap">{item.content}</p>
                 </div>
               );
@@ -663,7 +663,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
         {/* Streaming indicator while processing */}
         {isStreaming && (
-          <div className="max-w-2xl px-4 py-2">
+          <div className="max-w-2xl mx-auto px-4 py-2">
             {streamingText ? (
               <p className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap">{streamingText}</p>
             ) : currentTool ? (
