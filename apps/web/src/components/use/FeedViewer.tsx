@@ -627,10 +627,10 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-48"
+      className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-48 flex flex-col items-center"
       onScroll={handleScroll}
     >
-      <div className="space-y-6">
+      <div className="space-y-6 w-full" style={{ maxWidth: containerWidth }}>
         {feedItems.map((item) => {
           switch (item.type) {
             case 'user-query':
@@ -646,12 +646,13 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
               // Pages render at full container width for maximum visibility
               // Uses sequential loading to avoid memory pressure
               return (
-                <PagesCluster
-                  key={item.id}
-                  pages={item.pages}
-                  containerWidth={containerWidth}
-                  onTap={handlePageTap}
-                />
+                <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
+                  <PagesCluster
+                    pages={item.pages}
+                    containerWidth={containerWidth}
+                    onTap={handlePageTap}
+                  />
+                </div>
               );
 
             case 'text':
