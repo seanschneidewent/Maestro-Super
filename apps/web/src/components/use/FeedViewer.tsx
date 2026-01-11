@@ -371,7 +371,7 @@ const FeedPageItemDisplay: React.FC<{
   // Loading or waiting state
   if (isLoading || isWaiting || !pageImage) {
     return (
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-start">
         <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
           <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
         </div>
@@ -393,7 +393,7 @@ const FeedPageItemDisplay: React.FC<{
 
   // Loaded state - clickable thumbnail
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-start">
       <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
         <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
       </div>
