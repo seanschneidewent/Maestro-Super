@@ -326,6 +326,47 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setConversationQueries(restoredQueries);
     setActiveQueryId(selectedQueryId);
 
+    // Rebuild feedItems from conversation history up to selected query
+    const selectedQueryIndex = queries.findIndex(q => q.id === selectedQueryId);
+    const queriesToShow = queries.slice(0, selectedQueryIndex + 1);
+
+    const newFeedItems: FeedItem[] = [];
+    for (const q of queriesToShow) {
+      // Add user query
+      newFeedItems.push({
+        type: 'user-query',
+        id: `feed-query-${q.id}`,
+        text: q.queryText,
+        timestamp: new Date(q.createdAt).getTime(),
+      });
+
+      // Add pages if available
+      const cachedPages = queryPagesCache.get(q.id);
+      if (cachedPages && cachedPages.length > 0) {
+        newFeedItems.push({
+          type: 'pages',
+          id: `feed-pages-${q.id}`,
+          pages: cachedPages,
+          timestamp: new Date(q.createdAt).getTime() + 1,
+        });
+      }
+
+      // Add text response if available
+      const responseText = q.responseText || extractFinalAnswerFromTrace(q.trace);
+      const cachedTrace = queryTraceCache.get(q.id);
+      if (responseText) {
+        newFeedItems.push({
+          type: 'text',
+          id: `feed-text-${q.id}`,
+          content: responseText,
+          trace: (cachedTrace || []) as AgentTraceStep[],
+          timestamp: new Date(q.createdAt).getTime() + 2,
+        });
+      }
+    }
+
+    setFeedItems(newFeedItems);
+
     // Set the submitted query text for the selected query
     const selectedQuery = queries.find(q => q.id === selectedQueryId);
     setSubmittedQuery(selectedQuery?.queryText ?? null);
