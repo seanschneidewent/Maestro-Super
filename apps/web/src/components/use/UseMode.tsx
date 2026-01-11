@@ -677,30 +677,24 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
               />
             </div>
             {/* Stacked buttons: toggle above new session */}
-            <div className="flex flex-col gap-2">
-              {/* Response mode toggle */}
+            <div className="flex flex-col gap-2 items-center">
+              {/* Response mode toggle - icon only to match + button */}
               <button
                 onClick={() => setResponseMode(prev => prev === 'pages' ? 'conversational' : 'pages')}
                 disabled={isStreaming}
                 className={`
-                  px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-1.5
+                  w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg
                   ${isStreaming ? 'opacity-50 cursor-not-allowed' : ''}
                   ${responseMode === 'pages'
                     ? 'bg-cyan-500/20 text-cyan-600 border border-cyan-500/30'
-                    : 'bg-slate-100 text-slate-600 border border-slate-200'}
+                    : 'bg-white text-slate-600 border border-slate-200'}
                 `}
-                title={responseMode === 'pages' ? 'Will show relevant pages' : 'Will respond conversationally'}
+                title={responseMode === 'pages' ? 'Pages mode: Will show relevant pages' : 'Chat mode: Will respond conversationally'}
               >
                 {responseMode === 'pages' ? (
-                  <>
-                    <FileText size={16} />
-                    <span>Pages</span>
-                  </>
+                  <FileText size={20} />
                 ) : (
-                  <>
-                    <MessageSquare size={16} />
-                    <span>Chat</span>
-                  </>
+                  <MessageSquare size={20} />
                 )}
               </button>
               <NewSessionButton
