@@ -66,6 +66,7 @@ interface AgentMessageAccumulator {
   finalAnswer?: string
   trace: AgentTraceStep[]
   isComplete: boolean
+  lastToolResultIndex: number  // Track where the last tool result is in trace
 }
 
 export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamReturn {
@@ -123,6 +124,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         pagesVisited: [],
         trace: [],
         isComplete: false,
+        lastToolResultIndex: -1,  // -1 means no tools called yet
       }
 
       try {
@@ -243,6 +245,20 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
           setTrace([...agentMessage.trace])
           setThinkingText(extractLatestThinking(agentMessage.trace))
+
+          // Stream final answer: if we're past the last tool result (or no tools called),
+          // this text is part of the final answer - show it progressively
+          const currentTraceIndex = agentMessage.trace.length - 1
+          if (currentTraceIndex > agentMessage.lastToolResultIndex) {
+            // Collect all reasoning after lastToolResultIndex as the streaming answer
+            const answerParts: string[] = []
+            for (let i = agentMessage.lastToolResultIndex + 1; i < agentMessage.trace.length; i++) {
+              if (agentMessage.trace[i].type === 'reasoning' && agentMessage.trace[i].content) {
+                answerParts.push(agentMessage.trace[i].content!)
+              }
+            }
+            setFinalAnswer(answerParts.join(''))
+          }
         }
         break
 
@@ -250,6 +266,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         if (typeof data.tool === 'string') {
           // Set current tool for status display
           setCurrentTool(data.tool)
+
+          // Clear finalAnswer since we're calling more tools - previous text was thinking
+          setFinalAnswer('')
 
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
           const newStep: AgentTraceStep = {
@@ -309,6 +328,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           }
           agentMessage.trace.push(newStep)
           setTrace([...agentMessage.trace])
+
+          // Update lastToolResultIndex - text after this point is the final answer
+          agentMessage.lastToolResultIndex = agentMessage.trace.length - 1
 
           // Cache page data from search_pages for prefetching on select_pages tool_call
           if (data.tool === 'search_pages') {
