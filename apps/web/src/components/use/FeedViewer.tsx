@@ -55,7 +55,7 @@ const WELCOME_GREETINGS = [
 ];
 
 // Helper to load an image with retry logic
-async function loadImageWithRetry(url: string, maxRetries = 3): Promise<HTMLImageElement> {
+async function loadImageWithRetry(url: string, maxRetries = 5): Promise<HTMLImageElement> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -69,7 +69,7 @@ async function loadImageWithRetry(url: string, maxRetries = 3): Promise<HTMLImag
       console.log(`[FeedViewer] Image decode attempt ${attempt}/${maxRetries} failed, retrying...`);
       // Wait a bit before retrying (exponential backoff)
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+        await new Promise(resolve => setTimeout(resolve, 150 * attempt));
       }
     }
   }
