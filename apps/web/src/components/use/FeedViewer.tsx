@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { Loader2 } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 import { MaestroText } from './MaestroText';
@@ -124,11 +124,145 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
   return promise;
 }
 
-// Single page component with its own TransformWrapper
+// Full-screen modal for expanded page viewing
+const ExpandedPageModal: React.FC<{
+  page: AgentSelectedPage;
+  pageImage: PageImage;
+  onClose: () => void;
+}> = ({ page, pageImage, onClose }) => {
+  // Container size for fit calculation
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Measure container size
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerSize({ width: rect.width - 64, height: rect.height - 64 });
+      }
+    };
+
+    const timer = setTimeout(updateSize, 50);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  // Calculate display dimensions to fit container
+  const displayDimensions = (() => {
+    const imgWidth = pageImage.width;
+    const imgHeight = pageImage.height;
+    const scaleX = containerSize.width / imgWidth;
+    const scaleY = containerSize.height / imgHeight;
+    const fitScale = Math.min(scaleX, scaleY, 1);
+    return {
+      width: imgWidth * fitScale,
+      height: imgHeight * fitScale,
+    };
+  })();
+
+  // Close on escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm">
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
+      >
+        <X size={24} className="text-slate-700" />
+      </button>
+
+      {/* Page name header */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
+        <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
+      </div>
+
+      {/* Full-screen viewer with zoom/pan */}
+      <div
+        ref={containerRef}
+        className="w-full h-full flex items-center justify-center"
+        onClick={(e) => {
+          // Close when clicking backdrop (not the image)
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <TransformWrapper
+          initialScale={1}
+          minScale={0.5}
+          maxScale={5}
+          centerOnInit={true}
+          doubleClick={{ mode: 'reset' }}
+          panning={{ velocityDisabled: true }}
+        >
+          <TransformComponent
+            wrapperStyle={{
+              width: '100%',
+              height: '100%',
+            }}
+            contentStyle={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div
+              className="relative shadow-2xl select-none"
+              style={{
+                width: displayDimensions.width,
+                height: displayDimensions.height,
+              }}
+            >
+              <img
+                src={pageImage.dataUrl}
+                alt={page.pageName}
+                className="max-w-none w-full h-full"
+                draggable={false}
+              />
+
+              {/* Pointer overlays */}
+              {page.pointers.map((pointer) => (
+                <div
+                  key={pointer.pointerId}
+                  className="absolute border-2 border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20 cursor-pointer group"
+                  style={{
+                    left: `${pointer.bboxX * 100}%`,
+                    top: `${pointer.bboxY * 100}%`,
+                    width: `${pointer.bboxWidth * 100}%`,
+                    height: `${pointer.bboxHeight * 100}%`,
+                  }}
+                >
+                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none">
+                    {pointer.title}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </TransformComponent>
+        </TransformWrapper>
+      </div>
+    </div>
+  );
+};
+
+// Single page component - clickable thumbnail that opens modal
 const FeedPageItem: React.FC<{
   page: AgentSelectedPage;
   containerWidth: number;
-}> = ({ page, containerWidth }) => {
+  onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
+}> = ({ page, containerWidth, onTap }) => {
   const [pageImage, setPageImage] = useState<PageImage | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -183,66 +317,43 @@ const FeedPageItem: React.FC<{
         <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
       </div>
 
-      {/* Page with zoom/pan */}
-      <div
+      {/* Clickable page thumbnail */}
+      <button
+        onClick={() => onTap(page, pageImage)}
+        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden"
         style={{
           width: displayDimensions.width,
           height: displayDimensions.height,
         }}
       >
-        <TransformWrapper
-          initialScale={1}
-          minScale={0.5}
-          maxScale={5}
-          centerOnInit={true}
-          doubleClick={{ mode: 'reset' }}
-          panning={{ velocityDisabled: true }}
-        >
-          <TransformComponent
-            wrapperStyle={{ width: '100%', height: '100%' }}
-            contentStyle={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <div
-              className="relative shadow-2xl select-none"
-              style={{
-                width: displayDimensions.width,
-                height: displayDimensions.height,
-              }}
-            >
-              <img
-                src={pageImage.dataUrl}
-                alt={page.pageName}
-                className="max-w-none w-full h-full"
-                draggable={false}
-              />
+        <img
+          src={pageImage.dataUrl}
+          alt={page.pageName}
+          className="max-w-none w-full h-full"
+          draggable={false}
+        />
 
-              {/* Pointer overlays */}
-              {page.pointers.map((pointer) => (
-                <div
-                  key={pointer.pointerId}
-                  className="absolute border-2 border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20 cursor-pointer group"
-                  style={{
-                    left: `${pointer.bboxX * 100}%`,
-                    top: `${pointer.bboxY * 100}%`,
-                    width: `${pointer.bboxWidth * 100}%`,
-                    height: `${pointer.bboxHeight * 100}%`,
-                  }}
-                >
-                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800/90 px-2 py-1 rounded text-xs text-white whitespace-nowrap z-10 pointer-events-none">
-                    {pointer.title}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </TransformComponent>
-        </TransformWrapper>
-      </div>
+        {/* Pointer overlays (visible but not interactive in thumbnail) */}
+        {page.pointers.map((pointer) => (
+          <div
+            key={pointer.pointerId}
+            className="absolute border-2 border-cyan-500/70 bg-cyan-500/10"
+            style={{
+              left: `${pointer.bboxX * 100}%`,
+              top: `${pointer.bboxY * 100}%`,
+              width: `${pointer.bboxWidth * 100}%`,
+              height: `${pointer.bboxHeight * 100}%`,
+            }}
+          />
+        ))}
+
+        {/* Tap hint overlay */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/10 transition-colors">
+          <span className="opacity-0 hover:opacity-100 text-white text-sm font-medium bg-black/50 px-3 py-1 rounded-full transition-opacity">
+            Tap to zoom
+          </span>
+        </div>
+      </button>
     </div>
   );
 };
@@ -265,6 +376,22 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   const [greeting] = useState(
     () => WELCOME_GREETINGS[Math.floor(Math.random() * WELCOME_GREETINGS.length)]
   );
+
+  // Expanded page state for modal
+  const [expandedPage, setExpandedPage] = useState<{
+    page: AgentSelectedPage;
+    pageImage: PageImage;
+  } | null>(null);
+
+  // Handler for opening expanded view
+  const handlePageTap = useCallback((page: AgentSelectedPage, pageImage: PageImage) => {
+    setExpandedPage({ page, pageImage });
+  }, []);
+
+  // Handler for closing expanded view
+  const handleCloseExpanded = useCallback(() => {
+    setExpandedPage(null);
+  }, []);
 
   // Track scroll position to enable smart auto-scroll
   const handleScroll = useCallback(() => {
@@ -341,6 +468,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                       key={page.pageId}
                       page={page}
                       containerWidth={containerWidth}
+                      onTap={handlePageTap}
                     />
                   ))}
                 </div>
@@ -381,6 +509,15 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Expanded page modal */}
+      {expandedPage && (
+        <ExpandedPageModal
+          page={expandedPage.page}
+          pageImage={expandedPage.pageImage}
+          onClose={handleCloseExpanded}
+        />
+      )}
     </div>
   );
 };
