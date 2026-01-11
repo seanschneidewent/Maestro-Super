@@ -286,6 +286,7 @@ async def run_agent_query(
     project_id: str,
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
+    response_mode: str = "pages",
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
@@ -312,8 +313,21 @@ async def run_agent_query(
         base_url="https://openrouter.ai/api/v1",
     )
 
+    # Build system prompt based on response mode
+    system_content = AGENT_SYSTEM_PROMPT
+
+    if response_mode == "conversational":
+        system_content += """
+
+IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
+- Do NOT use select_pages or select_pointers tools
+- Answer their question directly in text based on context from previous messages
+- You may still use search tools if you need to look up information
+- Focus on providing a helpful text answer, not displaying pages
+- Keep your response concise and conversational"""
+
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
     ]
 
     # Add history messages if this is a multi-turn conversation

@@ -22,6 +22,7 @@ class AgentQueryRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="User's question")
     session_id: str | None = Field(default=None, alias="sessionId", description="Optional session ID to group queries")
+    response_mode: str = Field(default="pages", alias="responseMode", description="'pages' or 'conversational'")
 
     model_config = ConfigDict(populate_by_name=True)
 

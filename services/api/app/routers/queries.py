@@ -287,7 +287,7 @@ async def stream_query(
         stored_trace = []
         try:
             async for event in run_agent_query(
-                db, project_id, data.query, history_messages=history_messages
+                db, project_id, data.query, history_messages=history_messages, response_mode=data.response_mode
             ):
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
