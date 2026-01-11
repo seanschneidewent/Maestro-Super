@@ -300,28 +300,26 @@ const FeedPageItem: React.FC<{
     });
   }, [page.pageId, page.filePath]);
 
-  // Calculate display dimensions - smaller thumbnails (max 400px wide)
-  const maxThumbnailWidth = 400;
+  // Calculate display dimensions - fit to container width, maintain aspect ratio
   const displayDimensions = pageImage
     ? (() => {
         const imgWidth = pageImage.width;
         const imgHeight = pageImage.height;
-        // Cap at maxThumbnailWidth, maintain aspect ratio
-        const scale = Math.min(maxThumbnailWidth / imgWidth, 1);
+        const scale = Math.min(containerWidth / imgWidth, 1);
         return {
           width: imgWidth * scale,
           height: imgHeight * scale,
         };
       })()
-    : { width: maxThumbnailWidth, height: 280 };
+    : { width: containerWidth, height: 400 };
 
   if (isLoading) {
     return (
       <div
         className="flex items-center justify-center bg-slate-100 rounded-xl"
-        style={{ width: maxThumbnailWidth, height: 280 }}
+        style={{ width: containerWidth, height: 400 }}
       >
-        <Loader2 size={32} className="text-cyan-500 animate-spin" />
+        <Loader2 size={48} className="text-cyan-500 animate-spin" />
       </div>
     );
   }
@@ -330,7 +328,7 @@ const FeedPageItem: React.FC<{
     return (
       <div
         className="flex items-center justify-center bg-slate-100 rounded-xl text-slate-500"
-        style={{ width: maxThumbnailWidth, height: 150 }}
+        style={{ width: containerWidth, height: 200 }}
       >
         Failed to load page
       </div>
@@ -338,7 +336,7 @@ const FeedPageItem: React.FC<{
   }
 
   return (
-    <div className="flex flex-col items-start">
+    <div className="flex flex-col items-center">
       {/* Page name badge */}
       <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
         <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
