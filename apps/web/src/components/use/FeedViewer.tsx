@@ -6,6 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 import { MaestroText } from './MaestroText';
+import { ThinkingSection } from './ThinkingSection';
+import type { AgentTraceStep } from '../../types';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -17,7 +19,7 @@ const RENDER_SCALE = 3;
 export type FeedItem =
   | { type: 'user-query'; id: string; text: string; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
-  | { type: 'text'; id: string; content: string; timestamp: number };
+  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number };
 
 interface PageImage {
   dataUrl: string;
@@ -29,6 +31,7 @@ interface FeedViewerProps {
   feedItems: FeedItem[];
   isStreaming: boolean;
   streamingText?: string;
+  streamingTrace?: AgentTraceStep[];
   currentTool?: string | null;
   tutorialText?: string;
 }
@@ -540,6 +543,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   feedItems,
   isStreaming,
   streamingText,
+  streamingTrace = [],
   currentTool,
   tutorialText,
 }) => {
@@ -652,22 +656,35 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
 
             case 'text':
               return (
-                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2 text-slate-700 text-base leading-relaxed">
-                  <ReactMarkdown
-                    components={{
-                      p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                      strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
-                      ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
-                      ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
-                      li: ({ children }) => <li>{children}</li>,
-                      h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
-                      h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
-                      h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
-                      code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
-                    }}
-                  >
-                    {item.content}
-                  </ReactMarkdown>
+                <div key={item.id} className="max-w-2xl mx-auto px-4 py-2">
+                  {/* ThinkingSection for completed responses */}
+                  {item.trace.length > 0 && (
+                    <div className="mb-3">
+                      <ThinkingSection
+                        reasoning={[]}
+                        isStreaming={false}
+                        autoCollapse={false}
+                        trace={item.trace}
+                      />
+                    </div>
+                  )}
+                  <div className="text-slate-700 text-base leading-relaxed">
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                        strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                        ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
+                        li: ({ children }) => <li>{children}</li>,
+                        h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
+                        code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
+                      }}
+                    >
+                      {item.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               );
 
@@ -676,34 +693,36 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
           }
         })}
 
-        {/* Streaming indicator while processing */}
+        {/* Streaming response with live ThinkingSection */}
         {isStreaming && (
-          <div className="max-w-2xl mx-auto px-4 py-2 text-slate-700 text-base leading-relaxed">
-            {streamingText ? (
-              <ReactMarkdown
-                components={{
-                  p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                  strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
-                  ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
-                  ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
-                  li: ({ children }) => <li>{children}</li>,
-                  h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
-                  code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
-                }}
-              >
-                {streamingText}
-              </ReactMarkdown>
-            ) : currentTool ? (
-              <div className="flex items-center gap-2 text-slate-500">
-                <Loader2 size={16} className="animate-spin" />
-                <span>Working...</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-slate-500">
-                <Loader2 size={16} className="animate-spin" />
-                <span>Thinking...</span>
+          <div className="max-w-2xl mx-auto px-4 py-2">
+            {/* Live ThinkingSection during streaming */}
+            <div className="mb-3">
+              <ThinkingSection
+                reasoning={[]}
+                isStreaming={true}
+                autoCollapse={false}
+                trace={streamingTrace}
+              />
+            </div>
+            {/* Streaming text (final answer) */}
+            {streamingText && (
+              <div className="text-slate-700 text-base leading-relaxed">
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                    strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                    ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
+                    ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
+                    li: ({ children }) => <li>{children}</li>,
+                    h1: ({ children }) => <h1 className="text-lg font-semibold text-slate-800 mb-2 mt-4 first:mt-0">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-base font-semibold text-slate-800 mb-2 mt-3 first:mt-0">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-base font-medium text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
+                    code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
+                  }}
+                >
+                  {streamingText}
+                </ReactMarkdown>
               </div>
             )}
           </div>

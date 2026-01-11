@@ -3,7 +3,6 @@ import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTr
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
 import { FeedViewer, FeedItem } from './FeedViewer';
-import { ThinkingSection } from './ThinkingSection';
 import { ModeToggle } from '../ModeToggle';
 import { DemoHeader } from '../DemoHeader';
 import { api, isNotFoundError } from '../../lib/api';
@@ -228,13 +227,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             type: 'text',
             id: crypto.randomUUID(),
             content: finalAnswer,
+            trace: [...trace],  // Include trace for ThinkingSection
             timestamp: Date.now(),
           },
         ]);
       }
     }
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, selectedPages, finalAnswer, responseMode]);
+  }, [isStreaming, selectedPages, finalAnswer, trace, responseMode]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback((prompt: string) => {
@@ -582,6 +582,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           feedItems={feedItems}
           isStreaming={isStreaming}
           streamingText={finalAnswer}
+          streamingTrace={trace}
           currentTool={currentTool}
           tutorialText={
             tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
@@ -592,19 +593,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             undefined
           }
         />
-
-        {/* Thought process dropdown - top left */}
-        {(isStreaming || trace.length > 0) && (
-          <div className="absolute top-4 left-4 z-30 w-80 max-w-[calc(100%-2rem)]">
-            <ThinkingSection
-              reasoning={[]}
-              isStreaming={isStreaming}
-              autoCollapse={true}
-              trace={trace}
-              onNavigateToPage={handleNavigateToPage}
-            />
-          </div>
-        )}
 
         {/* Floating expand button - shows when sidebar collapsed, below ThinkingSection */}
         {isSidebarCollapsed && (
