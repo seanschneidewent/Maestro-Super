@@ -1,6 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Brain, Search, FileText, File, Folder, List, GitBranch, CheckCircle2, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Brain, Hammer, Search, FileText, File, Folder, List, GitBranch, CheckCircle2, Loader2 } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
+
+// Working phrases for cycling during streaming
+const WORKING_PHRASES = [
+  "Searching...",
+  "Looking for details...",
+  "Hunting through the plans...",
+  "Looking through pages...",
+  "Looking closer...",
+  "Checking that out...",
+  "Examining...",
+  "Reading the page...",
+  "Seeing what's here...",
+  "Getting the overview...",
+  "Zooming out...",
+  "Finding references...",
+  "Tracking connections...",
+  "Following the trail...",
+  "Pulling up the sheets...",
+  "Loading pages...",
+  "Highlighting...",
+  "Marking the spots...",
+  "Browsing the project...",
+];
 
 // Map tool names to icons and display names
 const TOOL_CONFIG: Record<string, { icon: React.ReactNode; name: string }> = {
@@ -172,8 +195,78 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onOpenPointer,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false); // Start collapsed
+  const [displayedText, setDisplayedText] = useState(''); // For typewriter effect
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const intervalRef = useRef<number | null>(null);
+  const timeoutRef = useRef<number | null>(null);
+  const phraseIndexRef = useRef(0);
+
+  // Clear typing interval
+  const clearTypingInterval = () => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  // Clear delay timeout
+  const clearDelayTimeout = () => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  // Typewrite a phrase, then call onComplete when done
+  const typewritePhrase = (phrase: string, onComplete: () => void) => {
+    setDisplayedText('');
+    let charIndex = 0;
+
+    intervalRef.current = window.setInterval(() => {
+      if (charIndex < phrase.length) {
+        setDisplayedText(phrase.slice(0, charIndex + 1));
+        charIndex++;
+      } else {
+        clearTypingInterval();
+        onComplete();
+      }
+    }, 30);
+  };
+
+  // Start cycling through working phrases
+  const startWorkingCycle = () => {
+    // Pick a random starting index
+    phraseIndexRef.current = Math.floor(Math.random() * WORKING_PHRASES.length);
+
+    const cycleNext = () => {
+      const phrase = WORKING_PHRASES[phraseIndexRef.current];
+      phraseIndexRef.current = (phraseIndexRef.current + 1) % WORKING_PHRASES.length;
+
+      typewritePhrase(phrase, () => {
+        // Wait 5 seconds then start next phrase
+        timeoutRef.current = window.setTimeout(cycleNext, 5000);
+      });
+    };
+
+    cycleNext();
+  };
+
+  // Handle streaming state changes for typewriter effect
+  useEffect(() => {
+    if (isStreaming) {
+      startWorkingCycle();
+    } else {
+      clearTypingInterval();
+      clearDelayTimeout();
+      setDisplayedText('');
+    }
+
+    return () => {
+      clearTypingInterval();
+      clearDelayTimeout();
+    };
+  }, [isStreaming]);
 
   // Auto-scroll to bottom when trace updates during streaming
   useEffect(() => {
@@ -218,19 +311,22 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
           )}
         </div>
 
-        <Brain size={14} className="flex-shrink-0 text-cyan-500" />
-
-        <span className="text-xs font-medium text-slate-600 flex-1 text-left">
-          {isStreaming ? 'Thinking' : 'Thoughts'}
-        </span>
-
-        {/* Animated dots while streaming */}
-        {isStreaming && (
-          <div className="flex items-center gap-0.5">
-            <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        {isStreaming ? (
+          /* Streaming: blinking dot + cycling typewriter text */
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="text-cyan-500 animate-pulse">●</span>
+            <span className="text-xs font-medium text-slate-600 truncate">
+              {displayedText}
+            </span>
           </div>
+        ) : (
+          /* Completed: hammer icon + "See my process." */
+          <>
+            <Hammer size={14} className="flex-shrink-0 text-cyan-500" />
+            <span className="text-xs font-medium text-slate-600 flex-1 text-left">
+              See my process.
+            </span>
+          </>
         )}
       </button>
 
