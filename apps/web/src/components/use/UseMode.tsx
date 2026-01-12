@@ -484,7 +484,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setActiveQueryId(null);
     queryPagesCache.clear();
     queryTraceCache.clear();
-    setFeedItems([]);
+    // Don't clear feedItems here - we'll replace them atomically below
 
     // Set sidebar highlighting
     setSelectedPageId(pageId);
@@ -520,7 +520,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
       loadPages([pageToLoad]);
 
-      // Add as standalone page for full-screen zoomable viewing
+      // Replace feedItems atomically with standalone page for full-screen viewing
       // (Different from 'pages' type which shows thumbnails for query results)
       setFeedItems([{
         type: 'standalone-page',
@@ -530,6 +530,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       }]);
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
+      setFeedItems([]); // Clear on error to show empty state
       if (isNotFoundError(err)) {
         showError(`Page "${pageName}" not found. Try refreshing the page list.`);
       } else {
