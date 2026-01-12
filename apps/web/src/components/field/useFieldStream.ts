@@ -33,6 +33,17 @@ export interface CompletedQuery {
   trace: AgentTraceStep[]
 }
 
+// Page context for page-first queries
+export interface PageContextForQuery {
+  pageId: string
+  pageName: string
+  pointers: Array<{
+    id: string
+    title: string
+    description: string
+  }>
+}
+
 interface UseFieldStreamOptions {
   projectId: string
   renderedPages: Map<string, string>
@@ -42,7 +53,7 @@ interface UseFieldStreamOptions {
 }
 
 interface UseFieldStreamReturn {
-  submitQuery: (query: string, conversationId?: string, responseMode?: 'pages' | 'conversational') => Promise<void>
+  submitQuery: (query: string, conversationId?: string, responseMode?: 'pages' | 'conversational', pageContext?: PageContextForQuery) => Promise<void>
   isStreaming: boolean
   thinkingText: string
   finalAnswer: string
@@ -96,7 +107,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   }, [])
 
   const submitQuery = useCallback(
-    async (query: string, conversationId?: string, responseMode: 'pages' | 'conversational' = 'pages') => {
+    async (query: string, conversationId?: string, responseMode: 'pages' | 'conversational' = 'pages', pageContext?: PageContextForQuery) => {
       // Abort any existing stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -141,7 +152,16 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
               Authorization: `Bearer ${session.access_token}`,
             }),
           },
-          body: JSON.stringify({ query, conversationId, responseMode }),
+          body: JSON.stringify({
+            query,
+            conversationId,
+            responseMode,
+            pageContext: pageContext ? {
+              pageId: pageContext.pageId,
+              pageName: pageContext.pageName,
+              pointers: pageContext.pointers,
+            } : undefined,
+          }),
           signal: abortControllerRef.current.signal,
         })
 

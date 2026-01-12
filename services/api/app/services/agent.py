@@ -293,6 +293,7 @@ async def run_agent_query(
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
     response_mode: str = "pages",
+    page_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
@@ -331,6 +332,34 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
 - You may still use search tools if you need to look up information
 - Focus on providing a helpful text answer, not displaying pages
 - Keep your response concise and conversational"""
+
+    # Augment system prompt with page context if provided
+    if page_context:
+        page_name = page_context.get("page_name", "Unknown page")
+        page_id = page_context.get("page_id", "")
+        pointers = page_context.get("pointers", [])
+
+        page_context_section = f"""
+
+PAGE CONTEXT (USER IS CURRENTLY VIEWING THIS PAGE):
+The user is looking at page "{page_name}" (ID: {page_id}).
+This page has {len(pointers)} annotated pointers. Prioritize information from this page when answering.
+
+POINTERS ON THIS PAGE:
+"""
+        for ptr in pointers[:20]:  # Limit to 20 to avoid token bloat
+            title = ptr.get("title", "Untitled")
+            description = ptr.get("description", "")[:150]
+            page_context_section += f"- {title}: {description}...\n"
+
+        if not pointers:
+            page_context_section += "(No pointers annotated on this page yet)\n"
+
+        page_context_section += """
+IMPORTANT: The user's question likely relates to what they're seeing on this page.
+Start by using get_page_context to get full details, then answer their question with this page as primary context."""
+
+        system_content = page_context_section + "\n" + system_content
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_content},
