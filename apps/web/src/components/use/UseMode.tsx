@@ -152,7 +152,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const wasStreamingRef = useRef(false);
 
   // Agent toast for background query notifications
-  const { addToast, markComplete } = useAgentToast();
+  const { addToast, markComplete, dismissToast } = useAgentToast();
   const currentToastIdRef = useRef<string | null>(null);
 
   // Callback when a query completes
@@ -404,11 +404,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Handle navigation from agent toast (fetch conversation and restore)
   const handleToastNavigate = useCallback(async (conversationId: string) => {
-    // If we're already on this conversation, just close history panel and show feed
-    // The feed already has the pages and text from the completed query
+    // If we're already on this conversation, show the conversation content
+    // by filtering out standalone-page items (the user was browsing pages)
     if (currentConversation?.id === conversationId && conversationQueries.length > 0) {
       setShowHistory(false);
-      // Scroll feed to bottom to show latest content
+      // Remove standalone-page items to show conversation content
+      setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
       return;
     }
 
@@ -513,6 +514,13 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
     // Tutorial: complete 'sidebar' step when user selects a page
     completeStep('sidebar');
+
+    // If there's an active toast (query in progress), dismiss it before resetting
+    // This prevents the toast from incorrectly showing "Complete" when switching pages
+    if (currentToastIdRef.current) {
+      dismissToast(currentToastIdRef.current);
+      currentToastIdRef.current = null;
+    }
 
     // Reset conversation state (like handleNewConversation but skip clearConversation API call)
     resetStream();
