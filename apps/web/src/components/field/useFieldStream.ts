@@ -87,6 +87,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   const selectedPagesRef = useRef<AgentSelectedPage[]>([])
   const currentQueryRef = useRef<{ id: string; text: string } | null>(null)
   const pageDataCache = useRef<Map<string, { filePath: string; pageName: string; disciplineId: string }>>(new Map())
+  // Use ref for callback to avoid stale closure issues with useCallback
+  const onQueryCompleteRef = useRef(onQueryComplete)
+  onQueryCompleteRef.current = onQueryComplete
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {
@@ -582,9 +585,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         setIsStreaming(false)
         setCurrentTool(null) // Clear tool status when streaming completes
 
-        // Notify parent of completed query
-        if (onQueryComplete && currentQueryRef.current) {
-          onQueryComplete({
+        // Notify parent of completed query (use ref to avoid stale closure)
+        if (onQueryCompleteRef.current && currentQueryRef.current) {
+          onQueryCompleteRef.current({
             queryId,
             queryText: currentQueryRef.current.text,
             displayTitle: eventDisplayTitle,
