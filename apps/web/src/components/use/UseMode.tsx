@@ -456,13 +456,13 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     // Otherwise fetch from API and restore
     try {
       const conversation = await api.conversations.get(conversationId);
-      // Set the conversation title locally for immediate display
-      setLocalConversationTitle(conversation.title ?? null);
       if (conversation.queries && conversation.queries.length > 0) {
         // Navigate to the most recent query in the conversation
         const lastQuery = conversation.queries[conversation.queries.length - 1];
         handleRestoreConversation(conversationId, conversation.queries, lastQuery.id);
       }
+      // Set title AFTER restore (which clears it) so we have the fetched title
+      setLocalConversationTitle(conversation.title ?? null);
     } catch (err) {
       console.error('Failed to navigate to conversation:', err);
       showError('Failed to load conversation. Please try again.');
