@@ -5,6 +5,7 @@ import { SetupMode } from './components/setup/SetupMode';
 import { UseMode } from './components/use/UseMode';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
+import { AgentToastProvider } from './contexts/AgentToastContext';
 import { queryClient } from './lib/queryClient';
 import { AppMode, Project } from './types';
 import { Loader2, ArrowLeft } from 'lucide-react';
@@ -486,7 +487,9 @@ const App: React.FC = () => {
             />
           </div>
           <div className={mode === AppMode.USE ? 'contents' : 'hidden'}>
-            <UseMode mode={mode} setMode={setMode} projectId={project.id} />
+            <AgentToastProvider>
+              <UseMode mode={mode} setMode={setMode} projectId={project.id} />
+            </AgentToastProvider>
           </div>
         </ToastProvider>
       </ErrorBoundary>

@@ -21,6 +21,8 @@ import {
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
+import { useAgentToast } from '../../contexts/AgentToastContext';
+import { AgentToastStack } from './AgentToastStack';
 
 /**
  * Extract final answer text from the query trace.
@@ -149,6 +151,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Track previous streaming state to detect completion
   const wasStreamingRef = useRef(false);
 
+  // Agent toast for background query notifications
+  const { addToast, markComplete } = useAgentToast();
+  const currentToastIdRef = useRef<string | null>(null);
+
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
@@ -202,6 +208,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   useEffect(() => {
     // Streaming just ended (true → false)
     if (wasStreamingRef.current && !isStreaming) {
+      // Mark agent toast as complete
+      if (currentToastIdRef.current) {
+        markComplete(currentToastIdRef.current);
+        currentToastIdRef.current = null;
+      }
+
       // Add pages if we have them
       if (selectedPages.length > 0) {
         setFeedItems((prev) => [
@@ -234,7 +246,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       }
     }
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, selectedPages, finalAnswer, trace, responseMode]);
+  }, [isStreaming, selectedPages, finalAnswer, trace, responseMode, markComplete]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback((prompt: string) => {
@@ -251,8 +263,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
+    // Create agent toast for background notification
+    const toastId = addToast(prompt, currentConversation?.id ?? null);
+    currentToastIdRef.current = toastId;
     submitQuery(prompt, currentConversation?.id, responseMode);
-  }, [isStreaming, currentConversation?.id, submitQuery, responseMode]);
+  }, [isStreaming, currentConversation?.id, submitQuery, responseMode, addToast]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -386,6 +401,21 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       cachedPages
     );
   };
+
+  // Handle navigation from agent toast (fetch conversation and restore)
+  const handleToastNavigate = useCallback(async (conversationId: string) => {
+    try {
+      const conversation = await api.conversations.get(conversationId);
+      if (conversation.queries && conversation.queries.length > 0) {
+        // Navigate to the most recent query in the conversation
+        const lastQuery = conversation.queries[conversation.queries.length - 1];
+        handleRestoreConversation(conversationId, conversation.queries, lastQuery.id);
+      }
+    } catch (err) {
+      console.error('Failed to navigate to conversation:', err);
+      showError('Failed to load conversation. Please try again.');
+    }
+  }, [handleRestoreConversation, showError]);
 
   // Handle visible page change from scrolling in multi-page mode
   const handleVisiblePageChange = (pageId: string, disciplineId: string) => {
@@ -727,6 +757,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       ]);
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
+                      // Create agent toast for background notification
+                      const toastId = addToast(trimmedQuery, currentConversation?.id ?? null);
+                      currentToastIdRef.current = toastId;
                       submitQuery(trimmedQuery, currentConversation?.id, responseMode);
                       setQueryInput('');
                     }
@@ -756,6 +789,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           showSkipTutorial={tutorialActive}
           onSkipTutorial={skipTutorial}
         />
+
+        {/* Agent working toast stack */}
+        <AgentToastStack onNavigate={handleToastNavigate} />
 
         {/* Error display */}
         {error && (
