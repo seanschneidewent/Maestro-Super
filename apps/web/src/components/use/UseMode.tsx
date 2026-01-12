@@ -680,13 +680,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSelectedPageId(pageId);
   };
 
-  // Compute toast visibility: only show when user is on file tree page (standalone-page)
-  // while agent works in background. Hide when in conversation view.
+  // Compute toast visibility: show when user is on file tree page (standalone-page),
+  // hide when in conversation view (they can see the agent working directly).
+  // Toast auto-dismisses naturally - don't tie visibility to isStreaming.
   const hasStandalonePageVisible = feedItems.some((item) => item.type === 'standalone-page');
-  const shouldShowToast = isStreaming && hasStandalonePageVisible;
+  const shouldShowToast = hasStandalonePageVisible;
 
   // Compute whether toast or conversation indicator is visible for button positioning
   const isToastVisible = toasts.length > 0 && shouldShowToast;
+  // Indicator shows when: in conversation, not streaming, and all toasts auto-dismissed
   const isIndicatorVisible = activeConversationId !== null && !isStreaming && toasts.length === 0;
   const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
 
@@ -754,7 +756,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           <button
             onClick={() => setIsSidebarCollapsed(false)}
             className={`absolute left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-              hasTopLeftOverlay ? 'top-16' : 'top-4'
+              hasTopLeftOverlay ? 'top-24' : 'top-4'
             }`}
             title="Expand sidebar"
             data-tutorial="sidebar-expand"
