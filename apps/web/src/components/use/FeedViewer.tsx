@@ -19,7 +19,8 @@ const RENDER_SCALE = 3;
 export type FeedItem =
   | { type: 'user-query'; id: string; text: string; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
-  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number };
+  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number }
+  | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
 
 interface PageImage {
   dataUrl: string;
@@ -539,6 +540,119 @@ const FeedPageItem: React.FC<{
   );
 };
 
+// Standalone page viewer - full-screen zoomable view for file tree selections
+const StandalonePageViewer: React.FC<{
+  page: AgentSelectedPage;
+}> = ({ page }) => {
+  const [pageImage, setPageImage] = useState<PageImage | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+
+  // Load the page image
+  useEffect(() => {
+    setIsLoading(true);
+    loadPageImage(page).then((img) => {
+      setPageImage(img);
+      setIsLoading(false);
+    });
+  }, [page.pageId, page.filePath]);
+
+  // Measure container size
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerSize({ width: rect.width, height: rect.height });
+      }
+    };
+
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  // Calculate display dimensions to fit container
+  const displayDimensions = pageImage
+    ? (() => {
+        const imgWidth = pageImage.width;
+        const imgHeight = pageImage.height;
+        const padding = 48;
+        const scaleX = (containerSize.width - padding) / imgWidth;
+        const scaleY = (containerSize.height - padding) / imgHeight;
+        const fitScale = Math.min(scaleX, scaleY, 1);
+        return {
+          width: imgWidth * fitScale,
+          height: imgHeight * fitScale,
+        };
+      })()
+    : { width: containerSize.width - 48, height: containerSize.height - 48 };
+
+  if (isLoading) {
+    return (
+      <div ref={containerRef} className="flex-1 flex items-center justify-center">
+        <Loader2 size={48} className="text-cyan-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!pageImage) {
+    return (
+      <div ref={containerRef} className="flex-1 flex items-center justify-center text-slate-500">
+        Failed to load page
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="flex-1 flex flex-col items-center justify-center">
+      {/* Page name header */}
+      <div className="mb-4 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
+        <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
+      </div>
+
+      {/* Full viewer with zoom/pan */}
+      <TransformWrapper
+        initialScale={1}
+        minScale={0.5}
+        maxScale={5}
+        centerOnInit={true}
+        doubleClick={{ mode: 'reset' }}
+        panning={{ velocityDisabled: true }}
+      >
+        <TransformComponent
+          wrapperStyle={{
+            width: displayDimensions.width,
+            height: displayDimensions.height,
+          }}
+          contentStyle={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            className="relative shadow-2xl select-none"
+            style={{
+              width: displayDimensions.width,
+              height: displayDimensions.height,
+            }}
+          >
+            <img
+              src={pageImage.dataUrl}
+              alt={page.pageName}
+              className="max-w-none w-full h-full"
+              draggable={false}
+            />
+          </div>
+        </TransformComponent>
+      </TransformWrapper>
+    </div>
+  );
+};
+
 export const FeedViewer: React.FC<FeedViewerProps> = ({
   feedItems,
   isStreaming,
@@ -620,6 +734,16 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
             state={currentTool ? 'working' : 'typing'}
           />
         )}
+      </div>
+    );
+  }
+
+  // Standalone page view - full-screen zoomable viewer for file tree selection
+  const standaloneItem = feedItems.find((item) => item.type === 'standalone-page');
+  if (standaloneItem && standaloneItem.type === 'standalone-page') {
+    return (
+      <div className="flex-1 flex flex-col blueprint-grid">
+        <StandalonePageViewer page={standaloneItem.page} />
       </div>
     );
   }

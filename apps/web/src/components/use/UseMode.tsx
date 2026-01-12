@@ -520,12 +520,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
       loadPages([pageToLoad]);
 
-      // Add directly to feedItems for immediate rendering
-      // (The streaming effect won't trigger since isStreaming is always false here)
+      // Add as standalone page for full-screen zoomable viewing
+      // (Different from 'pages' type which shows thumbnails for query results)
       setFeedItems([{
-        type: 'pages',
+        type: 'standalone-page',
         id: crypto.randomUUID(),
-        pages: [pageToLoad],
+        page: pageToLoad,
         timestamp: Date.now(),
       }]);
     } catch (err) {
