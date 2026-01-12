@@ -510,27 +510,24 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   }, [showHistory, tutorialActive, currentStep, advanceStep]);
 
   // Handle page selection from PlansPanel
-  // Resets to fresh conversation state and loads page into agent viewer
+  // Loads page into viewer - preserves agent if streaming
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
     // Tutorial: complete 'sidebar' step when user selects a page
     completeStep('sidebar');
 
-    // If there's an active toast (query in progress), dismiss it before resetting
-    // This prevents the toast from incorrectly showing "Complete" when switching pages
-    if (currentToastIdRef.current) {
-      dismissToast(currentToastIdRef.current);
-      currentToastIdRef.current = null;
+    // If agent is streaming, don't reset - let it continue in background
+    // User can browse pages while agent works, then click toast to see response
+    if (!isStreaming) {
+      // Reset conversation state only when not streaming
+      resetStream();
+      setQueryInput('');
+      setSubmittedQuery(null);
+      setIsQueryExpanded(false);
+      setConversationQueries([]);
+      setActiveQueryId(null);
+      queryPagesCache.clear();
+      queryTraceCache.clear();
     }
-
-    // Reset conversation state (like handleNewConversation but skip clearConversation API call)
-    resetStream();
-    setQueryInput('');
-    setSubmittedQuery(null);
-    setIsQueryExpanded(false);
-    setConversationQueries([]);
-    setActiveQueryId(null);
-    queryPagesCache.clear();
-    queryTraceCache.clear();
     // Don't clear feedItems here - we'll replace them atomically below
 
     // Set sidebar highlighting
