@@ -23,6 +23,7 @@ import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
 import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentToastStack } from './AgentToastStack';
+import { ConversationIndicator } from './ConversationIndicator';
 
 /**
  * Extract final answer text from the query trace.
@@ -159,7 +160,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const wasStreamingRef = useRef(false);
 
   // Agent toast for background query notifications
-  const { addToast, markComplete, dismissToast } = useAgentToast();
+  const { toasts, addToast, markComplete, dismissToast } = useAgentToast();
   const currentToastIdRef = useRef<string | null>(null);
 
   // Callback when a query completes
@@ -847,6 +848,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Agent working toast stack */}
         <AgentToastStack onNavigate={handleToastNavigate} />
+
+        {/* Conversation indicator - shows when bound to conversation and idle */}
+        <ConversationIndicator
+          conversationTitle={activeConversation?.title ?? null}
+          isVisible={activeConversationId !== null && !isStreaming && toasts.length === 0}
+        />
 
         {/* Error display */}
         {error && (
