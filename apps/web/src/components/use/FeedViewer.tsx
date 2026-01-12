@@ -580,7 +580,7 @@ const StandalonePageViewer: React.FC<{
       centerOnInit={true}
       doubleClick={{ mode: 'reset' }}
       panning={{ velocityDisabled: true }}
-      wheel={{ smoothStep: 0.003 }}
+      wheel={{ step: 0.05 }}
     >
       <TransformComponent
         wrapperStyle={{ width: '100%', height: '100%' }}
@@ -692,7 +692,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   const standaloneItem = feedItems.find((item) => item.type === 'standalone-page');
   if (standaloneItem && standaloneItem.type === 'standalone-page') {
     return (
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden blueprint-grid">
         <StandalonePageViewer page={standaloneItem.page} />
       </div>
     );
