@@ -510,12 +510,23 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
       // Load into viewer without pointers (clean sheet browsing)
       // Use pre-rendered PNG if available, fall back to PDF
-      loadPages([{
+      const pageToLoad = {
         pageId,
         pageName: pageData.pageName,
         filePath: pageData.pageImagePath || pageData.filePath,
         disciplineId,
         pointers: [], // Empty - pointers only shown for query results
+      };
+
+      loadPages([pageToLoad]);
+
+      // Add directly to feedItems for immediate rendering
+      // (The streaming effect won't trigger since isStreaming is always false here)
+      setFeedItems([{
+        type: 'pages',
+        id: crypto.randomUUID(),
+        pages: [pageToLoad],
+        timestamp: Date.now(),
       }]);
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
