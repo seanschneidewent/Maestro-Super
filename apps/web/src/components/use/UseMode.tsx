@@ -564,14 +564,31 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
       loadPages([pageToLoad]);
 
-      // Replace feedItems atomically with standalone page for full-screen viewing
-      // (Different from 'pages' type which shows thumbnails for query results)
-      setFeedItems([{
-        type: 'standalone-page',
-        id: crypto.randomUUID(),
-        page: pageToLoad,
-        timestamp: Date.now(),
-      }]);
+      // Update feedItems for page viewing
+      if (isStreaming) {
+        // If streaming, preserve conversation items (user-query, pages, text)
+        // and replace/add standalone-page for browsing
+        setFeedItems((prev) => {
+          const conversationItems = prev.filter((item) => item.type !== 'standalone-page');
+          return [
+            {
+              type: 'standalone-page',
+              id: crypto.randomUUID(),
+              page: pageToLoad,
+              timestamp: Date.now(),
+            },
+            ...conversationItems,
+          ];
+        });
+      } else {
+        // Not streaming - replace feedItems entirely with standalone page
+        setFeedItems([{
+          type: 'standalone-page',
+          id: crypto.randomUUID(),
+          page: pageToLoad,
+          timestamp: Date.now(),
+        }]);
+      }
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
       setFeedItems([]); // Clear on error to show empty state
