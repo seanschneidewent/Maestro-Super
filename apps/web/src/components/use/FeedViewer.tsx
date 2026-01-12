@@ -558,7 +558,7 @@ const StandalonePageViewer: React.FC<{
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="w-full h-full flex items-center justify-center">
         <Loader2 size={48} className="text-cyan-500 animate-spin" />
       </div>
     );
@@ -566,7 +566,7 @@ const StandalonePageViewer: React.FC<{
 
   if (!pageImage) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-500">
+      <div className="w-full h-full flex items-center justify-center text-slate-500">
         Failed to load page
       </div>
     );
@@ -575,22 +575,29 @@ const StandalonePageViewer: React.FC<{
   return (
     <TransformWrapper
       initialScale={1}
-      minScale={0.25}
-      maxScale={5}
+      minScale={0.1}
+      maxScale={8}
       centerOnInit={true}
       doubleClick={{ mode: 'reset' }}
       panning={{ velocityDisabled: true }}
+      wheel={{ smoothStep: 0.003 }}
     >
       <TransformComponent
-        wrapperClass="!w-full !h-full"
-        contentClass="!w-full !h-full flex items-center justify-center"
+        wrapperStyle={{ width: '100%', height: '100%' }}
+        contentStyle={{ width: '100%', height: '100%' }}
       >
-        <img
-          src={pageImage.dataUrl}
-          alt={page.pageName}
-          className="max-w-full max-h-full object-contain shadow-2xl"
-          draggable={false}
-        />
+        <div className="w-full h-full flex items-center justify-center p-4">
+          <img
+            src={pageImage.dataUrl}
+            alt={page.pageName}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+            }}
+            draggable={false}
+          />
+        </div>
       </TransformComponent>
     </TransformWrapper>
   );
@@ -685,7 +692,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   const standaloneItem = feedItems.find((item) => item.type === 'standalone-page');
   if (standaloneItem && standaloneItem.type === 'standalone-page') {
     return (
-      <div className="flex-1 flex flex-col blueprint-grid">
+      <div className="flex-1 overflow-hidden">
         <StandalonePageViewer page={standaloneItem.page} />
       </div>
     );
