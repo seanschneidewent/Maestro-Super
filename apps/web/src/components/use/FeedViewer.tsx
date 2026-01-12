@@ -546,8 +546,6 @@ const StandalonePageViewer: React.FC<{
 }> = ({ page }) => {
   const [pageImage, setPageImage] = useState<PageImage | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
   // Load the page image
   useEffect(() => {
@@ -558,39 +556,9 @@ const StandalonePageViewer: React.FC<{
     });
   }, [page.pageId, page.filePath]);
 
-  // Measure container size
-  useEffect(() => {
-    const updateSize = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setContainerSize({ width: rect.width, height: rect.height });
-      }
-    };
-
-    updateSize();
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
-
-  // Calculate display dimensions to fit container
-  const displayDimensions = pageImage
-    ? (() => {
-        const imgWidth = pageImage.width;
-        const imgHeight = pageImage.height;
-        const padding = 48;
-        const scaleX = (containerSize.width - padding) / imgWidth;
-        const scaleY = (containerSize.height - padding) / imgHeight;
-        const fitScale = Math.min(scaleX, scaleY, 1);
-        return {
-          width: imgWidth * fitScale,
-          height: imgHeight * fitScale,
-        };
-      })()
-    : { width: containerSize.width - 48, height: containerSize.height - 48 };
-
   if (isLoading) {
     return (
-      <div ref={containerRef} className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center">
         <Loader2 size={48} className="text-cyan-500 animate-spin" />
       </div>
     );
@@ -598,58 +566,33 @@ const StandalonePageViewer: React.FC<{
 
   if (!pageImage) {
     return (
-      <div ref={containerRef} className="flex-1 flex items-center justify-center text-slate-500">
+      <div className="flex-1 flex items-center justify-center text-slate-500">
         Failed to load page
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="flex-1 flex flex-col items-center justify-center">
-      {/* Page name header */}
-      <div className="mb-4 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
-        <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
-      </div>
-
-      {/* Full viewer with zoom/pan */}
-      <TransformWrapper
-        initialScale={1}
-        minScale={0.5}
-        maxScale={5}
-        centerOnInit={true}
-        doubleClick={{ mode: 'reset' }}
-        panning={{ velocityDisabled: true }}
+    <TransformWrapper
+      initialScale={1}
+      minScale={0.25}
+      maxScale={5}
+      centerOnInit={true}
+      doubleClick={{ mode: 'reset' }}
+      panning={{ velocityDisabled: true }}
+    >
+      <TransformComponent
+        wrapperClass="!w-full !h-full"
+        contentClass="!w-full !h-full flex items-center justify-center"
       >
-        <TransformComponent
-          wrapperStyle={{
-            width: displayDimensions.width,
-            height: displayDimensions.height,
-          }}
-          contentStyle={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div
-            className="relative shadow-2xl select-none"
-            style={{
-              width: displayDimensions.width,
-              height: displayDimensions.height,
-            }}
-          >
-            <img
-              src={pageImage.dataUrl}
-              alt={page.pageName}
-              className="max-w-none w-full h-full"
-              draggable={false}
-            />
-          </div>
-        </TransformComponent>
-      </TransformWrapper>
-    </div>
+        <img
+          src={pageImage.dataUrl}
+          alt={page.pageName}
+          className="max-w-full max-h-full object-contain shadow-2xl"
+          draggable={false}
+        />
+      </TransformComponent>
+    </TransformWrapper>
   );
 };
 
