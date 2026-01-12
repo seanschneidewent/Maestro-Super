@@ -17,23 +17,12 @@ class QueryCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class PageContext(BaseModel):
-    """Page context for page-first queries."""
-
-    page_id: str = Field(alias="pageId")
-    page_name: str = Field(alias="pageName")
-    pointers: list[dict[str, Any]] = Field(default_factory=list)
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
 class AgentQueryRequest(BaseModel):
     """Schema for streaming agent query request."""
 
     query: str = Field(..., min_length=1, description="User's question")
     conversation_id: str | None = Field(default=None, alias="conversationId", description="Optional conversation ID to group queries")
     response_mode: str = Field(default="pages", alias="responseMode", description="'pages' or 'conversational'")
-    page_context: PageContext | None = Field(default=None, alias="pageContext", description="Optional page context for page-first queries")
 
     model_config = ConfigDict(populate_by_name=True)
 

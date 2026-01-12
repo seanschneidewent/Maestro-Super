@@ -286,12 +286,9 @@ async def stream_query(
         conversation_title_from_agent = None
         referenced_pointers = []
         stored_trace = []
-        # Extract page context if provided
-        page_context = data.page_context.model_dump() if data.page_context else None
-
         try:
             async for event in run_agent_query(
-                db, project_id, data.query, history_messages=history_messages, response_mode=data.response_mode, page_context=page_context
+                db, project_id, data.query, history_messages=history_messages, response_mode=data.response_mode
             ):
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":

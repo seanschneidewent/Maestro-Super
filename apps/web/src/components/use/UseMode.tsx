@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
-import { FeedViewer, FeedItem, FocusedPageData } from './FeedViewer';
-import { PageContextViewer } from './PageContextViewer';
+import { FeedViewer, FeedItem } from './FeedViewer';
 import { ModeToggle } from '../ModeToggle';
 import { DemoHeader } from '../DemoHeader';
-import { api, isNotFoundError, PointerResponse } from '../../lib/api';
+import { api, isNotFoundError } from '../../lib/api';
 import { PanelLeftClose, PanelLeft, FileText, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useTutorial } from '../../hooks/useTutorial';
@@ -19,7 +18,6 @@ import {
   NewConversationButton,
   CompletedQuery,
   SuggestedPrompts,
-  PageContextForQuery,
 } from '../field';
 import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
@@ -147,16 +145,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Feed items for vertical scroll view
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
-
-  // Page-first mode state: focused page with pointers for context queries
-  const [focusedPage, setFocusedPage] = useState<{
-    pageId: string;
-    pageName: string;
-    filePath: string;
-    disciplineId: string;
-    pointers: PointerResponse[];
-  } | null>(null);
-  const [viewMode, setViewMode] = useState<'viewer' | 'chat'>('viewer');
 
   // Track previous streaming state to detect completion
   const wasStreamingRef = useRef(false);
@@ -482,7 +470,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   }, [showHistory, tutorialActive, currentStep, advanceStep]);
 
   // Handle page selection from PlansPanel
-  // Sets focusedPage for page-first query mode with full viewer
+  // Resets to fresh conversation state and loads page into agent viewer
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
     // Tutorial: complete 'sidebar' step when user selects a page
     completeStep('sidebar');
@@ -497,9 +485,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.clear();
     queryTraceCache.clear();
     setFeedItems([]);
-
-    // Enter viewer mode for page-first flow
-    setViewMode('viewer');
 
     // Set sidebar highlighting
     setSelectedPageId(pageId);
@@ -519,21 +504,19 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       }
     };
 
-    // Fetch page data AND pointers in parallel for page-first mode
+    // Fetch page data (skip pointers - not shown for file tree navigation)
     try {
-      const [pageData, pointers] = await Promise.all([
-        fetchPageWithRetry(),
-        api.pointers.list(pageId),
-      ]);
+      const pageData = await fetchPageWithRetry();
 
-      // Set focused page for full-screen viewer
-      setFocusedPage({
+      // Load into viewer without pointers (clean sheet browsing)
+      // Use pre-rendered PNG if available, fall back to PDF
+      loadPages([{
         pageId,
         pageName: pageData.pageName,
         filePath: pageData.pageImagePath || pageData.filePath,
         disciplineId,
-        pointers,
-      });
+        pointers: [], // Empty - pointers only shown for query results
+      }]);
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
       if (isNotFoundError(err)) {
@@ -559,8 +542,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSelectedPageId(null);  // Reset viewer to empty state
     setFeedItems([]);  // Clear feed
     setResponseMode('pages');  // Reset to pages mode for new conversation
-    setFocusedPage(null);  // Clear page-first context
-    setViewMode('viewer');  // Reset to viewer mode
 
     // Tutorial: advance from 'new-conversation' step
     if (tutorialActive && currentStep === 'new-conversation') {
@@ -636,28 +617,23 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
       {/* Main viewer area */}
       <div className="flex-1 relative flex flex-col overflow-hidden">
-        {/* Conditional: PageContextViewer for page-first mode, FeedViewer for chat mode */}
-        {focusedPage && viewMode === 'viewer' ? (
-          <PageContextViewer page={focusedPage} />
-        ) : (
-          <FeedViewer
-            key={currentConversation?.id}
-            feedItems={feedItems}
-            isStreaming={isStreaming}
-            streamingText={finalAnswer}
-            streamingTrace={trace}
-            currentTool={currentTool}
-            tutorialText={
-              tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
-              tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
-              tutorialActive && currentStep === 'conversation-intro' ? "Now we're in a new conversation." :
-              tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous conversations") :
-              tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
-              undefined
-            }
-            onAnchorExpand={() => setViewMode('viewer')}
-          />
-        )}
+        {/* PlanViewer - handles PDF rendering */}
+        <FeedViewer
+          key={currentConversation?.id}
+          feedItems={feedItems}
+          isStreaming={isStreaming}
+          streamingText={finalAnswer}
+          streamingTrace={trace}
+          currentTool={currentTool}
+          tutorialText={
+            tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
+            tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
+            tutorialActive && currentStep === 'conversation-intro' ? "Now we're in a new conversation." :
+            tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous conversations") :
+            tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
+            undefined
+          }
+        />
 
         {/* Floating expand button - shows when sidebar collapsed, below ThinkingSection */}
         {isSidebarCollapsed && (
@@ -727,65 +703,20 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   onSubmit={() => {
                     if (queryInput.trim() && !isStreaming) {
                       const trimmedQuery = queryInput.trim();
-
-                      // Page-first mode: transition from viewer to chat
-                      if (focusedPage && viewMode === 'viewer') {
-                        setViewMode('chat');
-                        // Add page anchor + user query to feed
-                        setFeedItems((prev) => [
-                          ...prev,
-                          {
-                            type: 'page-context-anchor',
-                            id: crypto.randomUUID(),
-                            page: focusedPage,
-                            timestamp: Date.now(),
-                          },
-                          {
-                            type: 'user-query',
-                            id: crypto.randomUUID(),
-                            text: trimmedQuery,
-                            timestamp: Date.now(),
-                          },
-                        ]);
-                        // Submit with page context
-                        setSubmittedQuery(trimmedQuery);
-                        setIsQueryExpanded(false);
-                        submitQuery(trimmedQuery, currentConversation?.id, responseMode, {
-                          pageId: focusedPage.pageId,
-                          pageName: focusedPage.pageName,
-                          pointers: focusedPage.pointers.map((p) => ({
-                            id: p.id,
-                            title: p.title,
-                            description: p.description,
-                          })),
-                        });
-                        setQueryInput('');
-                      } else {
-                        // Normal flow: just add user query
-                        setFeedItems((prev) => [
-                          ...prev,
-                          {
-                            type: 'user-query',
-                            id: crypto.randomUUID(),
-                            text: trimmedQuery,
-                            timestamp: Date.now(),
-                          },
-                        ]);
-                        setSubmittedQuery(trimmedQuery);
-                        setIsQueryExpanded(false);
-                        // Pass focusedPage context on follow-ups if we have it
-                        const pageContext = focusedPage ? {
-                          pageId: focusedPage.pageId,
-                          pageName: focusedPage.pageName,
-                          pointers: focusedPage.pointers.map((p) => ({
-                            id: p.id,
-                            title: p.title,
-                            description: p.description,
-                          })),
-                        } : undefined;
-                        submitQuery(trimmedQuery, currentConversation?.id, responseMode, pageContext);
-                        setQueryInput('');
-                      }
+                      // Add user query to feed
+                      setFeedItems((prev) => [
+                        ...prev,
+                        {
+                          type: 'user-query',
+                          id: crypto.randomUUID(),
+                          text: trimmedQuery,
+                          timestamp: Date.now(),
+                        },
+                      ]);
+                      setSubmittedQuery(trimmedQuery);
+                      setIsQueryExpanded(false);
+                      submitQuery(trimmedQuery, currentConversation?.id, responseMode);
+                      setQueryInput('');
                     }
                   }}
                   isProcessing={isStreaming}

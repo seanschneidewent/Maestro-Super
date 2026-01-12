@@ -7,9 +7,7 @@ import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
-import { PageContextAnchor } from './PageContextAnchor';
 import type { AgentTraceStep } from '../../types';
-import type { PointerResponse } from '../../lib/api';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -17,21 +15,11 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 // Render scale for PNG conversion (3x for sharp rendering on iPad)
 const RENDER_SCALE = 3;
 
-// Page data for context anchor
-export interface FocusedPageData {
-  pageId: string;
-  pageName: string;
-  filePath: string;
-  disciplineId: string;
-  pointers: PointerResponse[];
-}
-
 // Feed item types
 export type FeedItem =
   | { type: 'user-query'; id: string; text: string; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
-  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number }
-  | { type: 'page-context-anchor'; id: string; page: FocusedPageData; timestamp: number };
+  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number };
 
 interface PageImage {
   dataUrl: string;
@@ -46,7 +34,6 @@ interface FeedViewerProps {
   streamingTrace?: AgentTraceStep[];
   currentTool?: string | null;
   tutorialText?: string;
-  onAnchorExpand?: () => void;
 }
 
 // Cache for rendered page images (shared with PlanViewer if needed)
@@ -559,7 +546,6 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   streamingTrace = [],
   currentTool,
   tutorialText,
-  onAnchorExpand,
 }) => {
   // Scroll container ref and auto-scroll logic
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -700,16 +686,6 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                       {item.content}
                     </ReactMarkdown>
                   </div>
-                </div>
-              );
-
-            case 'page-context-anchor':
-              return (
-                <div key={item.id} className="py-2 mx-auto" style={{ maxWidth: containerWidth }}>
-                  <PageContextAnchor
-                    page={item.page}
-                    onExpand={onAnchorExpand || (() => {})}
-                  />
                 </div>
               );
 
