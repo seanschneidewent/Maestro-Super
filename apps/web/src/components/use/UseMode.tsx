@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
@@ -19,7 +20,7 @@ import {
   CompletedQuery,
   SuggestedPrompts,
 } from '../field';
-import { QueryResponse, QueryPageResponse } from '../../lib/api';
+import { QueryResponse, QueryPageResponse, ConversationResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
 import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentToastStack } from './AgentToastStack';
@@ -106,6 +107,7 @@ interface UseModeProps {
 }
 
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
+  const queryClient = useQueryClient();
   const { showError } = useToast();
   const { currentStep, completeStep, advanceStep, skipTutorial, isActive: tutorialActive, hasCompleted } = useTutorial();
 
@@ -185,9 +187,21 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.set(query.queryId, query.pages);
     queryTraceCache.set(query.queryId, query.trace);
 
+    // Update conversation title in cache if provided
+    if (query.conversationTitle && activeConversationId) {
+      queryClient.setQueryData<ConversationResponse[]>(
+        ['conversations', projectId],
+        (old) => old?.map(c =>
+          c.id === activeConversationId
+            ? { ...c, title: query.conversationTitle }
+            : c
+        ) ?? []
+      );
+    }
+
     setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache]);
+  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId]);
 
   // Field stream hook
   const {
