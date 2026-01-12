@@ -1,19 +1,25 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ConversationResponse } from '../lib/api';
 
 /**
- * Hook for managing the current conversation.
+ * Hook for managing conversation state with explicit binding.
  *
- * Conversations group related queries together and enable features like:
- * - Query history within a conversation
- * - "New conversation" via clearConversation
- * - Restoring previous conversations
+ * Key concepts:
+ * - `activeConversationId`: The conversation the user is currently bound to (null = ready for new)
+ * - `activeConversation`: The full conversation object if bound, null otherwise
+ * - Fresh load starts with null binding (welcome state)
+ * - First query creates a new conversation and binds to it
+ * - Plus button clears binding (returns to null/welcome state)
+ * - History restore binds to the selected conversation
  */
 export function useConversation(projectId: string | undefined) {
   const queryClient = useQueryClient();
 
-  // Query for the current conversation (most recent for this project)
+  // Explicit binding state: null means "ready for new conversation" (welcome state)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  // Query for all conversations (for history panel, etc.)
   const {
     data: conversations,
     isLoading: isLoadingConversations,
@@ -24,8 +30,10 @@ export function useConversation(projectId: string | undefined) {
     staleTime: 60 * 1000, // 1 minute
   });
 
-  // The current conversation is the most recent one (first in list, ordered by updated_at desc)
-  const currentConversation = conversations?.[0] ?? null;
+  // Derive the active conversation from the binding
+  const activeConversation = activeConversationId
+    ? (conversations?.find(c => c.id === activeConversationId) ?? null)
+    : null;
 
   // Mutation to create a new conversation
   const createConversationMutation = useMutation({
@@ -39,44 +47,40 @@ export function useConversation(projectId: string | undefined) {
     },
   });
 
-  // Create conversation function
-  const createConversation = useCallback(async () => {
+  // Bind to a specific conversation (used when restoring from history)
+  const bindToConversation = useCallback((conversationId: string) => {
+    setActiveConversationId(conversationId);
+  }, []);
+
+  // Start a new conversation: clears binding to null state (welcome screen)
+  // Does NOT create a conversation - that happens on first query
+  const startNewConversation = useCallback(() => {
+    setActiveConversationId(null);
+  }, []);
+
+  // Create a new conversation AND bind to it (used on first query)
+  const createAndBindConversation = useCallback(async () => {
     if (!projectId) {
       console.warn('Cannot create conversation: no projectId');
       return null;
     }
-    return createConversationMutation.mutateAsync(projectId);
+    const newConversation = await createConversationMutation.mutateAsync(projectId);
+    setActiveConversationId(newConversation.id);
+    return newConversation;
   }, [projectId, createConversationMutation]);
-
-  // Clear conversation (create new one) - called when "+" is tapped
-  const clearConversation = useCallback(async () => {
-    if (!projectId) {
-      console.warn('Cannot clear conversation: no projectId');
-      return null;
-    }
-    return createConversationMutation.mutateAsync(projectId);
-  }, [projectId, createConversationMutation]);
-
-  // Auto-create conversation on load if none exists
-  useEffect(() => {
-    if (
-      projectId &&
-      !isLoadingConversations &&
-      conversations !== undefined &&
-      conversations.length === 0 &&
-      !createConversationMutation.isPending
-    ) {
-      createConversation();
-    }
-  }, [projectId, isLoadingConversations, conversations, createConversation, createConversationMutation.isPending]);
 
   return {
-    currentConversation,
+    // State
+    activeConversationId,
+    activeConversation,
     conversations,
     isLoading: isLoadingConversations,
     isCreating: createConversationMutation.isPending,
-    createConversation,
-    clearConversation,
+
+    // Actions
+    bindToConversation,
+    startNewConversation,
+    createAndBindConversation,
   };
 }
 
