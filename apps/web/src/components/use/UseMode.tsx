@@ -404,6 +404,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Handle navigation from agent toast (fetch conversation and restore)
   const handleToastNavigate = useCallback(async (conversationId: string) => {
+    // If we're already on this conversation, just close history panel and show feed
+    // The feed already has the pages and text from the completed query
+    if (currentConversation?.id === conversationId && conversationQueries.length > 0) {
+      setShowHistory(false);
+      // Scroll feed to bottom to show latest content
+      return;
+    }
+
+    // Otherwise fetch from API and restore
     try {
       const conversation = await api.conversations.get(conversationId);
       if (conversation.queries && conversation.queries.length > 0) {
@@ -415,7 +424,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       console.error('Failed to navigate to conversation:', err);
       showError('Failed to load conversation. Please try again.');
     }
-  }, [handleRestoreConversation, showError]);
+  }, [currentConversation?.id, conversationQueries.length, handleRestoreConversation, showError]);
 
   // Handle visible page change from scrolling in multi-page mode
   const handleVisiblePageChange = (pageId: string, disciplineId: string) => {

@@ -14,7 +14,7 @@ export const AgentToastStack: React.FC<AgentToastStackProps> = ({ onNavigate }) 
   }
 
   return (
-    <div className="fixed top-4 left-4 z-40 flex flex-col gap-2 pointer-events-none">
+    <div className="absolute top-4 left-4 z-40 flex flex-col gap-2 pointer-events-none">
       {toasts.map((toast) => (
         <div key={toast.id} className="pointer-events-auto">
           <AgentWorkingToast
