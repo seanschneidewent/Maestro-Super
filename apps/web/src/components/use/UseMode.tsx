@@ -310,6 +310,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queries: QueryResponse[],
     selectedQueryId: string
   ) => {
+    // Clear local title to avoid stale title from previous conversation
+    // Will fall back to activeConversation?.title from cache
+    setLocalConversationTitle(null);
     // Bind to the restored conversation
     bindToConversation(conversationId);
     // Convert QueryResponse[] to QueryWithPages[] for the QueryStack
