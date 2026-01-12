@@ -135,7 +135,14 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [contextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
 
   // Conversation management
-  const { currentConversation, clearConversation, isCreating: isCreatingConversation } = useConversation(projectId);
+  const {
+    activeConversationId,
+    activeConversation,
+    startNewConversation,
+    createAndBindConversation,
+    bindToConversation,
+    isCreating: isCreatingConversation,
+  } = useConversation(projectId);
 
   // Track completed queries in the current conversation for QueryStack
   const [conversationQueries, setConversationQueries] = useState<QueryWithPages[]>([]);
@@ -159,7 +166,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
       id: query.queryId,
-      conversationId: currentConversation?.id ?? null,
+      conversationId: activeConversationId,
       displayTitle: query.displayTitle,
       sequenceOrder: conversationQueries.length + 1,
       queryText: query.queryText,
@@ -179,7 +186,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
     setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [currentConversation?.id, conversationQueries.length, queryPagesCache, queryTraceCache]);
+  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache]);
 
   // Field stream hook
   const {
@@ -249,8 +256,16 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   }, [isStreaming, selectedPages, finalAnswer, trace, responseMode, markComplete]);
 
   // Handle suggested prompt selection - auto-submit
-  const handleSuggestedPrompt = useCallback((prompt: string) => {
+  const handleSuggestedPrompt = useCallback(async (prompt: string) => {
     if (isStreaming) return;
+
+    // If no active conversation, create one first
+    let conversationId = activeConversationId;
+    if (!conversationId) {
+      const newConv = await createAndBindConversation();
+      conversationId = newConv?.id ?? null;
+    }
+
     // Add user query to feed
     setFeedItems((prev) => [
       ...prev,
@@ -264,10 +279,10 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     // Create agent toast for background notification
-    const toastId = addToast(prompt, currentConversation?.id ?? null);
+    const toastId = addToast(prompt, conversationId);
     currentToastIdRef.current = toastId;
-    submitQuery(prompt, currentConversation?.id, responseMode);
-  }, [isStreaming, currentConversation?.id, submitQuery, responseMode, addToast]);
+    submitQuery(prompt, conversationId ?? undefined, responseMode);
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, responseMode, addToast]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -275,6 +290,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queries: QueryResponse[],
     selectedQueryId: string
   ) => {
+    // Bind to the restored conversation
+    bindToConversation(conversationId);
     // Convert QueryResponse[] to QueryWithPages[] for the QueryStack
     const restoredQueries: QueryWithPages[] = queries.map((q, idx) => {
       // Use API responseText, or extract from trace as fallback
@@ -406,7 +423,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const handleToastNavigate = useCallback(async (conversationId: string) => {
     // If we're already on this conversation, show the conversation content
     // by filtering out standalone-page items (the user was browsing pages)
-    if (currentConversation?.id === conversationId && conversationQueries.length > 0) {
+    if (activeConversationId === conversationId && conversationQueries.length > 0) {
       setShowHistory(false);
       // Remove standalone-page items to show conversation content
       setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
@@ -425,7 +442,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       console.error('Failed to navigate to conversation:', err);
       showError('Failed to load conversation. Please try again.');
     }
-  }, [currentConversation?.id, conversationQueries.length, handleRestoreConversation, showError]);
+  }, [activeConversationId, conversationQueries.length, handleRestoreConversation, showError]);
 
   // Handle visible page change from scrolling in multi-page mode
   const handleVisiblePageChange = (pageId: string, disciplineId: string) => {
@@ -601,8 +618,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   };
 
   // Handle starting a new conversation (clears query stack)
-  const handleNewConversation = async () => {
-    await clearConversation();
+  const handleNewConversation = () => {
+    startNewConversation();
     resetStream();
     setQueryInput('');
     setSubmittedQuery(null);
@@ -692,7 +709,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       <div className="flex-1 relative flex flex-col overflow-hidden">
         {/* PlanViewer - handles PDF rendering */}
         <FeedViewer
-          key={currentConversation?.id}
           feedItems={feedItems}
           isStreaming={isStreaming}
           streamingText={finalAnswer}
@@ -773,9 +789,17 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                 <QueryInput
                   value={queryInput}
                   onChange={setQueryInput}
-                  onSubmit={() => {
+                  onSubmit={async () => {
                     if (queryInput.trim() && !isStreaming) {
                       const trimmedQuery = queryInput.trim();
+
+                      // If no active conversation, create one first
+                      let conversationId = activeConversationId;
+                      if (!conversationId) {
+                        const newConv = await createAndBindConversation();
+                        conversationId = newConv?.id ?? null;
+                      }
+
                       // Add user query to feed
                       setFeedItems((prev) => [
                         ...prev,
@@ -789,9 +813,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
                       // Create agent toast for background notification
-                      const toastId = addToast(trimmedQuery, currentConversation?.id ?? null);
+                      const toastId = addToast(trimmedQuery, conversationId);
                       currentToastIdRef.current = toastId;
-                      submitQuery(trimmedQuery, currentConversation?.id, responseMode);
+                      submitQuery(trimmedQuery, conversationId ?? undefined, responseMode);
                       setQueryInput('');
                     }
                   }}
