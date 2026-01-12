@@ -28,6 +28,7 @@ export interface CompletedQuery {
   queryId: string
   queryText: string
   displayTitle: string | null
+  conversationTitle: string | null
   pages: AgentSelectedPage[]
   finalAnswer: string
   trace: AgentTraceStep[]
@@ -517,8 +518,9 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
       case 'done':
         agentMessage.isComplete = true
 
-        // Extract displayTitle from done event
+        // Extract displayTitle and conversationTitle from done event
         const eventDisplayTitle = typeof data.displayTitle === 'string' ? data.displayTitle : null
+        const eventConversationTitle = typeof data.conversationTitle === 'string' ? data.conversationTitle : null
         setDisplayTitle(eventDisplayTitle)
 
         // Extract final answer from trace (reasoning after last tool result)
@@ -586,6 +588,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             queryId,
             queryText: currentQueryRef.current.text,
             displayTitle: eventDisplayTitle,
+            conversationTitle: eventConversationTitle,
             pages: [...selectedPagesRef.current],
             finalAnswer: extractedAnswer,
             trace: [...agentMessage.trace],
