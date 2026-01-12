@@ -150,6 +150,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Track completed queries in the current conversation for QueryStack
   const [conversationQueries, setConversationQueries] = useState<QueryWithPages[]>([]);
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
+  // Local state for conversation title - more reliable than cache for immediate display
+  const [localConversationTitle, setLocalConversationTitle] = useState<string | null>(null);
   // Store full page data for each query so we can restore it
   const [queryPagesCache] = useState<Map<string, AgentSelectedPage[]>>(new Map());
   // Store trace data for each query so we can restore thinking section
@@ -187,8 +189,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryPagesCache.set(query.queryId, query.pages);
     queryTraceCache.set(query.queryId, query.trace);
 
-    // Update conversation title in cache if provided
+    // Update conversation title in cache and local state if provided
     if (query.conversationTitle && activeConversationId) {
+      // Update local state immediately for reliable display
+      setLocalConversationTitle(query.conversationTitle);
+      // Also update cache for persistence
       queryClient.setQueryData<ConversationResponse[]>(
         ['conversations', projectId],
         (old) => old?.map(c =>
@@ -448,6 +453,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     // Otherwise fetch from API and restore
     try {
       const conversation = await api.conversations.get(conversationId);
+      // Set the conversation title locally for immediate display
+      setLocalConversationTitle(conversation.title ?? null);
       if (conversation.queries && conversation.queries.length > 0) {
         // Navigate to the most recent query in the conversation
         const lastQuery = conversation.queries[conversation.queries.length - 1];
@@ -642,6 +649,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setInputHasBeenFocused(false);  // Reset so prompts don't reappear
     setConversationQueries([]);
     setActiveQueryId(null);
+    setLocalConversationTitle(null);  // Clear title for new conversation
     queryPagesCache.clear();
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
@@ -879,7 +887,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Conversation indicator - shows when bound to conversation and idle */}
         <ConversationIndicator
-          conversationTitle={activeConversation?.title ?? null}
+          conversationTitle={localConversationTitle ?? activeConversation?.title ?? null}
           isVisible={activeConversationId !== null && !isStreaming && toasts.length === 0}
         />
 
