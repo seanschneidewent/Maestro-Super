@@ -680,6 +680,16 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSelectedPageId(pageId);
   };
 
+  // Compute toast visibility: only show when user is on file tree page (standalone-page)
+  // while agent works in background. Hide when in conversation view.
+  const hasStandalonePageVisible = feedItems.some((item) => item.type === 'standalone-page');
+  const shouldShowToast = isStreaming && hasStandalonePageVisible;
+
+  // Compute whether toast or conversation indicator is visible for button positioning
+  const isToastVisible = toasts.length > 0 && shouldShowToast;
+  const isIndicatorVisible = activeConversationId !== null && !isStreaming && toasts.length === 0;
+  const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
       {/* Left panel - PlansPanel with collapse */}
@@ -739,11 +749,13 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           }
         />
 
-        {/* Floating expand button - shows when sidebar collapsed, below ThinkingSection */}
+        {/* Floating expand button - shows when sidebar collapsed, shifts down when toast/indicator visible */}
         {isSidebarCollapsed && (
           <button
             onClick={() => setIsSidebarCollapsed(false)}
-            className="absolute top-20 left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors"
+            className={`absolute left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
+              hasTopLeftOverlay ? 'top-16' : 'top-4'
+            }`}
             title="Expand sidebar"
             data-tutorial="sidebar-expand"
           >
@@ -860,8 +872,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           onSkipTutorial={skipTutorial}
         />
 
-        {/* Agent working toast stack */}
-        <AgentToastStack onNavigate={handleToastNavigate} />
+        {/* Agent working toast stack - only shows when on file tree page with background agent */}
+        <AgentToastStack onNavigate={handleToastNavigate} shouldShow={shouldShowToast} />
 
         {/* Conversation indicator - shows when bound to conversation and idle */}
         <ConversationIndicator

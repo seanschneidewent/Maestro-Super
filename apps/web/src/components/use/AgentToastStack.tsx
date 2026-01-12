@@ -4,12 +4,13 @@ import { AgentWorkingToast } from './AgentWorkingToast';
 
 interface AgentToastStackProps {
   onNavigate: (conversationId: string) => void;
+  shouldShow?: boolean;
 }
 
-export const AgentToastStack: React.FC<AgentToastStackProps> = ({ onNavigate }) => {
+export const AgentToastStack: React.FC<AgentToastStackProps> = ({ onNavigate, shouldShow = true }) => {
   const { toasts, dismissToast } = useAgentToast();
 
-  if (toasts.length === 0) {
+  if (toasts.length === 0 || !shouldShow) {
     return null;
   }
 
