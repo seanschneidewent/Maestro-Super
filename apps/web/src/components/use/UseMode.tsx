@@ -694,7 +694,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
 
   return (
-    <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
+    <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid pt-safe">
       {/* Left panel - PlansPanel with collapse */}
       {!isSidebarCollapsed && (
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
