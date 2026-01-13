@@ -12,7 +12,7 @@ export const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, variant =
   const isDark = variant === 'dark';
 
   return (
-    <div className={`flex items-center gap-1 p-1 rounded-xl ${
+    <div className={`flex items-center gap-1 p-1 rounded-xl mt-1 ${
       isDark ? 'glass' : 'bg-slate-100/80 border border-slate-200/50'
     }`}>
       <button
