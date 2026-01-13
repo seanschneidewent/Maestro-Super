@@ -1,6 +1,7 @@
 """Project CRUD endpoints."""
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -308,7 +309,12 @@ def get_project_hierarchy(
                             for ptr in p.pointers
                         ],
                     }
-                    for p in sorted(d.pages, key=lambda x: x.page_name)
+                    for p in sorted(d.pages, key=lambda x: (
+                        # Extract base name (strip page number prefix like "(1 of 8) ")
+                        re.sub(r'^\(\d+ of \d+\)\s*', '', x.page_name),
+                        # Then sort by page_index within same base name
+                        x.page_index
+                    ))
                 ],
             }
             for d in sorted(project.disciplines, key=lambda x: x.display_name)
