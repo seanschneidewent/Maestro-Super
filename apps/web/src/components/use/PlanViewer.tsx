@@ -266,11 +266,18 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
       }
     };
 
+    // Delayed update for orientation change (iOS animation completion)
+    const handleOrientationChange = () => {
+      setTimeout(updateSize, 100);
+    };
+
     const timer = setTimeout(updateSize, 100);
     window.addEventListener('resize', updateSize);
+    window.addEventListener('orientationchange', handleOrientationChange);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('resize', updateSize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
     };
   }, []);
 

@@ -174,11 +174,18 @@ const ExpandedPageModal: React.FC<{
       }
     };
 
+    // Delayed update for orientation change (iOS animation completion)
+    const handleOrientationChange = () => {
+      setTimeout(updateSize, 100);
+    };
+
     const timer = setTimeout(updateSize, 50);
     window.addEventListener('resize', updateSize);
+    window.addEventListener('orientationchange', handleOrientationChange);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('resize', updateSize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
     };
   }, []);
 
@@ -567,9 +574,18 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
       }
     };
 
+    // Delayed update for orientation change (iOS animation completion)
+    const handleOrientationChange = () => {
+      setTimeout(updateWidth, 100);
+    };
+
     updateWidth();
     window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+    };
   }, []);
 
   // Empty state

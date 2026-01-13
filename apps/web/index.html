@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -123,6 +123,10 @@
         width: 100%;
         overflow: hidden; /* Content locked here only */
       }
+
+      /* Dynamic viewport unit fallbacks for browsers that support them */
+      .h-dvh { height: 100dvh; }
+      .w-dvw { width: 100dvw; }
 
       /* Custom scrollbar for dark mode */
       .dark-scroll::-webkit-scrollbar {
@@ -330,6 +334,18 @@
           lastHeight = newHeight;
         });
       }
+
+      // iOS orientation change fix - force layout recalculation
+      window.addEventListener('orientationchange', function() {
+        // Wait for iOS orientation animation to complete
+        setTimeout(function() {
+          // Force layout recalculation by triggering resize event
+          window.dispatchEvent(new Event('resize'));
+          // Micro-scroll to trigger Safari's layout recalculation
+          window.scrollTo(0, 1);
+          window.scrollTo(0, 0);
+        }, 150);
+      });
     </script>
     <script type="module" src="/src/index.tsx"></script>
 </body>
