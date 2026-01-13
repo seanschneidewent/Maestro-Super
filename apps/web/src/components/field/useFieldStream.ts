@@ -43,7 +43,7 @@ interface UseFieldStreamOptions {
 }
 
 interface UseFieldStreamReturn {
-  submitQuery: (query: string, conversationId?: string, responseMode?: 'pages' | 'conversational') => Promise<void>
+  submitQuery: (query: string, conversationId?: string, responseMode?: 'pages' | 'conversational', viewingPageId?: string | null) => Promise<void>
   isStreaming: boolean
   thinkingText: string
   finalAnswer: string
@@ -100,7 +100,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
   }, [])
 
   const submitQuery = useCallback(
-    async (query: string, conversationId?: string, responseMode: 'pages' | 'conversational' = 'pages') => {
+    async (query: string, conversationId?: string, responseMode: 'pages' | 'conversational' = 'pages', viewingPageId?: string | null) => {
       // Abort any existing stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -145,7 +145,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
               Authorization: `Bearer ${session.access_token}`,
             }),
           },
-          body: JSON.stringify({ query, conversationId, responseMode }),
+          body: JSON.stringify({ query, conversationId, responseMode, viewingPageId }),
           signal: abortControllerRef.current.signal,
         })
 

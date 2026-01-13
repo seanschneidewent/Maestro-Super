@@ -293,6 +293,7 @@ async def run_agent_query(
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
     response_mode: str = "pages",
+    viewing_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
@@ -307,6 +308,9 @@ async def run_agent_query(
         db: Database session
         project_id: Project UUID (injected into tools that need it)
         query: User's question
+        history_messages: Optional list of previous messages in conversation
+        response_mode: 'pages' (default) or 'conversational'
+        viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
     """
     settings = get_settings()
     if not settings.openrouter_api_key:
@@ -331,6 +335,19 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
 - You may still use search tools if you need to look up information
 - Focus on providing a helpful text answer, not displaying pages
 - Keep your response concise and conversational"""
+
+    # Add viewing context if user is currently viewing a specific page
+    if viewing_context:
+        page_name = viewing_context.get("page_name", "unknown page")
+        discipline = viewing_context.get("discipline_name")
+        if discipline:
+            system_content += f"""
+
+CURRENT VIEW: The user is currently viewing page {page_name} from {discipline}. This may or may not be relevant to their question - only reference it if it naturally relates to what they're asking."""
+        else:
+            system_content += f"""
+
+CURRENT VIEW: The user is currently viewing page {page_name}. This may or may not be relevant to their question - only reference it if it naturally relates to what they're asking."""
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_content},

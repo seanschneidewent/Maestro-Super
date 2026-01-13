@@ -301,8 +301,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     // Create agent toast for background notification
     const toastId = addToast(prompt, conversationId);
     currentToastIdRef.current = toastId;
-    submitQuery(prompt, conversationId ?? undefined, responseMode);
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, responseMode, addToast]);
+    submitQuery(prompt, conversationId ?? undefined, responseMode, selectedPageId);
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, responseMode, addToast, selectedPageId]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -845,7 +845,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       // Create agent toast for background notification
                       const toastId = addToast(trimmedQuery, conversationId);
                       currentToastIdRef.current = toastId;
-                      submitQuery(trimmedQuery, conversationId ?? undefined, responseMode);
+                      submitQuery(trimmedQuery, conversationId ?? undefined, responseMode, selectedPageId);
                       setQueryInput('');
                     }
                   }}

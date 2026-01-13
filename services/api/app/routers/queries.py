@@ -12,6 +12,7 @@ from app.auth.schemas import User
 from app.config import get_settings
 from app.database.session import get_db
 from app.dependencies.rate_limit import check_rate_limit, check_rate_limit_or_anon
+from app.models.page import Page
 from app.models.project import Project
 from app.models.query import Query
 from app.models.query_page import QueryPage
@@ -279,6 +280,19 @@ async def stream_query(
             logger.warning(f"Failed to load conversation history: {e}")
             # Continue without history - don't fail the query
 
+    # Build viewing context if user is viewing a specific page
+    viewing_context = None
+    if data.viewing_page_id:
+        page = db.query(Page).filter(Page.id == data.viewing_page_id).first()
+        if page:
+            discipline = page.discipline
+            viewing_context = {
+                "page_id": page.id,
+                "page_name": page.page_name,
+                "discipline_name": discipline.display_name if discipline else None,
+            }
+            logger.info(f"User is viewing page {page.page_name} ({data.viewing_page_id})")
+
     async def event_generator():
         total_tokens = 0
         response_text = ""
@@ -288,7 +302,7 @@ async def stream_query(
         stored_trace = []
         try:
             async for event in run_agent_query(
-                db, project_id, data.query, history_messages=history_messages, response_mode=data.response_mode
+                db, project_id, data.query, history_messages=history_messages, response_mode=data.response_mode, viewing_context=viewing_context
             ):
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
