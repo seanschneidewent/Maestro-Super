@@ -122,6 +122,9 @@
         height: 100%;
         width: 100%;
         overflow: hidden; /* Content locked here only */
+        /* iOS safe area - adds padding for status bar when in standalone/fullscreen mode */
+        padding-top: env(safe-area-inset-top);
+        box-sizing: border-box;
       }
 
       /* Dynamic viewport unit fallbacks for browsers that support them */
