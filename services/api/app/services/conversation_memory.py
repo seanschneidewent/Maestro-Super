@@ -68,8 +68,9 @@ def trace_to_messages(
         step = trace[i]
         step_type = step.get("type")
 
-        if step_type == "response":
+        if step_type == "response" or step_type == "reasoning":
             # Start of an assistant turn - collect content and any following tool calls
+            # Handle both "response" (old traces) and "reasoning" (new traces) for backwards compatibility
             assistant_content = step.get("content", "")
             tool_calls: list[dict[str, Any]] = []
             tool_results: list[dict[str, Any]] = []

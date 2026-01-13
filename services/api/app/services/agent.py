@@ -281,7 +281,8 @@ async def execute_tool(
         if hasattr(result, "model_dump"):
             return result.model_dump(by_alias=True, mode="json")
         # search_pointers returns list[dict], not a Pydantic model
-        return result if result else {"error": "Not found"}
+        # Use `is not None` to allow empty lists [] as valid results
+        return result if result is not None else {"error": "Not found"}
     except Exception as e:
         logger.exception(f"Tool execution error for {tool_name}: {e}")
         return {"error": str(e)}
@@ -419,7 +420,7 @@ CURRENT VIEW: The user is currently viewing page {page_name}. This may or may no
 
             # Add accumulated text to trace
             if current_text:
-                trace.append({"type": "response", "content": current_text})
+                trace.append({"type": "reasoning", "content": current_text})
 
             # If no tool calls, we're done
             if not tool_calls_data:

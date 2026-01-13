@@ -94,6 +94,7 @@ BEGIN
   JOIN pointers ptr ON c.id = ptr.id
   JOIN pages pg ON ptr.page_id = pg.id
   JOIN disciplines d ON pg.discipline_id = d.id
+  WHERE c.combined_score >= 0.15  -- Filter out low-relevance phantom results
   ORDER BY c.combined_score DESC
   LIMIT match_count;
 END;
