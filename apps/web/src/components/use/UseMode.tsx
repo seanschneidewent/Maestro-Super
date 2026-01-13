@@ -699,7 +699,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       {!isSidebarCollapsed && (
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
           {/* Header */}
-          <div className="px-4 py-3 border-b border-slate-200/50 bg-white/50 space-y-3">
+          <div className="p-4 border-b border-slate-200/50 bg-white/50 space-y-3">
             {mode === AppMode.DEMO && onGetStarted ? (
               <DemoHeader onGetStarted={onGetStarted} />
             ) : mode !== AppMode.DEMO ? (
