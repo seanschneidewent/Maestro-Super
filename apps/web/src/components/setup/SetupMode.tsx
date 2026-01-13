@@ -477,8 +477,23 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       const bIsFolder = b.type === FileType.FOLDER;
       if (aIsFolder && !bIsFolder) return -1;
       if (!aIsFolder && bIsFolder) return 1;
-      // Alphabetically within each group
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+      // For multi-page PDFs, extract base name (strip page number prefix)
+      // Format: "(X of Y) BaseName" -> "BaseName"
+      const getBaseName = (name: string) => {
+        const match = name.match(/^\(\d+ of \d+\)\s*(.+)$/);
+        return match ? match[1] : name;
+      };
+
+      const aBase = getBaseName(a.name);
+      const bBase = getBaseName(b.name);
+
+      // Sort by base name first
+      const baseCompare = aBase.localeCompare(bBase, undefined, { numeric: true, sensitivity: 'base' });
+      if (baseCompare !== 0) return baseCompare;
+
+      // Same base name - sort by page index
+      return (a.pageIndex ?? 0) - (b.pageIndex ?? 0);
     }).map(file => ({
       ...file,
       children: file.children ? sortFiles(file.children) : undefined
