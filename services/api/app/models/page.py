@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,7 @@ class Page(Base):
     )
     page_name: Mapped[str] = mapped_column(String(100), nullable=False)  # "A1.01"
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)  # Storage path
+    page_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # Zero-based index within source PDF
     initial_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Pass 1 AI summary
     full_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Pass 2 AI summary
     processed_pass_1: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

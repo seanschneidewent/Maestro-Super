@@ -106,12 +106,14 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     disciplines: DisciplineWithPagesResponse[],
     hierarchyData?: ProjectHierarchy | null
   ): ProjectFile[] => {
-    // Build a map of page ID -> pointer count from hierarchy if available
+    // Build maps of page ID -> pointer count and pageIndex from hierarchy if available
     const pointerCountMap = new Map<string, number>();
+    const pageIndexMap = new Map<string, number>();
     if (hierarchyData) {
       for (const disc of hierarchyData.disciplines) {
         for (const page of disc.pages) {
           pointerCountMap.set(page.id, page.pointerCount);
+          pageIndexMap.set(page.id, page.pageIndex);
         }
       }
     }
@@ -128,6 +130,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         type: FileType.PDF,
         parentId: disc.id,
         storagePath: page.filePath,
+        pageIndex: pageIndexMap.get(page.id) ?? page.pageIndex ?? 0,
         pointerCount: pointerCountMap.get(page.id) ?? 0,
         children: undefined,
       })),
@@ -778,8 +781,13 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
                 // Handle new stage-based event format
                 if (data.stage === 'init') {
-                  // Backend has bulk-inserted disciplines/pages
-                  console.log(`Processing ${data.pageCount} pages`);
+                  // Backend has bulk-inserted disciplines/pages (may be more than files due to multi-page PDFs)
+                  console.log(`Processing ${data.pageCount} pages (expanded from multi-page PDFs)`);
+                  // Update PNG progress total with expanded page count
+                  setUploadProgress(prev => prev ? {
+                    ...prev,
+                    png: { current: 0, total: data.pageCount },
+                  } : null);
                 } else if (data.stage === 'png') {
                   setUploadProgress(prev => prev ? {
                     ...prev,
@@ -1163,6 +1171,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 <PdfViewer
                     file={selectedFile.file}
                     fileId={selectedFile.id}
+                    pageIndex={selectedFile.pageIndex ?? 0}
                     pointers={pointers}
                     selectedPointerId={selectedPointerId}
                     setSelectedPointerId={setSelectedPointerId}

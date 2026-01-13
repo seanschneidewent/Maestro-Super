@@ -31,6 +31,7 @@ export interface ProjectFile {
   parentId?: string;
   storagePath?: string; // Supabase Storage path
   pageCount?: number;
+  pageIndex?: number; // Zero-based index within multi-page PDF
   pointerCount?: number; // Number of context pointers on this page
   category?: string; // For Use Mode grouping (e.g., "A-101")
   file?: File; // The actual file object for rendering (local only)
@@ -125,6 +126,7 @@ export interface PointerSummary {
 export interface PageInHierarchy {
   id: string;
   pageName: string;
+  pageIndex: number;  // Zero-based index within multi-page PDF
   processedPass1: boolean;
   processedPass2: boolean;
   pointerCount: number;

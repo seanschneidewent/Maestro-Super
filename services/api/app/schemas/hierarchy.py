@@ -15,6 +15,7 @@ class PageInHierarchy(BaseModel):
 
     id: str
     pageName: str
+    pageIndex: int = 0  # Zero-based index within multi-page PDF
     processedPass1: bool
     processedPass2: bool
     pointerCount: int

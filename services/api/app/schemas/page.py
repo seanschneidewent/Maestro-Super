@@ -35,6 +35,7 @@ class PageResponse(BaseModel):
     discipline_id: str = Field(alias="disciplineId")
     page_name: str = Field(alias="pageName")
     file_path: str = Field(alias="filePath")
+    page_index: int = Field(default=0, alias="pageIndex")  # Zero-based index within multi-page PDF
     initial_context: str | None = Field(default=None, alias="initialContext")
     full_context: str | None = Field(default=None, alias="fullContext")
     processed_pass_1: bool = Field(alias="processedPass1")

@@ -296,6 +296,7 @@ def get_project_hierarchy(
                     {
                         "id": str(p.id),
                         "pageName": p.page_name,
+                        "pageIndex": p.page_index,
                         "processedPass1": p.processed_pass_1,
                         "processedPass2": p.processed_pass_2,
                         "pointerCount": len(p.pointers),

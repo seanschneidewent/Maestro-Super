@@ -14,7 +14,7 @@ from app.database.session import SessionLocal, get_db
 from app.models.discipline import Discipline
 from app.models.page import Page
 from app.models.project import Project
-from app.services.pdf_renderer import pdf_page_to_image
+from app.services.pdf_renderer import get_pdf_page_count, pdf_page_to_image
 from app.services.storage import download_file, upload_page_image
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ async def _render_page_png(
     page_id: str,
     project_id: str,
     pdf_bytes: bytes,
+    page_index: int = 0,
 ) -> tuple[str, bytes | None, str | None, str | None]:
     """
     Render PDF page to PNG and upload to storage.
@@ -60,6 +61,7 @@ async def _render_page_png(
         page_id: Page ID string
         project_id: Project ID for storage path
         pdf_bytes: PDF bytes for this page
+        page_index: Zero-based index within the PDF (default: 0)
 
     Returns:
         (page_id, png_bytes, storage_path, error_message)
@@ -68,7 +70,7 @@ async def _render_page_png(
     try:
         # Render to PNG at 150 DPI with 30s timeout
         png_bytes = await asyncio.wait_for(
-            asyncio.to_thread(pdf_page_to_image, pdf_bytes, 0, 150),
+            asyncio.to_thread(pdf_page_to_image, pdf_bytes, page_index, 150),
             timeout=30.0,
         )
 
@@ -113,14 +115,36 @@ async def process_uploads_stream(
     # Extract page data to dicts so we can close session before SSE starts
     page_data_list: list[dict] = []
 
+    # First: verify project exists
     with SessionLocal() as db:
-        # Verify project exists
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Bulk insert disciplines/pages if request body provided
+    # Second: count pages in each PDF (async, before DB insert)
+    pdf_page_counts: dict[str, int] = {}
+    if request and request.disciplines:
+        # Collect unique PDF paths
+        unique_pdf_paths: set[str] = set()
+        for disc_data in request.disciplines:
+            for page_input in disc_data.pages:
+                unique_pdf_paths.add(page_input.storage_path)
+
+        # Download each unique PDF and count its pages
+        for pdf_path in unique_pdf_paths:
+            try:
+                pdf_bytes = await download_file(pdf_path)
+                page_count = get_pdf_page_count(pdf_bytes)
+                pdf_page_counts[pdf_path] = page_count
+                logger.info(f"PDF {pdf_path} has {page_count} page(s)")
+            except Exception as e:
+                logger.warning(f"Failed to count pages in {pdf_path}: {e}, defaulting to 1")
+                pdf_page_counts[pdf_path] = 1
+
+    # Third: bulk insert disciplines/pages
+    with SessionLocal() as db:
         if request and request.disciplines:
+            # Create disciplines and pages (splitting multi-page PDFs)
             for disc_data in request.disciplines:
                 discipline = Discipline(
                     project_id=project_id,
@@ -131,12 +155,24 @@ async def process_uploads_stream(
                 db.flush()  # Get ID without committing
 
                 for page_input in disc_data.pages:
-                    page = Page(
-                        discipline_id=str(discipline.id),
-                        page_name=page_input.page_name,
-                        file_path=page_input.storage_path,
-                    )
-                    db.add(page)
+                    page_count = pdf_page_counts.get(page_input.storage_path, 1)
+                    base_name = page_input.page_name
+
+                    # Create one Page record per page in the PDF
+                    for idx in range(page_count):
+                        # Format: "Name (X of Y)" for multi-page, original name for single-page
+                        if page_count > 1:
+                            page_name = f"{base_name} ({idx + 1} of {page_count})"
+                        else:
+                            page_name = base_name
+
+                        page = Page(
+                            discipline_id=str(discipline.id),
+                            page_name=page_name,
+                            file_path=page_input.storage_path,
+                            page_index=idx,
+                        )
+                        db.add(page)
 
             db.commit()
             logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
@@ -154,7 +190,7 @@ async def process_uploads_stream(
 
         # Extract to simple dicts before session closes
         page_data_list = [
-            {"id": str(p.id), "file_path": p.file_path}
+            {"id": str(p.id), "file_path": p.file_path, "page_index": p.page_index}
             for p in pages
         ]
 
@@ -198,7 +234,12 @@ async def process_uploads_stream(
                 except Exception as e:
                     return page_data["id"], None, None, f"PDF download failed: {e}"
                 async with semaphore:
-                    return await _render_page_png(page_data["id"], project_id, pdf_bytes)
+                    return await _render_page_png(
+                        page_data["id"],
+                        project_id,
+                        pdf_bytes,
+                        page_data.get("page_index", 0),
+                    )
 
             # Use asyncio.gather with return_exceptions=True to prevent stream crash
             # Run tasks and emit progress periodically
@@ -500,9 +541,9 @@ async def retry_page_png(
     except Exception as e:
         return {"success": False, "error": f"Failed to download PDF: {e}"}
 
-    # Render PNG
+    # Render PNG (use page.page_index for multi-page PDFs)
     result_page_id, png_bytes, storage_path, error = await _render_page_png(
-        page_id, project_id, pdf_bytes
+        page_id, project_id, pdf_bytes, page.page_index
     )
 
     if png_bytes and storage_path:

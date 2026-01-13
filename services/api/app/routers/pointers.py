@@ -105,11 +105,11 @@ async def create_pointer(
         logger.info(f"Downloading PDF: {page.file_path}")
         pdf_bytes = await download_file(page.file_path)
 
-        # 3. Crop to bounding box region
-        logger.info(f"Cropping region: ({bbox.x}, {bbox.y}, {bbox.width}, {bbox.height})")
+        # 3. Crop to bounding box region (use page.page_index for multi-page PDFs)
+        logger.info(f"Cropping region: ({bbox.x}, {bbox.y}, {bbox.width}, {bbox.height}) from page index {page.page_index}")
         cropped_png = crop_pdf_region(
             pdf_bytes,
-            page_index=0,  # Pages are single-page PDFs
+            page_index=page.page_index,
             x_norm=bbox.x,
             y_norm=bbox.y,
             w_norm=bbox.width,

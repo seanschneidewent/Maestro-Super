@@ -231,6 +231,7 @@ export interface PageInDisciplineResponse {
   id: string;
   pageName: string;
   filePath: string;
+  pageIndex: number;  // Zero-based index within multi-page PDF
   processedPass1: boolean;
   processedPass2: boolean;
 }
@@ -274,6 +275,7 @@ export interface PageResponse {
   disciplineId: string;
   pageName: string;
   filePath: string;
+  pageIndex: number;  // Zero-based index within multi-page PDF
   initialContext?: string;
   fullContext?: string;
   processedPass1: boolean;

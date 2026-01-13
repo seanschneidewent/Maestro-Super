@@ -52,6 +52,7 @@ class PageInDisciplineResponse(BaseModel):
     id: str
     page_name: str = Field(alias="pageName")
     file_path: str = Field(alias="filePath")
+    page_index: int = Field(default=0, alias="pageIndex")  # Zero-based index within multi-page PDF
     processed_pass_1: bool = Field(alias="processedPass1")
     processed_pass_2: bool = Field(alias="processedPass2")
 

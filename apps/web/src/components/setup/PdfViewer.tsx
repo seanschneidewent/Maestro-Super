@@ -84,6 +84,7 @@ async function renderPageImage(
 interface PdfViewerProps {
   file?: File;
   fileId?: string;
+  pageIndex?: number;  // Zero-based index within multi-page PDF (for PDF.js fallback rendering)
   pointers: ContextPointer[];
   setPointers?: React.Dispatch<React.SetStateAction<ContextPointer[]>>;  // Optional - only used as fallback
   selectedPointerId: string | null;
@@ -105,6 +106,7 @@ interface PdfViewerProps {
 export const PdfViewer: React.FC<PdfViewerProps> = ({
   file,
   fileId,
+  pageIndex = 0,
   pointers,
   setPointers,
   selectedPointerId,
@@ -209,13 +211,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Load PDF document when file changes (don't render all pages upfront)
   // Skip if we're using pre-rendered PNG
+  // Note: pageIndex is used to render the correct page from a multi-page PDF
   useEffect(() => {
     if (!file || usePreRendered) {
       if (!usePreRendered) {
         setPdfDoc(null);
         setNumPages(0);
         setCurrentPageImage(null);
-        setPageNumber(1);
+        setPageNumber(pageIndex + 1);  // Use pageIndex for multi-page PDF fallback
       }
       return;
     }
@@ -224,7 +227,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       setIsLoadingPdf(true);
       setPdfDoc(null);
       setCurrentPageImage(null);
-      setPageNumber(1);
+      setPageNumber(pageIndex + 1);  // Use pageIndex for multi-page PDF fallback (PDF.js uses 1-based pages)
       // Reset will be applied with offset when image loads
 
       try {
@@ -240,7 +243,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     };
 
     loadPdf();
-  }, [file, usePreRendered]);
+  }, [file, usePreRendered, pageIndex]);
 
   // Render current page on-demand when page changes (matches PlanViewer pattern)
   // If using pre-rendered PNG, load it instead of PDF.js rendering
