@@ -440,13 +440,15 @@ const App: React.FC = () => {
         <ToastProvider>
           <ErrorBoundary>
             <TutorialProvider>
-              <TutorialOverlay />
-              <UseMode
-                mode={mode}
-                setMode={setMode}
-                projectId={project.id}
-                onGetStarted={handleGetStarted}
-              />
+              <AgentToastProvider>
+                <TutorialOverlay />
+                <UseMode
+                  mode={mode}
+                  setMode={setMode}
+                  projectId={project.id}
+                  onGetStarted={handleGetStarted}
+                />
+              </AgentToastProvider>
             </TutorialProvider>
           </ErrorBoundary>
         </ToastProvider>
