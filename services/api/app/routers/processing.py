@@ -160,9 +160,9 @@ async def process_uploads_stream(
 
                     # Create one Page record per page in the PDF
                     for idx in range(page_count):
-                        # Format: "Name (X of Y)" for multi-page, original name for single-page
+                        # Format: "(X of Y) Name" for multi-page, original name for single-page
                         if page_count > 1:
-                            page_name = f"{base_name} ({idx + 1} of {page_count})"
+                            page_name = f"({idx + 1} of {page_count}) {base_name}"
                         else:
                             page_name = base_name
 

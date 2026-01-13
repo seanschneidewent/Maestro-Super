@@ -101,12 +101,12 @@ async def migrate_project(db, project_id: str, dry_run: bool) -> dict:
             for original_page in pages_list:
                 base_name = original_page.page_name
 
-                # Check if already migrated (name already has "(X of Y)" format)
-                if " of " in base_name and base_name.endswith(")"):
+                # Check if already migrated (handles both old suffix and new prefix format)
+                if (base_name.startswith("(") and " of " in base_name) or (" of " in base_name and base_name.endswith(")")):
                     logger.info(f"  Skipping already migrated: {base_name}")
                     continue
 
-                new_name = f"{base_name} (1 of {page_count})"
+                new_name = f"(1 of {page_count}) {base_name}"
 
                 if dry_run:
                     logger.info(f"  [DRY RUN] Would rename: {base_name} -> {new_name}")
@@ -121,7 +121,7 @@ async def migrate_project(db, project_id: str, dry_run: bool) -> dict:
                     for idx in range(1, page_count):
                         new_page = Page(
                             discipline_id=original_page.discipline_id,
-                            page_name=f"{base_name} ({idx + 1} of {page_count})",
+                            page_name=f"({idx + 1} of {page_count}) {base_name}",
                             file_path=file_path,
                             page_index=idx,
                         )
