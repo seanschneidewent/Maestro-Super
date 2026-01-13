@@ -7,7 +7,7 @@ import { FeedViewer, FeedItem } from './FeedViewer';
 import { ModeToggle } from '../ModeToggle';
 import { DemoHeader } from '../DemoHeader';
 import { api, isNotFoundError } from '../../lib/api';
-import { PanelLeftClose, PanelLeft, FileText, MessageSquare } from 'lucide-react';
+import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useTutorial } from '../../hooks/useTutorial';
 import {
@@ -125,9 +125,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     tutorialActive && currentStep === 'welcome'
   );
-
-  // Response mode: 'pages' shows plan pages, 'conversational' gives text-only answers
-  const [responseMode, setResponseMode] = useState<'pages' | 'conversational'>('pages');
 
   // Hierarchy data
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
@@ -252,11 +249,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             timestamp: Date.now(),
           },
         ]);
-
-        // Auto-switch to conversational mode after showing pages
-        if (responseMode === 'pages') {
-          setResponseMode('conversational');
-        }
       }
       // Add text response if we have one (show below pages as conversational output)
       if (finalAnswer) {
@@ -273,7 +265,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       }
     }
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, selectedPages, finalAnswer, trace, responseMode, markComplete]);
+  }, [isStreaming, selectedPages, finalAnswer, trace, markComplete]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback(async (prompt: string) => {
@@ -301,8 +293,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     // Create agent toast for background notification
     const toastId = addToast(prompt, conversationId);
     currentToastIdRef.current = toastId;
-    submitQuery(prompt, conversationId ?? undefined, responseMode, selectedPageId);
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, responseMode, addToast, selectedPageId]);
+    submitQuery(prompt, conversationId ?? undefined, selectedPageId);
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, addToast, selectedPageId]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -647,7 +639,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
     setFeedItems([]);  // Clear feed
-    setResponseMode('pages');  // Reset to pages mode for new conversation
 
     // Tutorial: advance from 'new-conversation' step
     if (tutorialActive && currentStep === 'new-conversation') {
@@ -791,28 +782,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           )}
 
           <div className="flex flex-col gap-2">
-            {/* Response mode toggle - positioned above input row, right-aligned */}
-            <div className="flex justify-end">
-              <button
-                onClick={() => setResponseMode(prev => prev === 'pages' ? 'conversational' : 'pages')}
-                disabled={isStreaming}
-                className={`
-                  w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg
-                  ${isStreaming ? 'opacity-50 cursor-not-allowed' : ''}
-                  ${responseMode === 'pages'
-                    ? 'bg-cyan-500/20 text-cyan-600 border border-cyan-500/30'
-                    : 'bg-white text-slate-600 border border-slate-200'}
-                `}
-                title={responseMode === 'pages' ? 'Pages mode: Will show relevant pages' : 'Chat mode: Will respond conversationally'}
-              >
-                {responseMode === 'pages' ? (
-                  <FileText size={20} />
-                ) : (
-                  <MessageSquare size={20} />
-                )}
-              </button>
-            </div>
-
             {/* Input and new session button inline */}
             <div className="flex items-center gap-3">
               <div className="flex-1" data-tutorial="query-input">
@@ -845,7 +814,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       // Create agent toast for background notification
                       const toastId = addToast(trimmedQuery, conversationId);
                       currentToastIdRef.current = toastId;
-                      submitQuery(trimmedQuery, conversationId ?? undefined, responseMode, selectedPageId);
+                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId);
                       setQueryInput('');
                     }
                   }}

@@ -293,7 +293,6 @@ async def run_agent_query(
     project_id: str,
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
-    response_mode: str = "pages",
     viewing_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
@@ -310,7 +309,6 @@ async def run_agent_query(
         project_id: Project UUID (injected into tools that need it)
         query: User's question
         history_messages: Optional list of previous messages in conversation
-        response_mode: 'pages' (default) or 'conversational'
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
     """
     settings = get_settings()
@@ -324,19 +322,7 @@ async def run_agent_query(
         base_url="https://openrouter.ai/api/v1",
     )
 
-    # Build system prompt based on response mode
     system_content = AGENT_SYSTEM_PROMPT
-
-    if response_mode == "conversational":
-        system_content += """
-
-IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
-- Do NOT use select_pages or select_pointers tools
-- Answer their question directly in text based on context from previous messages
-- You may still use search tools if you need to look up information
-- Focus on providing a helpful text answer, not displaying pages
-- Keep your response concise and conversational
-- You MUST still call set_display_title before your final answer"""
 
     # Add viewing context if user is currently viewing a specific page
     if viewing_context:

@@ -22,7 +22,6 @@ class AgentQueryRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="User's question")
     conversation_id: str | None = Field(default=None, alias="conversationId", description="Optional conversation ID to group queries")
-    response_mode: str = Field(default="pages", alias="responseMode", description="'pages' or 'conversational'")
     viewing_page_id: str | None = Field(default=None, alias="viewingPageId", description="Page ID user is currently viewing in the file tree")
 
     model_config = ConfigDict(populate_by_name=True)
