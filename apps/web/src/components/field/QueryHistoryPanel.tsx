@@ -220,7 +220,7 @@ export function QueryHistoryPanel({
                       ${isExpanded ? 'bg-cyan-50' : 'hover:bg-slate-50'}
                     `}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 overflow-hidden">
                       <button
                         onClick={() => handleExpandConversation(conversation.id)}
                         className="flex-1 flex items-center gap-3 text-left"
@@ -253,7 +253,7 @@ export function QueryHistoryPanel({
                             title: conversation.title || 'this conversation',
                           })
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
+                        className="flex-shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
                         title="Delete conversation"
                       >
                         <Trash2 size={14} />
