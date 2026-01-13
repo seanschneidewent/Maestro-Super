@@ -223,7 +223,7 @@ export function QueryHistoryPanel({
                     <div className="flex items-center gap-3 overflow-hidden">
                       <button
                         onClick={() => handleExpandConversation(conversation.id)}
-                        className="flex-1 flex items-center gap-3 text-left"
+                        className="flex-1 min-w-0 flex items-center gap-3 text-left"
                       >
                         <ChevronRight
                           size={16}
