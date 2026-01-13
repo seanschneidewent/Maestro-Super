@@ -334,7 +334,8 @@ IMPORTANT MODE CHANGE: The user has requested a CONVERSATIONAL response.
 - Answer their question directly in text based on context from previous messages
 - You may still use search tools if you need to look up information
 - Focus on providing a helpful text answer, not displaying pages
-- Keep your response concise and conversational"""
+- Keep your response concise and conversational
+- You MUST still call set_display_title before your final answer"""
 
     # Add viewing context if user is currently viewing a specific page
     if viewing_context:
