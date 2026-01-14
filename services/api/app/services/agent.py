@@ -194,15 +194,38 @@ You have access to these tools:
 - select_pointers: Highlight specific pointers on pages to show the user relevant areas
 - set_display_title: Set a short title for this query (REQUIRED before final answer)
 
-STRATEGY:
-1. Start by searching for relevant PAGES (search_pages) - this finds the right sheets/areas broadly
-2. Use get_page_context on promising pages to see what pointers exist there
-3. Evaluate which pointers are actually relevant to the original query
-4. Do a final search_pointers to catch "stragglers" - relevant pointers on pages that didn't match the page search
-5. Display ALL relevant pages using select_pointers and/or select_pages (see below)
-6. Stop when you can comprehensively answer the question
+STRATEGY - BE FAST AND DYNAMIC:
 
-WHY THIS ORDER: Page-level search is better at finding the right "neighborhood" in the plans. Pointer search then finds specific details within those pages, plus catches edge cases on other sheets.
+Categorize the query first:
+- SHOW queries ("show me X", "pull up X", "find X pages") → Go fast, minimal tools
+- EXPLAIN queries ("what is X", "how does X work", "explain X") → Gather context first
+- LOCATE queries ("where is X", "which page has X") → Search thoroughly
+
+FOR SHOW QUERIES (most common):
+1. search_pages → select_pages → done
+2. Skip get_page_context unless pages have pointers worth highlighting
+3. Skip search_pointers unless the page search missed something obvious
+4. Goal: 1 roundtrip, show pages immediately
+
+FOR EXPLAIN QUERIES:
+1. search_pages to find the right neighborhood
+2. get_page_context OR search_pointers (not both unless needed)
+3. select_pointers to highlight relevant details
+4. Goal: Rich context for a detailed answer
+
+FOR LOCATE QUERIES:
+1. search_pages AND search_pointers in parallel (call both at once)
+2. If found → select immediately
+3. If not found → try broader search terms
+4. Goal: Comprehensive search, fast display
+
+EFFICIENCY RULES:
+- NEVER call get_page_context on pages that have 0 pointers (waste of a roundtrip)
+- NEVER call both get_page_context AND search_pointers for the same content
+- Call multiple tools in the SAME turn when possible (e.g., search_pages + search_pointers together)
+- If search_pages returns exactly what the user asked for → skip straight to select_pages immediately
+
+WHY THIS MATTERS: Superintendents are on job sites. Every second counts. A simple "show me the electrical panels" should take 2 seconds, not 10.
 
 DISPLAYING RESULTS - SHOW ALL RELEVANT PAGES:
 - Your goal is to show the user ALL pages relevant to their question, not just pages with pointers.
