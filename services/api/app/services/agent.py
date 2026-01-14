@@ -194,38 +194,26 @@ You have access to these tools:
 - select_pointers: Highlight specific pointers on pages to show the user relevant areas
 - set_display_title: Set a short title for this query (REQUIRED before final answer)
 
-STRATEGY - BE FAST AND DYNAMIC:
+STRATEGY - SEARCH RESULTS ARE PRE-FETCHED:
 
-Categorize the query first:
-- SHOW queries ("show me X", "pull up X", "find X pages") → Go fast, minimal tools
-- EXPLAIN queries ("what is X", "how does X work", "explain X") → Gather context first
-- LOCATE queries ("where is X", "which page has X") → Search thoroughly
+Search results for both pages and pointers have ALREADY been fetched and are provided below.
+DO NOT call search_pages or search_pointers - the results are already here.
 
-FOR SHOW QUERIES (most common):
-1. search_pages → select_pages → done
-2. Skip get_page_context unless pages have pointers worth highlighting
-3. Skip search_pointers unless the page search missed something obvious
-4. Goal: 1 roundtrip, show pages immediately
+YOUR JOB:
+1. Review the pre-fetched results below
+2. Decide which pages/pointers to display
+3. Call select_pages and/or select_pointers with the relevant IDs
+4. Call set_display_title
+5. Write a brief response
 
-FOR EXPLAIN QUERIES:
-1. search_pages to find the right neighborhood
-2. get_page_context OR search_pointers (not both unless needed)
-3. select_pointers to highlight relevant details
-4. Goal: Rich context for a detailed answer
+WHEN TO USE ADDITIONAL TOOLS (escape hatch):
+- If the pre-fetched results are empty or unhelpful, you MAY call search_pages/search_pointers with different terms
+- If you need detailed pointer info, you MAY call get_pointer or get_page_context
+- But for most queries, the pre-fetched results are sufficient - just select and respond
 
-FOR LOCATE QUERIES:
-1. search_pages AND search_pointers in parallel (call both at once)
-2. If found → select immediately
-3. If not found → try broader search terms
-4. Goal: Comprehensive search, fast display
-
-EFFICIENCY RULES:
-- NEVER call get_page_context on pages that have 0 pointers (waste of a roundtrip)
-- NEVER call both get_page_context AND search_pointers for the same content
-- Call multiple tools in the SAME turn when possible (e.g., search_pages + search_pointers together)
-- If search_pages returns exactly what the user asked for → skip straight to select_pages immediately
-
-WHY THIS MATTERS: Superintendents are on job sites. Every second counts. A simple "show me the electrical panels" should take 2 seconds, not 10.
+EFFICIENCY IS CRITICAL:
+- Most queries should complete in ONE tool call batch: select_pages + set_display_title
+- Superintendents are on job sites. Every second counts.
 
 DISPLAYING RESULTS - SHOW ALL RELEVANT PAGES:
 - Your goal is to show the user ALL pages relevant to their question, not just pages with pointers.
@@ -334,6 +322,8 @@ async def run_agent_query(
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
     """
+    from app.services.tools import search_pages, search_pointers
+
     settings = get_settings()
     if not settings.openrouter_api_key:
         yield {"type": "error", "message": "OpenRouter API key not configured"}
@@ -345,7 +335,38 @@ async def run_agent_query(
         base_url="https://openrouter.ai/api/v1",
     )
 
-    system_content = AGENT_SYSTEM_PROMPT
+    # PRE-FETCH: Run searches before LLM call to eliminate roundtrips
+    # This runs in parallel using asyncio
+    import asyncio
+
+    # Yield pre-fetch status
+    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+    yield {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}}
+
+    # Run both searches in parallel
+    page_results, pointer_results = await asyncio.gather(
+        search_pages(db, query=query, project_id=project_id, limit=10),
+        search_pointers(db, query=query, project_id=project_id, limit=10),
+    )
+
+    # Yield pre-fetch results
+    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+    yield {"type": "tool_result", "tool": "search_pointers", "result": pointer_results}
+
+    # Build pre-fetch context to inject into prompt
+    prefetch_context = f"""
+
+PRE-FETCHED SEARCH RESULTS (already executed - do NOT call these tools again):
+
+Pages matching "{query}":
+{json.dumps(page_results, indent=2)}
+
+Pointers matching "{query}":
+{json.dumps(pointer_results, indent=2)}
+
+Use these results directly. Call select_pages/select_pointers with the relevant IDs from above."""
+
+    system_content = AGENT_SYSTEM_PROMPT + prefetch_context
 
     # Add viewing context if user is currently viewing a specific page
     if viewing_context:
@@ -371,7 +392,14 @@ CURRENT VIEW: The user is currently viewing page {page_name}. This may or may no
 
     # Add current user query
     messages.append({"role": "user", "content": query})
-    trace: list[dict] = []
+
+    # Initialize trace with pre-fetch calls
+    trace: list[dict] = [
+        {"type": "tool_call", "tool": "search_pages", "input": {"query": query}},
+        {"type": "tool_result", "tool": "search_pages", "result": page_results},
+        {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}},
+        {"type": "tool_result", "tool": "search_pointers", "result": pointer_results},
+    ]
     total_input_tokens = 0
     total_output_tokens = 0
     display_title: str | None = None
