@@ -251,19 +251,10 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           setTrace([...agentMessage.trace])
           setThinkingText(extractLatestThinking(agentMessage.trace))
 
-          // Stream final answer: if we're past the last tool result (or no tools called),
-          // this text is part of the final answer - show it progressively
-          const currentTraceIndex = agentMessage.trace.length - 1
-          if (currentTraceIndex > agentMessage.lastToolResultIndex) {
-            // Collect all reasoning after lastToolResultIndex as the streaming answer
-            const answerParts: string[] = []
-            for (let i = agentMessage.lastToolResultIndex + 1; i < agentMessage.trace.length; i++) {
-              if (agentMessage.trace[i].type === 'reasoning' && agentMessage.trace[i].content) {
-                answerParts.push(agentMessage.trace[i].content!)
-              }
-            }
-            setFinalAnswer(answerParts.join(''))
-          }
+          // NOTE: Don't stream text as finalAnswer during streaming.
+          // We don't know if more tools will be called, which would make this
+          // intermediate "thinking" rather than final answer.
+          // Final answer is extracted in the 'done' handler after streaming completes.
         }
         break
 
@@ -271,9 +262,6 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         if (typeof data.tool === 'string') {
           // Set current tool for status display
           setCurrentTool(data.tool)
-
-          // Clear finalAnswer since we're calling more tools - previous text was thinking
-          setFinalAnswer('')
 
           // Don't update thinkingText for tool calls - only show reasoning in the bubble
           const newStep: AgentTraceStep = {
