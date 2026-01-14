@@ -193,16 +193,26 @@ function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): 
       }
       i++;
     } else if (step.type === 'tool_call') {
-      // Look for matching tool_result
-      const nextStep = trace[i + 1];
-      if (nextStep?.type === 'tool_result' && nextStep.tool === step.tool) {
+      // Search forward for matching tool_result (may not be immediately next due to interleaved reasoning)
+      let matchingResultIndex = -1;
+      for (let j = i + 1; j < trace.length; j++) {
+        if (trace[j].type === 'tool_result' && trace[j].tool === step.tool) {
+          matchingResultIndex = j;
+          break;
+        }
+        // Stop searching if we hit another tool_call (means this one has no result yet)
+        if (trace[j].type === 'tool_call') break;
+      }
+
+      if (matchingResultIndex !== -1) {
         // Completed action
         actions.push({
           type: 'action',
-          text: formatCompletedAction(step, nextStep),
+          text: formatCompletedAction(step, trace[matchingResultIndex]),
           isComplete: true,
         });
-        i += 2;
+        // Skip to after the result (don't re-process steps in between)
+        i = matchingResultIndex + 1;
       } else {
         // In-progress tool call (no result yet)
         if (isStreaming) {
