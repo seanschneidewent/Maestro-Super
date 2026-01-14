@@ -19,6 +19,7 @@ from app.schemas.tools import (
     PageReferences,
     PageSummary,
     PointerDetail,
+    PointerListItem,
     PointerReferenceInTool,
     PointerSummary,
     ProjectPages,
@@ -314,7 +315,10 @@ async def list_project_pages(db: Session, project_id: str) -> ProjectPages | Non
                     PageListItem(
                         page_id=str(p.id),
                         page_name=p.page_name,
-                        pointer_count=len(p.pointers) if p.pointers else 0,
+                        pointers=[
+                            PointerListItem(pointer_id=str(ptr.id), title=ptr.title)
+                            for ptr in p.pointers
+                        ] if p.pointers else None,
                     )
                     for p in sorted(d.pages, key=lambda x: x.page_name)
                 ],
