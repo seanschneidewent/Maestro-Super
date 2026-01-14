@@ -63,14 +63,41 @@ async def search_pages(
         )
 
     # Search in page_name, initial_context, and full_context
-    search_pattern = f"%{query}%"
-    base_query = base_query.filter(
-        or_(
-            Page.page_name.ilike(search_pattern),
-            Page.initial_context.ilike(search_pattern),
-            Page.full_context.ilike(search_pattern),
-        )
-    )
+    # Use word-level matching: all words must appear (but not as exact phrase)
+    # This handles plural/singular mismatches like "plans" matching "PLAN"
+    from sqlalchemy import and_
+
+    words = query.lower().split()
+    word_conditions = []
+
+    for word in words:
+        # Create pattern for this word
+        word_pattern = f"%{word}%"
+
+        # Also try without trailing 's' for plural handling
+        # "plans" should match "PLAN", "floors" should match "FLOOR"
+        if word.endswith('s') and len(word) > 2:
+            singular_pattern = f"%{word[:-1]}%"
+            word_condition = or_(
+                Page.page_name.ilike(word_pattern),
+                Page.page_name.ilike(singular_pattern),
+                Page.initial_context.ilike(word_pattern),
+                Page.initial_context.ilike(singular_pattern),
+                Page.full_context.ilike(word_pattern),
+                Page.full_context.ilike(singular_pattern),
+            )
+        else:
+            word_condition = or_(
+                Page.page_name.ilike(word_pattern),
+                Page.initial_context.ilike(word_pattern),
+                Page.full_context.ilike(word_pattern),
+            )
+
+        word_conditions.append(word_condition)
+
+    # All words must match (AND) but each word can match anywhere (OR across fields)
+    if word_conditions:
+        base_query = base_query.filter(and_(*word_conditions))
 
     pages = base_query.limit(limit).all()
 
