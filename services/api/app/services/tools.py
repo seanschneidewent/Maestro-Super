@@ -68,7 +68,14 @@ async def search_pages(
     # This handles plural/singular mismatches like "plans" matching "PLAN"
     from sqlalchemy import and_
 
-    words = query.lower().split()
+    # Strip common stop words that don't add search value
+    STOP_WORDS = {"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "shall", "can", "need", "dare", "ought", "used", "it", "its", "this", "that", "these", "those", "i", "you", "he", "she", "we", "they", "what", "which", "who", "whom", "where", "when", "why", "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just", "also"}
+
+    words = [w for w in query.lower().split() if w not in STOP_WORDS]
+
+    # If all words were stop words, fall back to original query
+    if not words:
+        words = query.lower().split()
     word_conditions = []
 
     for word in words:

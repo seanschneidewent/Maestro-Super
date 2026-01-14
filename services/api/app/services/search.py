@@ -30,8 +30,14 @@ async def search_pointers(
     Returns:
         List of search results with pointer_id, title, page_id, etc.
     """
-    # Generate query embedding using Voyage
-    embedding = await embed_text(query)
+    # Strip common stop words that don't add search value
+    STOP_WORDS = {"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "shall", "can", "need", "dare", "ought", "used", "it", "its", "this", "that", "these", "those", "i", "you", "he", "she", "we", "they", "what", "which", "who", "whom", "where", "when", "why", "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just", "also"}
+
+    words = [w for w in query.lower().split() if w not in STOP_WORDS]
+    clean_query = " ".join(words) if words else query
+
+    # Generate query embedding using Voyage (use cleaned query for better embedding)
+    embedding = await embed_text(clean_query)
 
     # Format embedding as PostgreSQL array literal
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
@@ -49,7 +55,7 @@ async def search_pointers(
             )
         """),
         {
-            "query_text": query,
+            "query_text": clean_query,
             "query_embedding": embedding_str,
             "project_id": project_id,
             "discipline_filter": discipline,
