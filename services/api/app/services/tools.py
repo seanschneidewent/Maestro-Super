@@ -281,18 +281,22 @@ async def get_discipline_overview(
 
 async def list_project_pages(db: Session, project_id: str) -> ProjectPages | None:
     """
-    Get full map of project with all disciplines and pages.
+    Get full map of project with all disciplines, pages, and pointer titles.
 
     Args:
         db: Database session
         project_id: Project UUID
 
     Returns:
-        ProjectPages with all disciplines and pages, or None if not found
+        ProjectPages with all disciplines, pages, and pointer titles, or None if not found
     """
     project = (
         db.query(Project)
-        .options(joinedload(Project.disciplines).joinedload(Discipline.pages))
+        .options(
+            joinedload(Project.disciplines)
+            .joinedload(Discipline.pages)
+            .joinedload(Page.pointers)
+        )
         .filter(Project.id == project_id)
         .first()
     )
@@ -310,6 +314,7 @@ async def list_project_pages(db: Session, project_id: str) -> ProjectPages | Non
                     PageListItem(
                         page_id=str(p.id),
                         page_name=p.page_name,
+                        pointer_titles=[ptr.title for ptr in p.pointers] if p.pointers else None,
                     )
                     for p in sorted(d.pages, key=lambda x: x.page_name)
                 ],

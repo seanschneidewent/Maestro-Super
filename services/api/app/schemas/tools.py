@@ -93,6 +93,7 @@ class PageListItem(BaseModel):
 
     page_id: str = Field(alias="pageId")
     page_name: str = Field(alias="pageName")
+    pointer_titles: list[str] | None = Field(alias="pointerTitles", default=None)
 
     model_config = ConfigDict(populate_by_name=True)
 
