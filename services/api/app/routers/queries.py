@@ -21,6 +21,8 @@ from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, Que
 from app.services.agent import run_agent_query
 from app.services.conversation_memory import fetch_conversation_history
 from app.services.usage import UsageService
+from app.services.search import search_pointers
+from app.services.tools import search_pages, list_project_pages
 
 logger = logging.getLogger(__name__)
 
@@ -390,3 +392,56 @@ async def stream_query(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@router.get("/projects/{project_id}/search/test")
+async def test_search(
+    project_id: str,
+    q: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Test endpoint to see raw search results without agent.
+
+    Usage: GET /projects/{project_id}/search/test?q=freezer+cooler
+
+    Returns timing and results for:
+    - search_pages (keyword)
+    - search_pointers (hybrid: keyword + vector)
+    - list_project_pages (structure)
+    """
+    import time
+
+    verify_project_exists(project_id, db)
+
+    results = {}
+
+    # Test search_pages
+    start = time.time()
+    pages = await search_pages(db, query=q, project_id=project_id, limit=10)
+    results["search_pages"] = {
+        "time_ms": round((time.time() - start) * 1000, 2),
+        "count": len(pages),
+        "results": pages,
+    }
+
+    # Test search_pointers
+    start = time.time()
+    pointers = await search_pointers(db, query=q, project_id=project_id, limit=10)
+    results["search_pointers"] = {
+        "time_ms": round((time.time() - start) * 1000, 2),
+        "count": len(pointers),
+        "results": pointers,
+    }
+
+    # Test list_project_pages
+    start = time.time()
+    structure = await list_project_pages(db, project_id=project_id)
+    structure_dict = structure.model_dump() if structure else None
+    results["list_project_pages"] = {
+        "time_ms": round((time.time() - start) * 1000, 2),
+        "disciplines": len(structure_dict.get("disciplines", [])) if structure_dict else 0,
+        "total_pages": sum(len(d.get("pages", [])) for d in structure_dict.get("disciplines", [])) if structure_dict else 0,
+    }
+
+    return results

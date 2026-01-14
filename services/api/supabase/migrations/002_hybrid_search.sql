@@ -2,7 +2,7 @@
 -- Run this in Supabase SQL Editor
 
 CREATE OR REPLACE FUNCTION hybrid_search(
-  query_text TEXT,  -- Now expects OR format: "word1 | word2 | word3"
+  query_text TEXT,
   query_embedding vector(1024),
   p_project_id UUID,
   discipline_filter TEXT DEFAULT NULL,
@@ -22,7 +22,7 @@ AS $$
 BEGIN
   RETURN QUERY
   WITH
-  -- Keyword search using ts_rank with OR logic
+  -- Keyword search using ts_rank (AND logic - all words must match)
   keyword_search AS (
     SELECT
       ptr.id,
@@ -32,7 +32,7 @@ BEGIN
           COALESCE(ptr.description, '') || ' ' ||
           COALESCE(array_to_string(ptr.text_spans, ' '), '')
         ),
-        to_tsquery('english', query_text)
+        plainto_tsquery('english', query_text)
       ) AS keyword_rank
     FROM pointers ptr
     JOIN pages pg ON ptr.page_id = pg.id
@@ -43,7 +43,7 @@ BEGIN
             COALESCE(ptr.title, '') || ' ' ||
             COALESCE(ptr.description, '') || ' ' ||
             COALESCE(array_to_string(ptr.text_spans, ' '), '')
-          ) @@ to_tsquery('english', query_text)
+          ) @@ plainto_tsquery('english', query_text)
   ),
 
   -- Vector search using cosine similarity

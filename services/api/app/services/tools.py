@@ -103,9 +103,9 @@ async def search_pages(
 
         word_conditions.append(word_condition)
 
-    # Any word can match (OR) - more inclusive search for construction plans
+    # All words must match (AND) for more precise results
     if word_conditions:
-        base_query = base_query.filter(or_(*word_conditions))
+        base_query = base_query.filter(and_(*word_conditions))
 
     pages = base_query.limit(limit).all()
 
