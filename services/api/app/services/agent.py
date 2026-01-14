@@ -322,7 +322,7 @@ async def run_agent_query(
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
     """
-    from app.services.tools import search_pages, search_pointers
+    from app.services.tools import search_pages, search_pointers, list_project_pages
 
     settings = get_settings()
     if not settings.openrouter_api_key:
@@ -335,36 +335,48 @@ async def run_agent_query(
         base_url="https://openrouter.ai/api/v1",
     )
 
-    # PRE-FETCH: Run searches before LLM call to eliminate roundtrips
+    # PRE-FETCH: Run searches + project structure before LLM call to eliminate roundtrips
     # This runs in parallel using asyncio
     import asyncio
 
     # Yield pre-fetch status
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
     yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
     yield {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}}
 
-    # Run both searches in parallel
-    page_results, pointer_results = await asyncio.gather(
+    # Run all three in parallel
+    project_structure, page_results, pointer_results = await asyncio.gather(
+        list_project_pages(db, project_id=project_id),
         search_pages(db, query=query, project_id=project_id, limit=10),
         search_pointers(db, query=query, project_id=project_id, limit=10),
     )
 
+    # Convert project structure to dict for JSON serialization
+    project_structure_dict = project_structure.model_dump() if project_structure else None
+
     # Yield pre-fetch results
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
     yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
     yield {"type": "tool_result", "tool": "search_pointers", "result": pointer_results}
 
     # Build pre-fetch context to inject into prompt
     prefetch_context = f"""
 
-PRE-FETCHED SEARCH RESULTS (already executed - do NOT call these tools again):
+PRE-FETCHED DATA (already executed - do NOT call these tools again):
 
-Pages matching "{query}":
+PROJECT STRUCTURE (all disciplines and pages):
+{json.dumps(project_structure_dict, indent=2)}
+
+SEARCH RESULTS for "{query}":
+
+Pages matching query:
 {json.dumps(page_results, indent=2)}
 
-Pointers matching "{query}":
+Pointers matching query:
 {json.dumps(pointer_results, indent=2)}
 
-Use these results directly. Call select_pages/select_pointers with the relevant IDs from above."""
+Use these results directly. Call select_pages/select_pointers with the relevant IDs from above.
+If the search results are empty but you can identify relevant pages from the PROJECT STRUCTURE, use those page_ids."""
 
     system_content = AGENT_SYSTEM_PROMPT + prefetch_context
 
@@ -395,6 +407,8 @@ CURRENT VIEW: The user is currently viewing page {page_name}. This may or may no
 
     # Initialize trace with pre-fetch calls
     trace: list[dict] = [
+        {"type": "tool_call", "tool": "list_project_pages", "input": {}},
+        {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict},
         {"type": "tool_call", "tool": "search_pages", "input": {"query": query}},
         {"type": "tool_result", "tool": "search_pages", "result": page_results},
         {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}},
