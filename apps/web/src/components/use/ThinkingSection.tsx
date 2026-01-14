@@ -196,11 +196,17 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false); // Start collapsed
   const [displayedText, setDisplayedText] = useState(''); // For typewriter effect
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number>(0);
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
+  const timerIntervalRef = useRef<number | null>(null);
   const phraseIndexRef = useRef(0);
+
+  // Format elapsed time as seconds with 1 decimal
+  const formatTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
   // Clear typing interval
   const clearTypingInterval = () => {
@@ -268,6 +274,37 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
     };
   }, [isStreaming]);
 
+  // Timer: track elapsed time during streaming
+  useEffect(() => {
+    if (isStreaming && !startTime) {
+      setStartTime(Date.now());
+    }
+
+    if (isStreaming) {
+      timerIntervalRef.current = window.setInterval(() => {
+        if (startTime) {
+          setElapsedTime(Date.now() - startTime);
+        }
+      }, 100);
+      return () => {
+        if (timerIntervalRef.current) {
+          clearInterval(timerIntervalRef.current);
+        }
+      };
+    } else if (startTime) {
+      // Streaming ended - keep final time
+      setElapsedTime(Date.now() - startTime);
+    }
+  }, [isStreaming, startTime]);
+
+  // Reset timer when trace is cleared (new query)
+  useEffect(() => {
+    if (trace.length === 0 && !isStreaming) {
+      setStartTime(null);
+      setElapsedTime(0);
+    }
+  }, [trace.length, isStreaming]);
+
   // Auto-scroll to bottom when trace updates during streaming
   useEffect(() => {
     if (isStreaming && isExpanded && scrollContainerRef.current) {
@@ -312,20 +349,28 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         </div>
 
         {isStreaming ? (
-          /* Streaming: blinking dot + cycling typewriter text */
+          /* Streaming: blinking dot + cycling typewriter text + timer */
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className="text-cyan-500 animate-pulse">●</span>
             <span className="text-xs font-medium text-slate-600 truncate">
               {displayedText}
             </span>
+            <span className="text-xs font-mono text-slate-400 flex-shrink-0">
+              {formatTime(elapsedTime)}
+            </span>
           </div>
         ) : (
-          /* Completed: hammer icon + "See my process." */
+          /* Completed: hammer icon + "See my process." + final time */
           <>
             <Hammer size={14} className="flex-shrink-0 text-cyan-500" />
             <span className="text-xs font-medium text-slate-600 flex-1 text-left">
               See my process.
             </span>
+            {elapsedTime > 0 && (
+              <span className="text-xs font-mono text-slate-400 flex-shrink-0">
+                {formatTime(elapsedTime)}
+              </span>
+            )}
           </>
         )}
       </button>
