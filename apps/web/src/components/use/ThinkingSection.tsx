@@ -164,15 +164,25 @@ interface ProcessedAction {
 
 function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): ProcessedAction[] {
   const actions: ProcessedAction[] = [];
-  let i = 0;
 
+  // Find the last tool_result index to filter out intermediate reasoning
+  let lastToolResultIndex = -1;
+  for (let j = trace.length - 1; j >= 0; j--) {
+    if (trace[j].type === 'tool_result') {
+      lastToolResultIndex = j;
+      break;
+    }
+  }
+
+  let i = 0;
   while (i < trace.length) {
     const step = trace[i];
 
     if (step.type === 'reasoning') {
-      // Only show reasoning if it's substantial (more than just whitespace)
+      // Only show reasoning if it's AFTER the last tool_result (i.e., it's the final answer)
+      // Skip intermediate reasoning that came before/between tool calls
       const content = step.content?.trim() || '';
-      if (content.length > 20) {
+      if (content.length > 20 && i > lastToolResultIndex) {
         const truncated = content.length > 60 ? content.slice(0, 60) + '...' : content;
         actions.push({
           type: 'thinking',
@@ -441,11 +451,11 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
             </span>
           </div>
         ) : (
-          /* Completed: hammer icon + "Completed in X.Xs" */
+          /* Completed: hammer icon + "Completed in X.Xs" (or just "Completed" if no time) */
           <>
             <Hammer size={14} className="flex-shrink-0 text-cyan-500" />
             <span className="text-xs font-medium text-slate-600 flex-1 text-left">
-              Completed in {formatTime(elapsedTime)}
+              {elapsedTime > 0 ? `Completed in ${formatTime(elapsedTime)}` : 'Completed'}
             </span>
           </>
         )}
