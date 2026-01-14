@@ -35,6 +35,8 @@ async def search_pointers(
 
     words = [w for w in query.lower().split() if w not in STOP_WORDS]
     clean_query = " ".join(words) if words else query
+    # Build OR query for PostgreSQL ts_query (word1 | word2 | word3)
+    ts_query = " | ".join(words) if words else query
 
     # Generate query embedding using Voyage (use cleaned query for better embedding)
     embedding = await embed_text(clean_query)
@@ -55,7 +57,7 @@ async def search_pointers(
             )
         """),
         {
-            "query_text": clean_query,
+            "query_text": ts_query,  # OR format: "word1 | word2"
             "query_embedding": embedding_str,
             "project_id": project_id,
             "discipline_filter": discipline,
