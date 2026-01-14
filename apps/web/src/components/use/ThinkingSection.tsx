@@ -1,39 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Brain, Hammer, Search, FileText, File, Folder, List, GitBranch, CheckCircle2, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2 } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
-
-// Working phrases for cycling during streaming
-const WORKING_PHRASES = [
-  "Searching...",
-  "Looking for details...",
-  "Hunting through the plans...",
-  "Looking through pages...",
-  "Looking closer...",
-  "Checking that out...",
-  "Examining...",
-  "Reading the page...",
-  "Seeing what's here...",
-  "Getting the overview...",
-  "Zooming out...",
-  "Finding references...",
-  "Tracking connections...",
-  "Following the trail...",
-  "Pulling up the sheets...",
-  "Loading pages...",
-  "Highlighting...",
-  "Marking the spots...",
-  "Browsing the project...",
-];
-
-// Map tool names to icons and display names
-const TOOL_CONFIG: Record<string, { icon: React.ReactNode; name: string }> = {
-  search_pointers: { icon: <Search size={12} />, name: 'Search pointers' },
-  get_pointer: { icon: <FileText size={12} />, name: 'Get pointer details' },
-  get_page_context: { icon: <File size={12} />, name: 'Get page context' },
-  get_discipline_overview: { icon: <Folder size={12} />, name: 'Get discipline overview' },
-  list_project_pages: { icon: <List size={12} />, name: 'List project pages' },
-  get_references_to_page: { icon: <GitBranch size={12} />, name: 'Get page references' },
-};
+import { ConstellationAnimation } from './ConstellationAnimation';
 
 interface ThinkingSectionProps {
   reasoning: string[];
@@ -44,142 +12,257 @@ interface ThinkingSectionProps {
   onOpenPointer?: (pointerId: string) => void;
 }
 
-// Individual expandable step component
-const TraceStepItem: React.FC<{
-  step: AgentTraceStep;
+// Generate a productivity phrase from a tool result
+function generateProductivityPhrase(step: AgentTraceStep): string | null {
+  if (step.type !== 'tool_result' || !step.result) return null;
+
+  const result = step.result;
+  const tool = step.tool;
+
+  switch (tool) {
+    case 'search_pointers': {
+      const pointers = result.pointers as unknown[];
+      if (Array.isArray(pointers)) {
+        return `Found ${pointers.length} relevant area${pointers.length !== 1 ? 's' : ''}`;
+      }
+      return 'Searching areas...';
+    }
+    case 'search_pages': {
+      const pages = result.pages as unknown[];
+      if (Array.isArray(pages)) {
+        return `Found ${pages.length} page${pages.length !== 1 ? 's' : ''}`;
+      }
+      return 'Searching pages...';
+    }
+    case 'get_pointer': {
+      const title = result.title as string;
+      if (title) {
+        const truncated = title.length > 30 ? title.slice(0, 30) + '...' : title;
+        return `Reading "${truncated}"`;
+      }
+      return 'Reading details...';
+    }
+    case 'get_page_context': {
+      const sheetNumber = result.sheet_number as string;
+      if (sheetNumber) {
+        return `Understanding ${sheetNumber}`;
+      }
+      return 'Understanding page...';
+    }
+    case 'get_discipline_overview': {
+      const name = result.name as string;
+      if (name) {
+        return `Reviewing ${name}`;
+      }
+      return 'Reviewing discipline...';
+    }
+    case 'get_references_to_page': {
+      const references = result.references as unknown[];
+      if (Array.isArray(references)) {
+        return `Found ${references.length} connected page${references.length !== 1 ? 's' : ''}`;
+      }
+      return 'Finding connections...';
+    }
+    case 'select_pages': {
+      const pages = result.pages as unknown[];
+      if (Array.isArray(pages)) {
+        return `Selected ${pages.length} page${pages.length !== 1 ? 's' : ''}`;
+      }
+      return 'Selecting pages...';
+    }
+    case 'select_pointers': {
+      const pointers = result.pointers as unknown[];
+      if (Array.isArray(pointers)) {
+        return `Highlighting ${pointers.length} area${pointers.length !== 1 ? 's' : ''}`;
+      }
+      return 'Highlighting areas...';
+    }
+    default:
+      return null;
+  }
+}
+
+// Generate human-readable text for a completed tool action
+function formatCompletedAction(toolCall: AgentTraceStep, toolResult: AgentTraceStep): string {
+  const tool = toolCall.tool;
+  const input = toolCall.input || {};
+  const result = toolResult.result || {};
+
+  switch (tool) {
+    case 'search_pointers': {
+      const query = input.query as string;
+      const pointers = result.pointers as unknown[];
+      const count = Array.isArray(pointers) ? pointers.length : 0;
+      if (query) {
+        return `Searched for "${query}" → Found ${count} area${count !== 1 ? 's' : ''}`;
+      }
+      return `Found ${count} relevant area${count !== 1 ? 's' : ''}`;
+    }
+    case 'search_pages': {
+      const query = input.query as string;
+      const pages = result.pages as unknown[];
+      const count = Array.isArray(pages) ? pages.length : 0;
+      if (query) {
+        return `Searched pages for "${query}" → Found ${count}`;
+      }
+      return `Found ${count} page${count !== 1 ? 's' : ''}`;
+    }
+    case 'get_pointer': {
+      const title = result.title as string;
+      if (title) {
+        const truncated = title.length > 40 ? title.slice(0, 40) + '...' : title;
+        return `Read "${truncated}"`;
+      }
+      return 'Read pointer details';
+    }
+    case 'get_page_context': {
+      const sheetNumber = result.sheet_number as string;
+      const pageName = result.page_name as string;
+      if (sheetNumber) {
+        return `Reviewed page ${sheetNumber}`;
+      }
+      if (pageName) {
+        return `Reviewed "${pageName}"`;
+      }
+      return 'Reviewed page context';
+    }
+    case 'get_discipline_overview': {
+      const name = result.name as string;
+      if (name) {
+        return `Reviewed ${name} overview`;
+      }
+      return 'Reviewed discipline';
+    }
+    case 'get_references_to_page': {
+      const references = result.references as unknown[];
+      const count = Array.isArray(references) ? references.length : 0;
+      return `Found ${count} page${count !== 1 ? 's' : ''} referencing this`;
+    }
+    case 'select_pages': {
+      const pages = result.pages as unknown[];
+      const count = Array.isArray(pages) ? pages.length : 0;
+      return `Selected ${count} page${count !== 1 ? 's' : ''} to show`;
+    }
+    case 'select_pointers': {
+      const pointers = result.pointers as unknown[];
+      const count = Array.isArray(pointers) ? pointers.length : 0;
+      return `Highlighted ${count} area${count !== 1 ? 's' : ''}`;
+    }
+    default:
+      return tool?.replace(/_/g, ' ') || 'Completed action';
+  }
+}
+
+// Process trace into human-readable actions
+interface ProcessedAction {
+  type: 'action' | 'thinking';
+  text: string;
+  isComplete: boolean;
+  expandedContent?: string;
+}
+
+function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): ProcessedAction[] {
+  const actions: ProcessedAction[] = [];
+  let i = 0;
+
+  while (i < trace.length) {
+    const step = trace[i];
+
+    if (step.type === 'reasoning') {
+      // Only show reasoning if it's substantial (more than just whitespace)
+      const content = step.content?.trim() || '';
+      if (content.length > 20) {
+        const truncated = content.length > 60 ? content.slice(0, 60) + '...' : content;
+        actions.push({
+          type: 'thinking',
+          text: truncated,
+          isComplete: true,
+          expandedContent: content.length > 60 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'tool_call') {
+      // Look for matching tool_result
+      const nextStep = trace[i + 1];
+      if (nextStep?.type === 'tool_result' && nextStep.tool === step.tool) {
+        // Completed action
+        actions.push({
+          type: 'action',
+          text: formatCompletedAction(step, nextStep),
+          isComplete: true,
+        });
+        i += 2;
+      } else {
+        // In-progress tool call (no result yet)
+        if (isStreaming) {
+          actions.push({
+            type: 'action',
+            text: step.tool?.replace(/_/g, ' ') || 'Working...',
+            isComplete: false,
+          });
+        }
+        i++;
+      }
+    } else if (step.type === 'tool_result') {
+      // Orphan result without call (shouldn't happen, but handle it)
+      i++;
+    } else {
+      i++;
+    }
+  }
+
+  return actions;
+}
+
+// Individual action item component
+const ActionItem: React.FC<{
+  action: ProcessedAction;
   index: number;
-  isLast: boolean;
-  isStreaming: boolean;
-  onNavigateToPage?: (pageId: string) => void;
-  onOpenPointer?: (pointerId: string) => void;
-}> = ({ step, index, isLast, isStreaming, onNavigateToPage, onOpenPointer }) => {
+}> = ({ action, index }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const toolConfig = step.tool ? TOOL_CONFIG[step.tool] : null;
-
-  // Get step display info
-  const getStepInfo = () => {
-    if (step.type === 'reasoning') {
-      // Truncate for display
-      const text = step.content || '';
-      const truncated = text.length > 80 ? text.slice(0, 80) + '...' : text;
-      return {
-        icon: <Brain size={12} />,
-        title: truncated || 'Thinking...',
-        color: 'text-purple-500',
-        bgColor: 'bg-purple-50',
-        hasDetails: text.length > 80,
-      };
-    }
-    if (step.type === 'tool_call') {
-      return {
-        icon: toolConfig?.icon || <FileText size={12} />,
-        title: toolConfig?.name || step.tool?.replace(/_/g, ' ') || 'Tool call',
-        color: 'text-cyan-500',
-        bgColor: 'bg-cyan-50',
-        hasDetails: !!step.input && Object.keys(step.input).length > 0,
-      };
-    }
-    if (step.type === 'tool_result') {
-      return {
-        icon: <CheckCircle2 size={12} />,
-        title: `${toolConfig?.name || step.tool?.replace(/_/g, ' ') || 'Tool'} result`,
-        color: 'text-green-500',
-        bgColor: 'bg-green-50',
-        hasDetails: !!step.result,
-      };
-    }
-    return { icon: <FileText size={12} />, title: 'Unknown', color: 'text-slate-500', bgColor: 'bg-slate-50', hasDetails: false };
-  };
-
-  const info = getStepInfo();
-  const showSpinner = isLast && isStreaming && step.type === 'tool_call';
-
-  // Format result data for display
-  const formatResult = (result: Record<string, unknown>) => {
-    // Check for common result patterns
-    if (result.pages && Array.isArray(result.pages)) {
-      return `Found ${result.pages.length} pages`;
-    }
-    if (result.pointers && Array.isArray(result.pointers)) {
-      return `Found ${result.pointers.length} pointers`;
-    }
-    if (result.disciplines && Array.isArray(result.disciplines)) {
-      return `Found ${result.disciplines.length} disciplines`;
-    }
-    if (result.error) {
-      return `Error: ${result.error}`;
-    }
-    // Truncate JSON for display
-    const json = JSON.stringify(result, null, 2);
-    return json.length > 500 ? json.slice(0, 500) + '...' : json;
-  };
-
   return (
-    <div className="group min-w-0">
+    <div className="group">
       <button
-        onClick={() => info.hasDetails && setIsExpanded(!isExpanded)}
-        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors min-w-0 ${
-          info.hasDetails ? 'hover:bg-slate-100 cursor-pointer' : 'cursor-default'
+        onClick={() => action.expandedContent && setIsExpanded(!isExpanded)}
+        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+          action.expandedContent ? 'hover:bg-slate-100 cursor-pointer' : 'cursor-default'
         }`}
       >
-        {/* Expand chevron or spacer */}
-        <div className="w-3 flex-shrink-0">
-          {info.hasDetails && (
-            isExpanded ? (
-              <ChevronDown size={10} className="text-slate-400" />
-            ) : (
-              <ChevronRight size={10} className="text-slate-400" />
-            )
-          )}
-        </div>
-
-        {/* Icon */}
-        <div className={`flex-shrink-0 ${info.color}`}>
-          {showSpinner ? (
-            <Loader2 size={12} className="animate-spin" />
+        {/* Status icon */}
+        <div className="flex-shrink-0 w-4">
+          {action.isComplete ? (
+            <CheckCircle2 size={14} className="text-green-500" />
           ) : (
-            info.icon
+            <Loader2 size={14} className="text-cyan-500 animate-spin" />
           )}
         </div>
 
-        {/* Title */}
-        <span className="text-xs text-slate-600 flex-1 text-left truncate min-w-0">
-          {info.title}
+        {/* Action text */}
+        <span className={`text-xs flex-1 text-left ${
+          action.type === 'thinking' ? 'text-slate-500 italic' : 'text-slate-600'
+        }`}>
+          {action.text}
         </span>
 
-        {/* Step number */}
-        <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
-          {(index + 1).toString().padStart(2, '0')}
-        </span>
+        {/* Expand indicator for thinking with more content */}
+        {action.expandedContent && (
+          <div className="flex-shrink-0">
+            {isExpanded ? (
+              <ChevronDown size={12} className="text-slate-400" />
+            ) : (
+              <ChevronRight size={12} className="text-slate-400" />
+            )}
+          </div>
+        )}
       </button>
 
-      {/* Expanded details */}
-      {isExpanded && info.hasDetails && (
-        <div className={`ml-5 mr-2 mt-1 mb-2 p-2 rounded-lg ${info.bgColor} border border-slate-100 animate-fade-in overflow-hidden`}>
-          {step.type === 'reasoning' && step.content && (
-            <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
-              {step.content}
-            </p>
-          )}
-
-          {step.type === 'tool_call' && step.input && (
-            <div className="space-y-1">
-              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Input</p>
-              <pre className="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all">
-                {JSON.stringify(step.input, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {step.type === 'tool_result' && step.result && (
-            <div className="space-y-1">
-              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Result</p>
-              <pre className="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-                {formatResult(step.result)}
-              </pre>
-            </div>
-          )}
+      {/* Expanded content */}
+      {isExpanded && action.expandedContent && (
+        <div className="ml-6 mr-2 mt-1 mb-2 p-2 rounded-lg bg-slate-100 border border-slate-200">
+          <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+            {action.expandedContent}
+          </p>
         </div>
       )}
     </div>
@@ -194,16 +277,16 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onNavigateToPage,
   onOpenPointer,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false); // Start collapsed
-  const [displayedText, setDisplayedText] = useState(''); // For typewriter effect
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [displayedText, setDisplayedText] = useState('');
+  const [currentPhrase, setCurrentPhrase] = useState('Thinking...');
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<number | null>(null);
-  const timeoutRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<number | null>(null);
-  const phraseIndexRef = useRef(0);
+  const lastPhraseRef = useRef<string>('');
 
   // Format elapsed time as seconds with 1 decimal
   const formatTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
@@ -216,16 +299,9 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
     }
   };
 
-  // Clear delay timeout
-  const clearDelayTimeout = () => {
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  };
-
-  // Typewrite a phrase, then call onComplete when done
-  const typewritePhrase = (phrase: string, onComplete: () => void) => {
+  // Typewrite a phrase
+  const typewritePhrase = (phrase: string) => {
+    clearTypingInterval();
     setDisplayedText('');
     let charIndex = 0;
 
@@ -235,43 +311,43 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         charIndex++;
       } else {
         clearTypingInterval();
-        onComplete();
       }
-    }, 30);
+    }, 25);
   };
 
-  // Start cycling through working phrases
-  const startWorkingCycle = () => {
-    // Pick a random starting index
-    phraseIndexRef.current = Math.floor(Math.random() * WORKING_PHRASES.length);
-
-    const cycleNext = () => {
-      const phrase = WORKING_PHRASES[phraseIndexRef.current];
-      phraseIndexRef.current = (phraseIndexRef.current + 1) % WORKING_PHRASES.length;
-
-      typewritePhrase(phrase, () => {
-        // Wait 5 seconds then start next phrase
-        timeoutRef.current = window.setTimeout(cycleNext, 5000);
-      });
-    };
-
-    cycleNext();
-  };
-
-  // Handle streaming state changes for typewriter effect
+  // Watch trace for tool_results and generate productivity phrases
   useEffect(() => {
-    if (isStreaming) {
-      startWorkingCycle();
-    } else {
+    if (!isStreaming) return;
+
+    // Find the latest tool_result
+    for (let i = trace.length - 1; i >= 0; i--) {
+      const step = trace[i];
+      if (step.type === 'tool_result') {
+        const phrase = generateProductivityPhrase(step);
+        if (phrase && phrase !== lastPhraseRef.current) {
+          lastPhraseRef.current = phrase;
+          setCurrentPhrase(phrase);
+          typewritePhrase(phrase);
+        }
+        break;
+      }
+    }
+  }, [trace, isStreaming]);
+
+  // Initialize with "Thinking..." when streaming starts
+  useEffect(() => {
+    if (isStreaming && !wasStreamingRef.current) {
+      setCurrentPhrase('Thinking...');
+      lastPhraseRef.current = '';
+      typewritePhrase('Thinking...');
+    }
+
+    if (!isStreaming) {
       clearTypingInterval();
-      clearDelayTimeout();
       setDisplayedText('');
     }
 
-    return () => {
-      clearTypingInterval();
-      clearDelayTimeout();
-    };
+    return () => clearTypingInterval();
   }, [isStreaming]);
 
   // Timer: track elapsed time during streaming
@@ -330,15 +406,18 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
     return null;
   }
 
-  // Count step types for header
-  const toolCallCount = trace.filter(s => s.type === 'tool_call').length;
+  // Process trace into human-readable actions
+  const processedActions = processTraceForDisplay(trace, isStreaming);
 
   return (
-    <div className="w-1/2 rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0">
+    <div className="w-1/2 rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0 relative">
+      {/* Constellation animation background */}
+      <ConstellationAnimation isActive={isStreaming} />
+
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100/50 transition-colors"
+        className="relative z-10 w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100/50 transition-colors"
       >
         <div className="flex-shrink-0">
           {isExpanded ? (
@@ -349,7 +428,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         </div>
 
         {isStreaming ? (
-          /* Streaming: blinking dot + cycling typewriter text + timer */
+          /* Streaming: blinking dot + productivity phrase + timer */
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className="text-cyan-500 animate-pulse">●</span>
             <span className="text-xs font-medium text-slate-600 truncate">
@@ -360,40 +439,31 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
             </span>
           </div>
         ) : (
-          /* Completed: hammer icon + "See my process." + final time */
+          /* Completed: hammer icon + "Completed in X.Xs" */
           <>
             <Hammer size={14} className="flex-shrink-0 text-cyan-500" />
             <span className="text-xs font-medium text-slate-600 flex-1 text-left">
-              See my process.
+              Completed in {formatTime(elapsedTime)}
             </span>
-            {elapsedTime > 0 && (
-              <span className="text-xs font-mono text-slate-400 flex-shrink-0">
-                {formatTime(elapsedTime)}
-              </span>
-            )}
           </>
         )}
       </button>
 
-      {/* Trace steps */}
+      {/* Processed actions */}
       {isExpanded && (
-        <div ref={scrollContainerRef} className="px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto overflow-x-hidden">
-          {trace.length === 0 && isStreaming && (
+        <div ref={scrollContainerRef} className="relative z-10 px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto overflow-x-hidden">
+          {processedActions.length === 0 && isStreaming && (
             <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-400">
               <Loader2 size={12} className="animate-spin" />
               Starting to think...
             </div>
           )}
 
-          {trace.map((step, index) => (
-            <TraceStepItem
+          {processedActions.map((action, index) => (
+            <ActionItem
               key={index}
-              step={step}
+              action={action}
               index={index}
-              isLast={index === trace.length - 1}
-              isStreaming={isStreaming}
-              onNavigateToPage={onNavigateToPage}
-              onOpenPointer={onOpenPointer}
             />
           ))}
         </div>
