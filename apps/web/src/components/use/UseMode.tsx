@@ -219,7 +219,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     error,
     reset: resetStream,
     restore,
-    loadPages,
   } = useFieldStream({
     projectId,
     renderedPages,
@@ -595,8 +594,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         disciplineId,
         pointers: [], // Empty - pointers only shown for query results
       };
-
-      loadPages([pageToLoad]);
 
       // Update feedItems for page viewing
       // Always preserve conversation items when adding standalone-page
