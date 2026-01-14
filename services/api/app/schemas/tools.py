@@ -88,12 +88,21 @@ class DisciplineOverview(BaseModel):
 
 
 # Tool 5: list_project_pages
+class PointerListItem(BaseModel):
+    """Minimal pointer info for listing."""
+
+    pointer_id: str = Field(alias="pointerId")
+    title: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class PageListItem(BaseModel):
     """Minimal page info for listing."""
 
     page_id: str = Field(alias="pageId")
     page_name: str = Field(alias="pageName")
-    pointer_titles: list[str] | None = Field(alias="pointerTitles", default=None)
+    pointers: list[PointerListItem] | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
