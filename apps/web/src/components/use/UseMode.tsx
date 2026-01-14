@@ -201,6 +201,35 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       );
     }
 
+    // Add pages and text response to feed (using callback data which has correct trace)
+    setFeedItems((prev) => {
+      const newItems: FeedItem[] = [...prev];
+
+      // Add pages if we have them
+      if (query.pages.length > 0) {
+        newItems.push({
+          type: 'pages',
+          id: crypto.randomUUID(),
+          pages: query.pages,
+          timestamp: Date.now(),
+        });
+      }
+
+      // Add text response if we have one
+      if (query.finalAnswer) {
+        newItems.push({
+          type: 'text',
+          id: crypto.randomUUID(),
+          content: query.finalAnswer,
+          trace: query.trace,
+          elapsedTime: query.elapsedTime,
+          timestamp: Date.now(),
+        });
+      }
+
+      return newItems;
+    });
+
     setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
   }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId]);
@@ -227,7 +256,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     onQueryComplete: handleQueryComplete,
   });
 
-  // Detect streaming completion and add pages/text to feed
+  // Detect streaming completion to mark toast complete
+  // Note: Feed items are now added in handleQueryComplete callback
   useEffect(() => {
     // Streaming just ended (true → false)
     if (wasStreamingRef.current && !isStreaming) {
@@ -236,35 +266,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         markComplete(currentToastIdRef.current);
         currentToastIdRef.current = null;
       }
-
-      // Add pages if we have them
-      if (selectedPages.length > 0) {
-        setFeedItems((prev) => [
-          ...prev,
-          {
-            type: 'pages',
-            id: crypto.randomUUID(),
-            pages: selectedPages,
-            timestamp: Date.now(),
-          },
-        ]);
-      }
-      // Add text response if we have one (show below pages as conversational output)
-      if (finalAnswer) {
-        setFeedItems((prev) => [
-          ...prev,
-          {
-            type: 'text',
-            id: crypto.randomUUID(),
-            content: finalAnswer,
-            trace: [...trace],  // Include trace for ThinkingSection
-            timestamp: Date.now(),
-          },
-        ]);
-      }
     }
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, selectedPages, finalAnswer, trace, markComplete]);
+  }, [isStreaming, markComplete]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback(async (prompt: string) => {

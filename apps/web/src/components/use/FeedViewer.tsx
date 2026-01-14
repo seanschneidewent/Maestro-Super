@@ -19,7 +19,7 @@ const RENDER_SCALE = 3;
 export type FeedItem =
   | { type: 'user-query'; id: string; text: string; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
-  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; timestamp: number }
+  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; elapsedTime?: number; timestamp: number }
   | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
 
 interface PageImage {
@@ -655,6 +655,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                         isStreaming={false}
                         autoCollapse={false}
                         trace={item.trace}
+                        initialElapsedTime={item.elapsedTime}
                       />
                     </div>
                   )}

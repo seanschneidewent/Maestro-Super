@@ -32,6 +32,7 @@ export interface CompletedQuery {
   pages: AgentSelectedPage[]
   finalAnswer: string
   trace: AgentTraceStep[]
+  elapsedTime: number
 }
 
 interface UseFieldStreamOptions {
@@ -595,6 +596,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             pages: [...selectedPagesRef.current],
             finalAnswer: extractedAnswer,
             trace: [...agentMessage.trace],
+            elapsedTime: Date.now() - agentMessage.timestamp.getTime(),
           })
         }
         break

@@ -8,6 +8,7 @@ interface ThinkingSectionProps {
   isStreaming: boolean;
   autoCollapse?: boolean;
   trace?: AgentTraceStep[];
+  initialElapsedTime?: number; // For completed responses - time in ms
   onNavigateToPage?: (pageId: string) => void;
   onOpenPointer?: (pointerId: string) => void;
 }
@@ -274,6 +275,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   isStreaming,
   autoCollapse = true,
   trace = [],
+  initialElapsedTime,
   onNavigateToPage,
   onOpenPointer,
 }) => {
@@ -281,7 +283,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   const [displayedText, setDisplayedText] = useState('');
   const [currentPhrase, setCurrentPhrase] = useState('Thinking...');
   const [startTime, setStartTime] = useState<number | null>(null);
-  const [elapsedTime, setElapsedTime] = useState<number>(0);
+  const [elapsedTime, setElapsedTime] = useState<number>(initialElapsedTime || 0);
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<number | null>(null);
