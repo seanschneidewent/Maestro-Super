@@ -412,26 +412,41 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         },
         tempId,
         onCreated: (created) => {
-          // Select the new pointer
-          setSelectedPointerId(created.id);
+          // Check if user is still on the same page before applying side effects
+          // Use setSetupState's functional form to access current state at execution time
+          // (avoids stale closure issues when user switches pages during generation)
+          setSetupState(prev => {
+            const isStillOnSamePage = prev.selectedFileId === created.pageId;
 
-          // Auto-expand path to new pointer in mind map
-          const disciplineId = findDisciplineIdForPage(pageId);
-          if (disciplineId && hierarchy) {
-            const projectNodeId = `project-${hierarchy.name}`;
-            setExpandedNodes(prev => {
-              const newSet = new Set(prev);
-              newSet.add(projectNodeId);
-              newSet.add(disciplineId);
-              newSet.add(pageId);
-              return Array.from(newSet);
-            });
-          }
+            if (isStillOnSamePage) {
+              // User is still on the same page - select the new pointer and focus on it
+              setFocusPointerId(created.id);
 
-          // Signal to scroll/center on the new pointer
-          setFocusPointerId(created.id);
+              // Auto-expand path to new pointer in mind map
+              const disciplineId = findDisciplineIdForPage(created.pageId);
+              if (disciplineId && hierarchy) {
+                const projectNodeId = `project-${hierarchy.name}`;
+                setExpandedNodes(prevNodes => {
+                  const newSet = new Set(prevNodes);
+                  newSet.add(projectNodeId);
+                  newSet.add(disciplineId);
+                  newSet.add(created.pageId);
+                  return Array.from(newSet);
+                });
+              }
 
-          // Refresh hierarchy to update file tree pointer counts
+              return {
+                ...prev,
+                selectedPointerId: created.id,
+              };
+            }
+
+            // User switched to a different page - don't change selection or focus
+            return prev;
+          });
+
+          // Always refresh hierarchy to update file tree pointer counts
+          // (regardless of which page the user is on)
           setHierarchyRefresh(h => h + 1);
         },
       });

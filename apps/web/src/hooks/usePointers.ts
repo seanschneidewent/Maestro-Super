@@ -75,6 +75,8 @@ export function useCreatePointer(projectId: string) {
     },
 
     onMutate: async ({ pageId, bounds, tempId }) => {
+      console.log('[useCreatePointer] onMutate:', { pageId, tempId });
+
       // Cancel any outgoing refetches to prevent race conditions
       await queryClient.cancelQueries({ queryKey: ['pointers', pageId] });
 
@@ -112,6 +114,15 @@ export function useCreatePointer(projectId: string) {
 
     onSuccess: (created, variables, context) => {
       if (!context) return;
+
+      // Debug logging to help diagnose page-switching issues
+      console.log('[useCreatePointer] onSuccess:', {
+        createdId: created.id,
+        createdPageId: created.pageId,
+        contextPageId: context.pageId,
+        tempId: context.tempId,
+        variablesPageId: variables.pageId,
+      });
 
       // Robust replacement: handle both temp-exists and temp-missing cases
       queryClient.setQueryData<PointerResponse[]>(['pointers', context.pageId], (old = []) => {
