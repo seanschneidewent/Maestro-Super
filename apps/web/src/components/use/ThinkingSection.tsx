@@ -432,7 +432,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   const processedActions = processTraceForDisplay(trace, isStreaming);
 
   return (
-    <div className="w-1/2 rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0 relative">
+    <div className="w-1/2 rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0 relative" data-tutorial="thinking-section">
       {/* Constellation animation background */}
       <ConstellationAnimation isActive={isStreaming} />
 

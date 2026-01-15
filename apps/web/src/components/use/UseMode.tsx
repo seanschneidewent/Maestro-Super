@@ -109,7 +109,7 @@ interface UseModeProps {
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const queryClient = useQueryClient();
   const { showError } = useToast();
-  const { currentStep, completeStep, advanceStep, skipTutorial, isActive: tutorialActive, hasCompleted } = useTutorial();
+  const { currentStep, completeStep, advanceStep, isActive: tutorialActive, hasCompleted } = useTutorial();
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -439,6 +439,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Handle navigation from agent toast (fetch conversation and restore)
   const handleToastNavigate = useCallback(async (conversationId: string) => {
+    // Tutorial: advance from 'toast-complete' to 'thinking' when user clicks Complete
+    if (tutorialActive && currentStep === 'toast-complete') {
+      advanceStep(); // → 'thinking'
+    }
+
     // If we're already on this conversation, show the conversation content
     // by filtering out standalone-page items (the user was browsing pages)
     if (activeConversationId === conversationId && conversationQueries.length > 0) {
@@ -462,7 +467,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       console.error('Failed to navigate to conversation:', err);
       showError('Failed to load conversation. Please try again.');
     }
-  }, [activeConversationId, conversationQueries.length, handleRestoreConversation, showError]);
+  }, [activeConversationId, conversationQueries.length, handleRestoreConversation, showError, tutorialActive, currentStep, advanceStep]);
 
   // Handle visible page change from scrolling in multi-page mode
   const handleVisiblePageChange = (pageId: string, disciplineId: string) => {
@@ -489,9 +494,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Initialize to true if sidebar starts collapsed due to tutorial
   const tutorialCollapsedSidebarRef = useRef(tutorialActive && currentStep === 'welcome');
 
-  // Track previous streaming state to detect when agent finishes
-  const prevIsStreamingRef = useRef(isStreaming);
-
   // Track if history panel was opened (for tutorial flow)
   const historyOpenedRef = useRef(false);
 
@@ -504,31 +506,32 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     }
   }, [isSidebarCollapsed, tutorialActive, currentStep, completeStep]);
 
-  // Tutorial: auto-advance from 'viewer' to 'query' after 4 seconds
+  // Tutorial: advance to 'toast-complete' when toast status changes to complete
   useEffect(() => {
-    if (tutorialActive && currentStep === 'viewer') {
+    if (tutorialActive && currentStep === 'toast-working') {
+      const completedToast = toasts.find(t => t.status === 'complete');
+      if (completedToast) {
+        advanceStep(); // → 'toast-complete'
+      }
+    }
+  }, [tutorialActive, currentStep, toasts, advanceStep]);
+
+  // Tutorial: auto-advance from 'thinking' to 'page-zoom' after 2 seconds
+  useEffect(() => {
+    if (tutorialActive && currentStep === 'thinking') {
       const timer = setTimeout(() => {
-        advanceStep();
-      }, 4000);
+        advanceStep(); // → 'page-zoom'
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [tutorialActive, currentStep, advanceStep]);
 
-  // Tutorial: detect streaming end → advance from 'responding' to 'new-conversation'
+  // Tutorial: auto-advance from 'query-again' to 'history' after 2 seconds
   useEffect(() => {
-    // Streaming just ended (true → false) during 'responding' step
-    if (prevIsStreamingRef.current && !isStreaming && tutorialActive && currentStep === 'responding') {
-      // Small delay so user can see the response before showing next arrow
-      const timer = setTimeout(() => advanceStep(), 1500);
-      return () => clearTimeout(timer);
-    }
-    prevIsStreamingRef.current = isStreaming;
-  }, [isStreaming, tutorialActive, currentStep, advanceStep]);
-
-  // Tutorial: auto-advance from 'conversation-intro' to 'history' after pause
-  useEffect(() => {
-    if (tutorialActive && currentStep === 'conversation-intro') {
-      const timer = setTimeout(() => advanceStep(), 2500);
+    if (tutorialActive && currentStep === 'query-again') {
+      const timer = setTimeout(() => {
+        advanceStep(); // → 'history'
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [tutorialActive, currentStep, advanceStep]);
@@ -540,15 +543,28 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         historyOpenedRef.current = true;
       } else if (historyOpenedRef.current) {
         // Panel was open, now closed
-        advanceStep(); // → 'complete'
+        advanceStep(); // → 'new-convo'
         historyOpenedRef.current = false;
       }
     }
   }, [showHistory, tutorialActive, currentStep, advanceStep]);
 
+  // Callback for when expanded page modal closes (for tutorial)
+  const handleExpandedPageClose = useCallback(() => {
+    if (tutorialActive && currentStep === 'page-zoom') {
+      advanceStep(); // → 'query-again'
+    }
+  }, [tutorialActive, currentStep, advanceStep]);
+
+  // Tutorial suggested query for auto-submit
+  const TUTORIAL_QUERY = 'Show me all canopy elevations.';
+
   // Handle page selection from PlansPanel
   // Loads page into viewer - preserves agent if streaming
   const handlePageSelect = async (pageId: string, disciplineId: string, pageName: string) => {
+    // Check if we should auto-submit tutorial query (before completing step)
+    const shouldAutoSubmitTutorial = tutorialActive && currentStep === 'sidebar';
+
     // Tutorial: complete 'sidebar' step when user selects a page
     completeStep('sidebar');
 
@@ -614,6 +630,36 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           ...conversationItems,
         ];
       });
+
+      // Tutorial: auto-submit query after page loads
+      // This triggers the background agent flow - user stays on page, toast appears
+      if (shouldAutoSubmitTutorial) {
+        // Small delay to let the page render first
+        setTimeout(async () => {
+          // Create conversation and submit query
+          const newConv = await createAndBindConversation();
+          const conversationId = newConv?.id ?? null;
+
+          // Add user query to feed (will appear behind standalone page)
+          setFeedItems((prev) => [
+            ...prev,
+            {
+              type: 'user-query',
+              id: crypto.randomUUID(),
+              text: TUTORIAL_QUERY,
+              timestamp: Date.now(),
+            },
+          ]);
+          setSubmittedQuery(TUTORIAL_QUERY);
+
+          // Create agent toast for background notification
+          const toastId = addToast(TUTORIAL_QUERY, conversationId);
+          currentToastIdRef.current = toastId;
+
+          // Submit the query - will run as background agent since we're on standalone page
+          submitQuery(TUTORIAL_QUERY, conversationId ?? undefined, pageId);
+        }, 500);
+      }
     } catch (err) {
       console.error('Failed to load page for viewer:', err);
       setFeedItems([]); // Clear on error to show empty state
@@ -641,9 +687,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setSelectedPageId(null);  // Reset viewer to empty state
     setFeedItems([]);  // Clear feed
 
-    // Tutorial: advance from 'new-conversation' step
-    if (tutorialActive && currentStep === 'new-conversation') {
-      advanceStep(); // → 'conversation-intro'
+    // Tutorial: advance from 'new-convo' step to 'complete'
+    if (tutorialActive && currentStep === 'new-convo') {
+      advanceStep(); // → 'complete'
     }
   };
 
@@ -734,14 +780,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           streamingText={finalAnswer}
           streamingTrace={trace}
           currentTool={currentTool}
-          tutorialText={
-            tutorialActive && currentStep === 'welcome' ? "Let me show you around." :
-            tutorialActive && currentStep === 'sidebar' ? "Pick a sheet to get started." :
-            tutorialActive && currentStep === 'conversation-intro' ? "Now we're in a new conversation." :
-            tutorialActive && currentStep === 'history' ? (showHistory ? "Now close that." : "These are previous conversations") :
-            tutorialActive && currentStep === 'complete' ? "That's it! I'm pretty simple. Make an account so I can be your plans expert." :
-            undefined
-          }
+          onExpandedPageClose={handleExpandedPageClose}
         />
 
         {/* Floating expand button - shows when sidebar collapsed, shifts down when toast/indicator visible */}
@@ -822,10 +861,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                   isProcessing={isStreaming}
                   onFocus={() => {
                     setInputHasBeenFocused(true);
-                    // Advance from 'query' step to hide the input arrow
-                    if (tutorialActive && currentStep === 'query') {
-                      advanceStep(); // → 'responding' (no arrow)
-                    }
                   }}
                 />
               </div>
@@ -841,8 +876,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         <SessionControls
           onToggleHistory={() => setShowHistory(!showHistory)}
           isHistoryOpen={showHistory}
-          showSkipTutorial={tutorialActive}
-          onSkipTutorial={skipTutorial}
         />
 
         {/* Agent working toast stack - only shows when on file tree page with background agent */}

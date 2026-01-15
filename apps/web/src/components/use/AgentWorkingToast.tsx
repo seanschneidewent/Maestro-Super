@@ -121,7 +121,7 @@ export const AgentWorkingToast: React.FC<AgentWorkingToastProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-left-2 duration-200 max-w-[280px]">
+    <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-left-2 duration-200 max-w-[280px]" data-tutorial="agent-toast">
       {/* Blue query bubble */}
       <div className="bg-blue-600 text-white px-3 py-2 rounded-2xl shadow-md">
         <span className="text-sm">{truncatedQuery}</span>
@@ -143,6 +143,7 @@ export const AgentWorkingToast: React.FC<AgentWorkingToastProps> = ({
           className="rounded-xl border border-green-200 bg-green-50/80 backdrop-blur-sm px-3 py-2 shadow-sm
                      hover:bg-green-100 hover:border-green-300 transition-colors cursor-pointer
                      flex items-center gap-2"
+          data-tutorial="toast-complete-btn"
         >
           <Check size={14} className="text-green-600" />
           <span className="text-xs font-medium text-green-700">Complete!</span>

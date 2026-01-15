@@ -258,4 +258,15 @@ export interface FieldResponse {
 }
 
 // Tutorial types
-export type TutorialStep = 'welcome' | 'sidebar' | 'viewer' | 'query' | 'responding' | 'new-conversation' | 'conversation-intro' | 'history' | 'complete' | null;
+export type TutorialStep =
+  | 'welcome'
+  | 'sidebar'
+  | 'toast-working'
+  | 'toast-complete'
+  | 'thinking'
+  | 'page-zoom'
+  | 'query-again'
+  | 'history'
+  | 'new-convo'
+  | 'complete'
+  | null;

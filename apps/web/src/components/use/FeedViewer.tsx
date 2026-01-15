@@ -35,6 +35,7 @@ interface FeedViewerProps {
   streamingTrace?: AgentTraceStep[];
   currentTool?: string | null;
   tutorialText?: string;
+  onExpandedPageClose?: () => void;
 }
 
 // Cache for rendered page images (shared with PlanViewer if needed)
@@ -300,7 +301,8 @@ const PagesCluster: React.FC<{
   pages: AgentSelectedPage[];
   containerWidth: number;
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
-}> = ({ pages, containerWidth, onTap }) => {
+  isFirstCluster?: boolean;
+}> = ({ pages, containerWidth, onTap, isFirstCluster = false }) => {
   // Track loaded images and current loading index
   const [loadedImages, setLoadedImages] = useState<Map<string, PageImage>>(new Map());
   const [loadingIndex, setLoadingIndex] = useState(0);
@@ -347,6 +349,7 @@ const PagesCluster: React.FC<{
             isWaiting={isWaiting}
             containerWidth={containerWidth}
             onTap={onTap}
+            isFirstPage={isFirstCluster && index === 0}
           />
         );
       })}
@@ -362,7 +365,8 @@ const FeedPageItemDisplay: React.FC<{
   isWaiting: boolean;
   containerWidth: number;
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
-}> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap }) => {
+  isFirstPage?: boolean;
+}> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
   // Calculate display dimensions
   const displayDimensions = pageImage
     ? (() => {
@@ -413,6 +417,7 @@ const FeedPageItemDisplay: React.FC<{
           width: displayDimensions.width,
           height: displayDimensions.height,
         }}
+        {...(isFirstPage && { 'data-tutorial': 'first-page-result' })}
       >
         <img
           src={pageImage.dataUrl}
@@ -516,6 +521,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   streamingTrace = [],
   currentTool,
   tutorialText,
+  onExpandedPageClose,
 }) => {
   // Scroll container ref and auto-scroll logic
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -543,7 +549,8 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   // Handler for closing expanded view
   const handleCloseExpanded = useCallback(() => {
     setExpandedPage(null);
-  }, []);
+    onExpandedPageClose?.();
+  }, [onExpandedPageClose]);
 
   // Track scroll position to enable smart auto-scroll
   const handleScroll = useCallback(() => {
@@ -613,6 +620,9 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
     );
   }
 
+  // Track if we've seen the first pages cluster for tutorial targeting
+  let isFirstPagesCluster = true;
+
   return (
     <div
       ref={scrollContainerRef}
@@ -631,18 +641,22 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                 </div>
               );
 
-            case 'pages':
+            case 'pages': {
               // Pages render at full container width for maximum visibility
               // Uses sequential loading to avoid memory pressure
+              const isFirst = isFirstPagesCluster;
+              isFirstPagesCluster = false;
               return (
                 <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
                   <PagesCluster
                     pages={item.pages}
                     containerWidth={containerWidth}
                     onTap={handlePageTap}
+                    isFirstCluster={isFirst}
                   />
                 </div>
               );
+            }
 
             case 'text':
               return (
