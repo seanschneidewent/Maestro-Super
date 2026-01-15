@@ -129,15 +129,8 @@ function calculateTooltipPosition(
 
 // Arrow component pointing in specified direction
 const TooltipArrow: React.FC<{ direction: 'up' | 'down' | 'left' | 'right' }> = ({ direction }) => {
-  const rotations = {
-    up: 'rotate-0',
-    down: 'rotate-180',
-    left: '-rotate-90',
-    right: 'rotate-90',
-  };
-
   return (
-    <div className={`absolute ${rotations[direction]}`} style={{
+    <div className="absolute" style={{
       ...(direction === 'up' && { top: -10, left: '50%', transform: 'translateX(-50%)' }),
       ...(direction === 'down' && { bottom: -10, left: '50%', transform: 'translateX(-50%) rotate(180deg)' }),
       ...(direction === 'left' && { left: -10, top: '50%', transform: 'translateY(-50%) rotate(-90deg)' }),
@@ -207,39 +200,60 @@ export const TutorialOverlay: React.FC = () => {
   // For center screen (no target), show tooltip in center
   const isCentered = !targetSelector;
 
+  // Viewport dimensions
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
+
   return (
     <>
-      {/* Dimmed overlay with spotlight cutout */}
-      <div className="fixed inset-0 z-[60]" style={{ pointerEvents: 'none' }}>
-        <svg className="w-full h-full">
-          <defs>
-            <mask id="spotlight-mask">
-              {/* White = visible (dimmed), Black = hidden (spotlight) */}
-              <rect x="0" y="0" width="100%" height="100%" fill="white" />
-              {spotlightBounds && (
-                <rect
-                  x={spotlightBounds.x}
-                  y={spotlightBounds.y}
-                  width={spotlightBounds.width}
-                  height={spotlightBounds.height}
-                  rx="12"
-                  fill="black"
-                />
-              )}
-            </mask>
-          </defs>
-          {/* Dimmed background */}
-          <rect
-            x="0"
-            y="0"
-            width="100%"
-            height="100%"
-            fill="rgba(0, 0, 0, 0.7)"
-            mask="url(#spotlight-mask)"
-            style={{ pointerEvents: 'auto' }}
+      {/* Dimmed overlay using 4 divs around the spotlight (allows clicks through spotlight) */}
+      {spotlightBounds ? (
+        <>
+          {/* Top */}
+          <div
+            className="fixed bg-black/70 z-[60]"
+            style={{
+              top: 0,
+              left: 0,
+              right: 0,
+              height: Math.max(0, spotlightBounds.y),
+            }}
           />
-        </svg>
-      </div>
+          {/* Bottom */}
+          <div
+            className="fixed bg-black/70 z-[60]"
+            style={{
+              top: spotlightBounds.y + spotlightBounds.height,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          />
+          {/* Left */}
+          <div
+            className="fixed bg-black/70 z-[60]"
+            style={{
+              top: spotlightBounds.y,
+              left: 0,
+              width: Math.max(0, spotlightBounds.x),
+              height: spotlightBounds.height,
+            }}
+          />
+          {/* Right */}
+          <div
+            className="fixed bg-black/70 z-[60]"
+            style={{
+              top: spotlightBounds.y,
+              left: spotlightBounds.x + spotlightBounds.width,
+              right: 0,
+              height: spotlightBounds.height,
+            }}
+          />
+        </>
+      ) : (
+        /* Full overlay when no target (centered message) */
+        <div className="fixed inset-0 bg-black/70 z-[60]" />
+      )}
 
       {/* Spotlight glow ring */}
       {spotlightBounds && (
@@ -262,7 +276,6 @@ export const TutorialOverlay: React.FC = () => {
           style={{
             top: tooltipPosition.top,
             left: tooltipPosition.left,
-            pointerEvents: 'auto',
           }}
         >
           <TooltipArrow direction={tooltipPosition.arrowDirection} />
@@ -275,9 +288,7 @@ export const TutorialOverlay: React.FC = () => {
       {/* Centered tooltip (for complete step) */}
       {isCentered && (
         <div className="fixed inset-0 z-[62] flex items-center justify-center pointer-events-none">
-          <div
-            className="bg-white rounded-xl shadow-2xl px-6 py-5 max-w-[320px] animate-in fade-in zoom-in-95 duration-300 pointer-events-auto text-center"
-          >
+          <div className="bg-white rounded-xl shadow-2xl px-6 py-5 max-w-[320px] animate-in fade-in zoom-in-95 duration-300 pointer-events-auto text-center">
             <p className="text-slate-800 text-lg font-medium leading-relaxed">
               {stepConfig.text}
             </p>
@@ -289,7 +300,6 @@ export const TutorialOverlay: React.FC = () => {
       <button
         onClick={skipTutorial}
         className="fixed top-4 right-4 z-[63] p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
-        style={{ pointerEvents: 'auto' }}
       >
         <X size={20} className="text-slate-600" />
       </button>
