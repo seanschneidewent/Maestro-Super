@@ -39,7 +39,7 @@ export const SuggestedPrompts: React.FC<SuggestedPromptsProps> = ({
   showTutorialArrows = false
 }) => {
   return (
-    <div className="flex flex-col gap-2 mb-3 animate-fade-in">
+    <div className="flex flex-col gap-2 mb-3 animate-fade-in" data-tutorial="prompt-suggestions">
       <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
         <Sparkles size={12} className="text-cyan-500" />
         <span>Try asking</span>

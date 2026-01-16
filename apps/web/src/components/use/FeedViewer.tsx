@@ -614,7 +614,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   const standaloneItem = feedItems.find((item) => item.type === 'standalone-page');
   if (standaloneItem && standaloneItem.type === 'standalone-page') {
     return (
-      <div className="flex-1 overflow-hidden blueprint-grid">
+      <div className="flex-1 overflow-hidden blueprint-grid" data-tutorial="page-viewer">
         <StandalonePageViewer page={standaloneItem.page} />
       </div>
     );

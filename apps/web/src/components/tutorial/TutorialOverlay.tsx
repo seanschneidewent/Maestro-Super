@@ -5,7 +5,7 @@ import { TutorialStep } from '../../types';
 
 // Step configuration with target selectors and text
 interface StepConfig {
-  targetSelector: string | null; // null means center screen (no target)
+  targetSelector: string | null; // null means no target (cta step uses inline component)
   text: string;
   position: 'top' | 'bottom' | 'left' | 'right' | 'auto';
 }
@@ -16,55 +16,46 @@ const STEP_CONFIG: Partial<Record<NonNullable<TutorialStep>, StepConfig>> = {
     text: "Let me show you around.",
     position: 'right',
   },
-  sidebar: {
+  'pick-sheet': {
     targetSelector: '[data-tutorial="first-page"]',
     text: "Pick a sheet to get started.",
     position: 'right',
   },
-  'toast-working': {
-    targetSelector: '[data-tutorial="agent-toast"]',
-    text: "I'm finding what you need.",
-    position: 'bottom',
-  },
-  'toast-complete': {
-    targetSelector: '[data-tutorial="toast-complete-btn"]',
-    text: "Tap here to see what I found.",
-    position: 'bottom',
-  },
-  thinking: {
-    targetSelector: '[data-tutorial="thinking-section"]',
-    text: "Here's what I did and how long it took.",
+  'page-zoom': {
+    targetSelector: '[data-tutorial="page-viewer"]',
+    text: "Pinch to zoom in on the page.",
     position: 'left',
   },
-  'page-zoom': {
+  'prompt-suggestions': {
+    targetSelector: '[data-tutorial="prompt-suggestions"]',
+    text: "Try one of these.",
+    position: 'top',
+  },
+  'background-task': {
+    targetSelector: '[data-tutorial="agent-toast"]',
+    text: "This is me working. You can still switch pages.",
+    position: 'bottom',
+  },
+  'complete-task': {
+    targetSelector: '[data-tutorial="toast-complete-btn"]',
+    text: "Tap here when I'm done.",
+    position: 'bottom',
+  },
+  'result-page': {
     targetSelector: '[data-tutorial="first-page-result"]',
     text: "Tap any page to zoom in.",
     position: 'top',
   },
-  'query-again': {
-    targetSelector: '[data-tutorial="query-input"]',
-    text: "Ask me anything else.",
-    position: 'top',
-  },
-  history: {
-    targetSelector: '[data-tutorial="history-btn"]',
-    text: "Your conversations save here.",
-    position: 'bottom',
-  },
-  'new-convo': {
+  'new-session': {
     targetSelector: '[data-tutorial="new-conversation-btn"]',
     text: "Start fresh anytime.",
     position: 'top',
   },
-  complete: {
-    targetSelector: null, // Center screen
-    text: "That's it! Create an account.",
-    position: 'auto',
-  },
+  // 'cta' step has no target - it's an inline component in UseMode
 };
 
-// Padding around spotlight cutout
-const SPOTLIGHT_PADDING = 12;
+// Padding around highlight
+const HIGHLIGHT_PADDING = 8;
 
 // Calculate best position for tooltip based on target location
 function calculateTooltipPosition(
@@ -75,7 +66,7 @@ function calculateTooltipPosition(
   const viewportHeight = window.innerHeight;
   const tooltipWidth = 280;
   const tooltipHeight = 80;
-  const offset = 20;
+  const offset = 16;
 
   let position = preferredPosition;
 
@@ -99,23 +90,23 @@ function calculateTooltipPosition(
 
   switch (position) {
     case 'bottom':
-      top = targetRect.bottom + SPOTLIGHT_PADDING + offset;
+      top = targetRect.bottom + HIGHLIGHT_PADDING + offset;
       left = targetRect.left + targetRect.width / 2 - tooltipWidth / 2;
       arrowDirection = 'up';
       break;
     case 'top':
-      top = targetRect.top - SPOTLIGHT_PADDING - offset - tooltipHeight;
+      top = targetRect.top - HIGHLIGHT_PADDING - offset - tooltipHeight;
       left = targetRect.left + targetRect.width / 2 - tooltipWidth / 2;
       arrowDirection = 'down';
       break;
     case 'right':
       top = targetRect.top + targetRect.height / 2 - tooltipHeight / 2;
-      left = targetRect.right + SPOTLIGHT_PADDING + offset;
+      left = targetRect.right + HIGHLIGHT_PADDING + offset;
       arrowDirection = 'left';
       break;
     case 'left':
       top = targetRect.top + targetRect.height / 2 - tooltipHeight / 2;
-      left = targetRect.left - SPOTLIGHT_PADDING - offset - tooltipWidth;
+      left = targetRect.left - HIGHLIGHT_PADDING - offset - tooltipWidth;
       arrowDirection = 'right';
       break;
   }
@@ -181,15 +172,18 @@ export const TutorialOverlay: React.FC = () => {
     };
   }, [targetSelector]);
 
-  // Don't render if tutorial not active
+  // Don't render if tutorial not active or no step config
   if (!isActive || !stepConfig) return null;
 
-  // Calculate spotlight bounds (with padding)
-  const spotlightBounds = targetRect ? {
-    x: targetRect.left - SPOTLIGHT_PADDING,
-    y: targetRect.top - SPOTLIGHT_PADDING,
-    width: targetRect.width + SPOTLIGHT_PADDING * 2,
-    height: targetRect.height + SPOTLIGHT_PADDING * 2,
+  // Don't render overlay for 'cta' step - it uses inline component
+  if (currentStep === 'cta') return null;
+
+  // Calculate highlight bounds (with padding)
+  const highlightBounds = targetRect ? {
+    x: targetRect.left - HIGHLIGHT_PADDING,
+    y: targetRect.top - HIGHLIGHT_PADDING,
+    width: targetRect.width + HIGHLIGHT_PADDING * 2,
+    height: targetRect.height + HIGHLIGHT_PADDING * 2,
   } : null;
 
   // Calculate tooltip position
@@ -197,74 +191,19 @@ export const TutorialOverlay: React.FC = () => {
     ? calculateTooltipPosition(targetRect, stepConfig.position)
     : null;
 
-  // For center screen (no target), show tooltip in center
-  const isCentered = !targetSelector;
-
-  // Viewport dimensions
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
-
   return (
     <>
-      {/* Dimmed overlay using 4 divs around the spotlight (allows clicks through spotlight) */}
-      {spotlightBounds ? (
-        <>
-          {/* Top */}
-          <div
-            className="fixed bg-black/70 z-[60]"
-            style={{
-              top: 0,
-              left: 0,
-              right: 0,
-              height: Math.max(0, spotlightBounds.y),
-            }}
-          />
-          {/* Bottom */}
-          <div
-            className="fixed bg-black/70 z-[60]"
-            style={{
-              top: spotlightBounds.y + spotlightBounds.height,
-              left: 0,
-              right: 0,
-              bottom: 0,
-            }}
-          />
-          {/* Left */}
-          <div
-            className="fixed bg-black/70 z-[60]"
-            style={{
-              top: spotlightBounds.y,
-              left: 0,
-              width: Math.max(0, spotlightBounds.x),
-              height: spotlightBounds.height,
-            }}
-          />
-          {/* Right */}
-          <div
-            className="fixed bg-black/70 z-[60]"
-            style={{
-              top: spotlightBounds.y,
-              left: spotlightBounds.x + spotlightBounds.width,
-              right: 0,
-              height: spotlightBounds.height,
-            }}
-          />
-        </>
-      ) : (
-        /* Full overlay when no target (centered message) */
-        <div className="fixed inset-0 bg-black/70 z-[60]" />
-      )}
-
-      {/* Spotlight glow ring */}
-      {spotlightBounds && (
+      {/* Pulsing highlight glow on target - no shadow overlay */}
+      {highlightBounds && (
         <div
-          className="fixed z-[61] pointer-events-none rounded-xl border-2 border-cyan-400 animate-pulse"
+          className="fixed z-[61] pointer-events-none rounded-xl"
           style={{
-            left: spotlightBounds.x,
-            top: spotlightBounds.y,
-            width: spotlightBounds.width,
-            height: spotlightBounds.height,
-            boxShadow: '0 0 30px rgba(34, 211, 238, 0.5), 0 0 60px rgba(34, 211, 238, 0.3)',
+            left: highlightBounds.x,
+            top: highlightBounds.y,
+            width: highlightBounds.width,
+            height: highlightBounds.height,
+            border: '2px solid rgba(34, 211, 238, 0.8)',
+            animation: 'pulse-glow 2s ease-in-out infinite',
           }}
         />
       )}
@@ -285,17 +224,6 @@ export const TutorialOverlay: React.FC = () => {
         </div>
       )}
 
-      {/* Centered tooltip (for complete step) */}
-      {isCentered && (
-        <div className="fixed inset-0 z-[62] flex items-center justify-center pointer-events-none">
-          <div className="bg-white rounded-xl shadow-2xl px-6 py-5 max-w-[320px] animate-in fade-in zoom-in-95 duration-300 pointer-events-auto text-center">
-            <p className="text-slate-800 text-lg font-medium leading-relaxed">
-              {stepConfig.text}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Skip button */}
       <button
         onClick={skipTutorial}
@@ -303,6 +231,14 @@ export const TutorialOverlay: React.FC = () => {
       >
         <X size={20} className="text-slate-600" />
       </button>
+
+      {/* CSS for pulse animation */}
+      <style>{`
+        @keyframes pulse-glow {
+          0%, 100% { box-shadow: 0 0 12px rgba(34, 211, 238, 0.5); }
+          50% { box-shadow: 0 0 24px rgba(34, 211, 238, 0.8); }
+        }
+      `}</style>
     </>
   );
 };

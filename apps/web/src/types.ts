@@ -260,13 +260,12 @@ export interface FieldResponse {
 // Tutorial types
 export type TutorialStep =
   | 'welcome'
-  | 'sidebar'
-  | 'toast-working'
-  | 'toast-complete'
-  | 'thinking'
+  | 'pick-sheet'
   | 'page-zoom'
-  | 'query-again'
-  | 'history'
-  | 'new-convo'
-  | 'complete'
+  | 'prompt-suggestions'
+  | 'background-task'
+  | 'complete-task'
+  | 'result-page'
+  | 'new-session'
+  | 'cta'
   | null;
