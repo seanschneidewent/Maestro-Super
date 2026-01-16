@@ -734,6 +734,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           streamingText={finalAnswer}
           streamingTrace={trace}
           currentTool={currentTool}
+          tutorialStep={currentStep}
           onExpandedPageClose={handleExpandedPageClose}
         />
 

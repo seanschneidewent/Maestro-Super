@@ -35,6 +35,7 @@ interface FeedViewerProps {
   streamingTrace?: AgentTraceStep[];
   currentTool?: string | null;
   tutorialText?: string;
+  tutorialStep?: string | null;
   onExpandedPageClose?: () => void;
 }
 
@@ -521,6 +522,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   streamingTrace = [],
   currentTool,
   tutorialText,
+  tutorialStep,
   onExpandedPageClose,
 }) => {
   // Scroll container ref and auto-scroll logic
@@ -595,8 +597,12 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
     };
   }, []);
 
-  // Empty state
+  // Empty state - hide greeting during CTA step (modal covers it otherwise)
   if (feedItems.length === 0 && !isStreaming) {
+    // Don't show greeting during CTA step - the modal would cover it
+    if (tutorialStep === 'cta') {
+      return <div className="flex-1 blueprint-grid" />;
+    }
     const displayText = tutorialText || greeting;
     return (
       <div className="flex-1 flex items-center justify-center h-full blueprint-grid">

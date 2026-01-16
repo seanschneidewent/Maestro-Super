@@ -35,7 +35,7 @@ const STEP_CONFIG: Partial<Record<NonNullable<TutorialStep>, StepConfig>> = {
   },
   'background-task': {
     targetSelector: '[data-tutorial="agent-toast"]',
-    text: "This is me working. You can still switch pages.",
+    text: "I'll work in the background while you explore.",
     position: 'bottom',
   },
   'complete-task': {
@@ -367,10 +367,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
         />
       )}
 
-      {/* Tooltip card */}
+      {/* Tooltip card - z-40 so expanded modal (z-50) covers it */}
       {tooltipPosition && (
         <div
-          className="fixed z-[62] bg-white rounded-xl shadow-2xl px-5 py-4 max-w-[280px] animate-in fade-in slide-in-from-bottom-2 duration-300"
+          className="fixed z-40 bg-white rounded-xl shadow-2xl px-5 py-4 max-w-[280px] animate-in fade-in slide-in-from-bottom-2 duration-300"
           style={{
             top: tooltipPosition.top,
             left: tooltipPosition.left,
