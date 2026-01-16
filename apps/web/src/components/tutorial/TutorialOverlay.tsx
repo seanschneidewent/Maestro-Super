@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { X, ChevronLeft } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import { useTutorial } from '../../hooks/useTutorial';
 import { TutorialStep } from '../../types';
 
 // Step configuration with target selectors and text
 interface StepConfig {
-  targetSelector: string | null; // null means centered modal
+  targetSelector: string | null;
   text: string;
   position: 'top' | 'bottom' | 'left' | 'right' | 'auto';
   isCenteredModal?: boolean;
@@ -13,9 +13,9 @@ interface StepConfig {
 
 const STEP_CONFIG: Partial<Record<NonNullable<TutorialStep>, StepConfig>> = {
   welcome: {
-    targetSelector: null,
+    targetSelector: '[data-tutorial="sidebar-expand"]',
     text: "Let me show you around.",
-    position: 'auto',
+    position: 'right',
     isCenteredModal: true,
   },
   'pick-sheet': {
@@ -141,23 +141,51 @@ const TooltipArrow: React.FC<{ direction: 'up' | 'down' | 'left' | 'right' }> = 
   );
 };
 
+// Typewriter text with blue dot (like MaestroText)
+const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const intervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setDisplayedText('');
+    let charIndex = 0;
+
+    intervalRef.current = window.setInterval(() => {
+      if (charIndex < text.length) {
+        setDisplayedText(text.slice(0, charIndex + 1));
+        charIndex++;
+      } else {
+        if (intervalRef.current !== null) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }
+    }, 30);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [text]);
+
+  return (
+    <div className="flex items-center gap-3 justify-center">
+      <span className="text-cyan-500 text-xl">●</span>
+      <span className="text-slate-800 text-lg font-medium whitespace-nowrap">
+        {displayedText}
+      </span>
+    </div>
+  );
+};
+
 // Centered modal component for welcome and CTA steps
 const CenteredModal: React.FC<{
   children: React.ReactNode;
-  showArrow?: boolean;
-}> = ({ children, showArrow = false }) => {
+}> = ({ children }) => {
   return (
     <div className="fixed inset-0 flex items-center justify-center z-[62] pointer-events-none">
       <div className="relative pointer-events-auto">
-        {/* Bouncing arrow pointing left toward sidebar */}
-        {showArrow && (
-          <div className="absolute -left-16 top-1/2 -translate-y-1/2">
-            <ChevronLeft
-              size={40}
-              className="text-cyan-500 animate-bounce-horizontal"
-            />
-          </div>
-        )}
         <div
           className="bg-white rounded-2xl shadow-2xl px-8 py-6 max-w-sm text-center"
           style={{
@@ -177,7 +205,7 @@ interface TutorialOverlayProps {
 }
 
 export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }) => {
-  const { currentStep, isActive, skipTutorial } = useTutorial();
+  const { currentStep, isActive } = useTutorial();
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
 
   const stepConfig = currentStep ? STEP_CONFIG[currentStep] : null;
@@ -217,23 +245,61 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
   // Don't render if tutorial not active or no step config
   if (!isActive || !stepConfig) return null;
 
-  // Welcome step - centered modal with bouncing arrow
+  // Calculate highlight bounds (with padding)
+  const highlightBounds = targetRect ? {
+    x: targetRect.left - HIGHLIGHT_PADDING,
+    y: targetRect.top - HIGHLIGHT_PADDING,
+    width: targetRect.width + HIGHLIGHT_PADDING * 2,
+    height: targetRect.height + HIGHLIGHT_PADDING * 2,
+  } : null;
+
+  // Welcome step - centered modal with typewriter text + highlight on sidebar button + arrow
   if (currentStep === 'welcome') {
+    // Calculate arrow position pointing at the sidebar button
+    const arrowPosition = targetRect ? {
+      left: targetRect.right + 20,
+      top: targetRect.top + targetRect.height / 2,
+    } : null;
+
     return (
       <>
-        <CenteredModal showArrow={true}>
-          <p className="text-slate-800 text-lg font-medium">
-            {stepConfig.text}
-          </p>
-        </CenteredModal>
+        {/* Pulsing highlight glow on sidebar expand button */}
+        {highlightBounds && (
+          <div
+            className="fixed z-40 pointer-events-none rounded-xl"
+            style={{
+              left: highlightBounds.x,
+              top: highlightBounds.y,
+              width: highlightBounds.width,
+              height: highlightBounds.height,
+              border: '2px solid rgba(34, 211, 238, 0.8)',
+              animation: 'pulse-glow 2s ease-in-out infinite',
+            }}
+          />
+        )}
 
-        {/* Skip button */}
-        <button
-          onClick={skipTutorial}
-          className="fixed top-4 left-4 z-[63] p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
-        >
-          <X size={20} className="text-slate-600" />
-        </button>
+        {/* Bouncing arrow pointing at sidebar button */}
+        {arrowPosition && (
+          <div
+            className="fixed z-[62] pointer-events-none"
+            style={{
+              left: arrowPosition.left,
+              top: arrowPosition.top,
+              transform: 'translateY(-50%)',
+            }}
+          >
+            <ChevronLeft
+              size={36}
+              className="text-cyan-500"
+              style={{ animation: 'bounce-horizontal 1s ease-in-out infinite' }}
+            />
+          </div>
+        )}
+
+        {/* Centered modal with typewriter text */}
+        <CenteredModal>
+          <TypewriterText text={stepConfig.text} />
+        </CenteredModal>
 
         {/* CSS for animations */}
         <style>{`
@@ -242,18 +308,15 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
             50% { box-shadow: 0 0 24px rgba(34, 211, 238, 0.8); }
           }
           @keyframes bounce-horizontal {
-            0%, 100% { transform: translateX(0) translateY(-50%); }
-            50% { transform: translateX(-10px) translateY(-50%); }
-          }
-          .animate-bounce-horizontal {
-            animation: bounce-horizontal 1s ease-in-out infinite;
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(-8px); }
           }
         `}</style>
       </>
     );
   }
 
-  // CTA step - centered modal with button
+  // CTA step - centered modal with button (no skip button needed here)
   if (currentStep === 'cta') {
     return (
       <>
@@ -271,14 +334,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
           )}
         </CenteredModal>
 
-        {/* Skip button */}
-        <button
-          onClick={skipTutorial}
-          className="fixed top-4 left-4 z-[63] p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
-        >
-          <X size={20} className="text-slate-600" />
-        </button>
-
         {/* CSS for animations */}
         <style>{`
           @keyframes pulse-glow {
@@ -290,15 +345,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
     );
   }
 
-  // Calculate highlight bounds (with padding)
-  const highlightBounds = targetRect ? {
-    x: targetRect.left - HIGHLIGHT_PADDING,
-    y: targetRect.top - HIGHLIGHT_PADDING,
-    width: targetRect.width + HIGHLIGHT_PADDING * 2,
-    height: targetRect.height + HIGHLIGHT_PADDING * 2,
-  } : null;
-
-  // Calculate tooltip position
+  // Calculate tooltip position for standard steps
   const tooltipPosition = targetRect
     ? calculateTooltipPosition(targetRect, stepConfig.position)
     : null;
@@ -335,14 +382,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
           </p>
         </div>
       )}
-
-      {/* Skip button - positioned top-left to avoid overlap with expanded page modal close button */}
-      <button
-        onClick={skipTutorial}
-        className="fixed top-4 left-4 z-[63] p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
-      >
-        <X size={20} className="text-slate-600" />
-      </button>
 
       {/* CSS for pulse animation */}
       <style>{`

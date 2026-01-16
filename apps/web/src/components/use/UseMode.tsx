@@ -109,7 +109,7 @@ interface UseModeProps {
 export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const queryClient = useQueryClient();
   const { showError } = useToast();
-  const { currentStep, completeStep, advanceStep, isActive: tutorialActive, hasCompleted } = useTutorial();
+  const { currentStep, completeStep, advanceStep, isActive: tutorialActive, hasCompleted, skipTutorial } = useTutorial();
 
   // Selected page state
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -823,6 +823,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
         <SessionControls
           onToggleHistory={() => setShowHistory(!showHistory)}
           isHistoryOpen={showHistory}
+          showSkipTutorial={tutorialActive}
+          onSkipTutorial={skipTutorial}
         />
 
         {/* Agent working toast stack - only shows when on file tree page with background agent */}
