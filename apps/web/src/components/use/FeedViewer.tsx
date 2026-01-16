@@ -162,7 +162,8 @@ const ExpandedPageModal: React.FC<{
   page: AgentSelectedPage;
   pageImage: PageImage;
   onClose: () => void;
-}> = ({ page, pageImage, onClose }) => {
+  tutorialStep?: string | null;
+}> = ({ page, pageImage, onClose, tutorialStep }) => {
   // Container size for fit calculation
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,13 +216,26 @@ const ExpandedPageModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm">
-      {/* Close button */}
+      {/* Close button - highlight during tutorial */}
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors"
+        className={`absolute top-4 right-4 z-10 p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors ${
+          tutorialStep === 'result-page' ? 'ring-2 ring-cyan-400' : ''
+        }`}
+        style={tutorialStep === 'result-page' ? { animation: 'pulse-glow 2s ease-in-out infinite' } : undefined}
       >
         <X size={24} className="text-slate-700" />
       </button>
+
+      {/* CSS for tutorial pulse animation */}
+      {tutorialStep === 'result-page' && (
+        <style>{`
+          @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 12px rgba(34, 211, 238, 0.5); }
+            50% { box-shadow: 0 0 24px rgba(34, 211, 238, 0.8); }
+          }
+        `}</style>
+      )}
 
       {/* Page name header */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
@@ -747,6 +761,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
           page={expandedPage.page}
           pageImage={expandedPage.pageImage}
           onClose={handleCloseExpanded}
+          tutorialStep={tutorialStep}
         />
       )}
     </div>
