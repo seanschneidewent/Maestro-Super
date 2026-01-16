@@ -55,7 +55,7 @@ const STEP_CONFIG: Partial<Record<NonNullable<TutorialStep>, StepConfig>> = {
   },
   cta: {
     targetSelector: null,
-    text: "That's it! Create an account to save your work.",
+    text: "Keep playing around! Create an account when you're ready.",
     position: 'auto',
     isCenteredModal: true,
   },
@@ -172,7 +172,7 @@ const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
   return (
     <div className="flex items-center gap-3 justify-center">
       <span className="text-cyan-500 text-xl">●</span>
-      <span className="text-slate-800 text-lg font-medium whitespace-nowrap">
+      <span className="text-slate-800 text-lg font-medium">
         {displayedText}
       </span>
     </div>

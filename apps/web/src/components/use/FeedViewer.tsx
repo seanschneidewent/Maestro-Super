@@ -611,10 +611,10 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
     };
   }, []);
 
-  // Empty state - hide greeting during CTA step (modal covers it otherwise)
+  // Empty state - hide greeting during tutorial modal steps (modal covers it otherwise)
   if (feedItems.length === 0 && !isStreaming) {
-    // Don't show greeting during CTA step - the modal would cover it
-    if (tutorialStep === 'cta') {
+    // Don't show greeting during CTA or pick-sheet steps - the modal would cover it
+    if (tutorialStep === 'cta' || tutorialStep === 'pick-sheet') {
       return <div className="flex-1 blueprint-grid" />;
     }
     const displayText = tutorialText || greeting;
