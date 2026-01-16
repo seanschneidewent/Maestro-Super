@@ -441,7 +441,7 @@ const App: React.FC = () => {
           <ErrorBoundary>
             <TutorialProvider>
               <AgentToastProvider>
-                <TutorialOverlay />
+                <TutorialOverlay onGetStarted={handleGetStarted} />
                 <UseMode
                   mode={mode}
                   setMode={setMode}

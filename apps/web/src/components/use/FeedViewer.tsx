@@ -628,6 +628,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
       ref={scrollContainerRef}
       className="flex-1 overflow-y-auto blueprint-grid px-6 pt-8 pb-48 flex flex-col items-center"
       onScroll={handleScroll}
+      data-scroll-container
     >
       <div className="space-y-6 w-full" style={{ maxWidth: containerWidth }}>
         {feedItems.map((item) => {

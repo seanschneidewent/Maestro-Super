@@ -455,6 +455,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       setShowHistory(false);
       // Remove standalone-page items to show conversation content
       setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
+      // Force scroll to top
+      setTimeout(() => {
+        const scrollContainer = document.querySelector('[data-scroll-container]');
+        scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
       return;
     }
 
@@ -468,6 +473,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       }
       // Set title AFTER restore (which clears it) so we have the fetched title
       setLocalConversationTitle(conversation.title ?? null);
+
+      // Force scroll to top when navigating from toast
+      setTimeout(() => {
+        const scrollContainer = document.querySelector('[data-scroll-container]');
+        scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
     } catch (err) {
       console.error('Failed to navigate to conversation:', err);
       showError('Failed to load conversation. Please try again.');
@@ -740,18 +751,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           </button>
         )}
 
-
-        {/* Centered sign-up button for tutorial cta step */}
-        {tutorialActive && currentStep === 'cta' && onGetStarted && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
-            <button
-              onClick={onGetStarted}
-              className="pointer-events-auto px-6 py-3 bg-cyan-500 text-white rounded-xl font-medium text-lg hover:bg-cyan-600 transition-colors shadow-xl mt-24"
-            >
-              Create Account
-            </button>
-          </div>
-        )}
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
