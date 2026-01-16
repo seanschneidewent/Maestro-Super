@@ -1,5 +1,17 @@
 # CLAUDE.md - Instructions for Claude Code
 
+## Session Initialization
+
+**At the start of EVERY new session, run these commands:**
+
+```bash
+cd claude-memory && ./scripts/sync-memory.sh && cat CONTEXT.md
+```
+
+This syncs your persistent memory from Supabase and loads the current context. Do this before any other work.
+
+---
+
 ## Project Overview
 
 Maestro Super is a clean rewrite of a construction plan analysis system. One app, two modes: Setup (draw boxes, process, commit) and Use (query plans, get AI walkthroughs).
