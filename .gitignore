@@ -40,3 +40,7 @@ uploads/
 
 # Supabase
 .supabase/
+
+# Claude Memory
+claude-memory/.env
+claude-memory/CONTEXT.md
