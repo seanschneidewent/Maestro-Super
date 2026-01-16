@@ -316,14 +316,77 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ onGetStarted }
     );
   }
 
-  // CTA step - centered modal with button (no skip button needed here)
+  // Pick-sheet step - centered modal with typewriter text + highlight on first page + arrow
+  if (currentStep === 'pick-sheet') {
+    // Calculate arrow position pointing at the first page
+    const arrowPosition = targetRect ? {
+      left: targetRect.right + 20,
+      top: targetRect.top + targetRect.height / 2,
+    } : null;
+
+    return (
+      <>
+        {/* Pulsing highlight glow on first page */}
+        {highlightBounds && (
+          <div
+            className="fixed z-40 pointer-events-none rounded-xl"
+            style={{
+              left: highlightBounds.x,
+              top: highlightBounds.y,
+              width: highlightBounds.width,
+              height: highlightBounds.height,
+              border: '2px solid rgba(34, 211, 238, 0.8)',
+              animation: 'pulse-glow 2s ease-in-out infinite',
+            }}
+          />
+        )}
+
+        {/* Bouncing arrow pointing at first page */}
+        {arrowPosition && (
+          <div
+            className="fixed z-[62] pointer-events-none"
+            style={{
+              left: arrowPosition.left,
+              top: arrowPosition.top,
+              transform: 'translateY(-50%)',
+            }}
+          >
+            <ChevronLeft
+              size={36}
+              className="text-cyan-500"
+              style={{ animation: 'bounce-horizontal 1s ease-in-out infinite' }}
+            />
+          </div>
+        )}
+
+        {/* Centered modal with typewriter text */}
+        <CenteredModal>
+          <TypewriterText text={stepConfig.text} />
+        </CenteredModal>
+
+        {/* CSS for animations */}
+        <style>{`
+          @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 12px rgba(34, 211, 238, 0.5); }
+            50% { box-shadow: 0 0 24px rgba(34, 211, 238, 0.8); }
+          }
+          @keyframes bounce-horizontal {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(-8px); }
+          }
+        `}</style>
+      </>
+    );
+  }
+
+  // CTA step - centered modal with typewriter text + button
   if (currentStep === 'cta') {
     return (
       <>
         <CenteredModal>
-          <p className="text-slate-800 text-lg font-medium mb-4">
-            {stepConfig.text}
-          </p>
+          <div className="mb-4">
+            <TypewriterText text={stepConfig.text} />
+          </div>
           {onGetStarted && (
             <button
               onClick={onGetStarted}

@@ -26,7 +26,7 @@ export function SessionControls({
           onClick={onSkipTutorial}
           className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
         >
-          Skip
+          Exit Tutorial
         </button>
       )}
       <button
