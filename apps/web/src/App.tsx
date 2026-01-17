@@ -37,6 +37,8 @@ const App: React.FC = () => {
 
   // Track when we intentionally want to show login (not auto-sign-in anonymously)
   const pendingLoginRef = useRef(false);
+  // Track current user ID to avoid reloading project on token refresh
+  const currentUserIdRef = useRef<string | null>(null);
 
   // Persistent state for Setup mode (survives mode switches)
   const localFileMapRef = useRef<Map<string, File>>(new Map());
@@ -53,6 +55,7 @@ const App: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session) {
+        currentUserIdRef.current = session.user.id;
         if (isAnonymousUser(session)) {
           setMode(AppMode.DEMO);
         } else {
@@ -84,10 +87,15 @@ const App: React.FC = () => {
           setMode(AppMode.DEMO);
         } else {
           pendingLoginRef.current = false; // Clear flag on real login
-          setProject(null); // Clear to force re-fetch for new user
+          // Only clear project if user actually changed (not just token refresh)
+          if (currentUserIdRef.current !== session.user.id) {
+            setProject(null);
+          }
+          currentUserIdRef.current = session.user.id;
           setMode(AppMode.USE);
         }
       } else if (event === 'SIGNED_OUT') {
+        currentUserIdRef.current = null;
         setProject(null);
         // Check if this is intentional (user clicked "Get Started")
         if (pendingLoginRef.current) {
