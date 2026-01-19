@@ -3,7 +3,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -200,6 +200,7 @@ def hide_query(
 async def stream_query(
     project_id: str,
     data: AgentQueryRequest,
+    request: Request,
     user: User = Depends(check_rate_limit_or_anon),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
@@ -306,6 +307,11 @@ async def stream_query(
             async for event in run_agent_query(
                 db, project_id, data.query, history_messages=history_messages, viewing_context=viewing_context
             ):
+                # Check if client disconnected - stop processing to save resources
+                if await request.is_disconnected():
+                    logger.info(f"Client disconnected for query {query_id}, stopping stream")
+                    break
+
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
                     usage = event.get("usage", {})

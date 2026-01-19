@@ -1,8 +1,16 @@
 """Query agent tools for retrieving construction plan context."""
 
+import logging
+from datetime import datetime, timedelta
 from typing import Callable
 
 from sqlalchemy.orm import Session, joinedload
+
+logger = logging.getLogger(__name__)
+
+# Simple time-based cache for project structure
+_project_structure_cache: dict[str, tuple[dict, datetime]] = {}
+CACHE_TTL = timedelta(minutes=5)
 
 from app.models.discipline import Discipline
 from app.models.page import Page
@@ -287,6 +295,90 @@ async def get_discipline_overview(
     )
 
 
+async def _get_project_structure_impl(db: Session, project_id: str) -> dict | None:
+    """
+    Internal implementation - get lightweight project structure WITHOUT loading all pointers.
+
+    This is optimized for the agent prefetch - returns discipline/page info
+    without the expensive pointer data. Much faster than list_project_pages.
+    """
+    # Only load disciplines and pages - NO pointers
+    disciplines = (
+        db.query(Discipline)
+        .options(joinedload(Discipline.pages))
+        .filter(Discipline.project_id == project_id)
+        .all()
+    )
+
+    if not disciplines:
+        return None
+
+    return {
+        "disciplines": [
+            {
+                "discipline_id": str(d.id),
+                "code": d.name,
+                "name": d.display_name,
+                "page_count": len(d.pages),
+                "pages": [
+                    {
+                        "page_id": str(p.id),
+                        "sheet_number": p.page_name,
+                        "title": p.page_title,
+                    }
+                    for p in sorted(d.pages, key=lambda x: x.page_name)[:30]  # Limit to 30 pages per discipline
+                ],
+            }
+            for d in sorted(disciplines, key=lambda x: x.display_name)
+        ],
+        "total_pages": sum(len(d.pages) for d in disciplines),
+    }
+
+
+async def get_project_structure_summary(db: Session, project_id: str) -> dict | None:
+    """
+    Get lightweight project structure with 5-minute caching.
+
+    Args:
+        db: Database session
+        project_id: Project UUID
+
+    Returns:
+        Dict with disciplines and pages (no pointers), or None if not found
+    """
+    now = datetime.utcnow()
+
+    # Check cache
+    if project_id in _project_structure_cache:
+        cached, cached_at = _project_structure_cache[project_id]
+        if now - cached_at < CACHE_TTL:
+            logger.debug(f"Cache hit for project structure: {project_id}")
+            return cached
+
+    # Cache miss - fetch from DB
+    logger.debug(f"Cache miss for project structure: {project_id}")
+    result = await _get_project_structure_impl(db, project_id)
+
+    # Store in cache (even None results, to avoid repeated queries)
+    if result is not None:
+        _project_structure_cache[project_id] = (result, now)
+
+    return result
+
+
+def invalidate_project_structure_cache(project_id: str | None = None) -> None:
+    """
+    Invalidate the project structure cache.
+
+    Args:
+        project_id: If provided, only invalidate for this project. Otherwise, clear all.
+    """
+    if project_id:
+        _project_structure_cache.pop(project_id, None)
+    else:
+        _project_structure_cache.clear()
+
+
 async def list_project_pages(db: Session, project_id: str) -> ProjectPages | None:
     """
     Get full map of project with all disciplines, pages, and pointer titles.
@@ -458,6 +550,7 @@ TOOL_REGISTRY: dict[str, Callable] = {
     "get_page_context": get_page_context,
     "get_discipline_overview": get_discipline_overview,
     "list_project_pages": list_project_pages,
+    "get_project_structure_summary": get_project_structure_summary,
     "get_references_to_page": get_references_to_page,
     "select_pages": select_pages,
     "select_pointers": select_pointers,

@@ -34,8 +34,16 @@ def get_engine() -> Engine:
         url,
         pool_pre_ping=True,
         pool_recycle=300,  # Recycle connections every 5 min to prevent stale state
-        pool_size=5,
-        max_overflow=10,
+        pool_size=10,       # Increased from 5 to handle concurrent requests
+        max_overflow=20,    # Increased from 10 for burst capacity
+        pool_timeout=10,    # Wait max 10s for connection from pool
+        connect_args={
+            "connect_timeout": 10,      # 10s connection timeout
+            "keepalives": 1,            # Enable TCP keepalives
+            "keepalives_idle": 30,      # Start keepalives after 30s idle
+            "keepalives_interval": 10,  # Send keepalive every 10s
+            "keepalives_count": 5,      # Drop after 5 failed keepalives
+        },
         echo=False,
     )
 

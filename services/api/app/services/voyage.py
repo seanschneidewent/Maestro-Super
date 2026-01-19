@@ -1,5 +1,6 @@
 """Voyage AI embedding service for pointer semantic search."""
 
+import asyncio
 import logging
 
 import voyageai
@@ -8,6 +9,9 @@ from app.config import get_settings
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
+
+# Timeout for Voyage API calls (seconds)
+VOYAGE_TIMEOUT = 10.0
 
 
 def _get_voyage_client() -> voyageai.Client:
@@ -18,11 +22,24 @@ def _get_voyage_client() -> voyageai.Client:
     return voyageai.Client(api_key=settings.voyage_api_key)
 
 
-async def _embed_text_impl(text: str) -> list[float]:
-    """Internal implementation of text embedding."""
+def _embed_text_sync(text: str) -> list[float]:
+    """Synchronous implementation of text embedding (runs in thread pool)."""
     client = _get_voyage_client()
     response = client.embed([text], model="voyage-3")
     return response.embeddings[0]
+
+
+async def _embed_text_impl(text: str) -> list[float]:
+    """Internal implementation of text embedding with timeout."""
+    try:
+        # Run sync Voyage client in thread pool with timeout
+        return await asyncio.wait_for(
+            asyncio.to_thread(_embed_text_sync, text),
+            timeout=VOYAGE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"Voyage API timeout after {VOYAGE_TIMEOUT}s")
+        raise TimeoutError(f"Voyage API timeout after {VOYAGE_TIMEOUT}s")
 
 
 async def embed_text(text: str) -> list[float]:
@@ -37,8 +54,9 @@ async def embed_text(text: str) -> list[float]:
     return await with_retry(
         _embed_text_impl,
         text,
-        max_attempts=3,
-        base_delay=1.0,
+        max_attempts=2,      # Reduced from 3 for faster failure
+        base_delay=0.5,      # Reduced from 1.0
+        max_delay=5.0,       # Cap retry delay
         exceptions=(Exception,),
     )
 

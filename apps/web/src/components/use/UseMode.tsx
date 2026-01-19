@@ -13,7 +13,7 @@ import { useTutorial } from '../../hooks/useTutorial';
 import {
   QueryInput,
   SessionControls,
-  useFieldStream,
+  useQueryManager,
   QueryHistoryPanel,
   AgentSelectedPage,
   NewConversationButton,
@@ -157,12 +157,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   // Feed items for vertical scroll view
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
 
-  // Track previous streaming state to detect completion
-  const wasStreamingRef = useRef(false);
-
-  // Agent toast for background query notifications
-  const { toasts, addToast, markComplete, dismissToast } = useAgentToast();
-  const currentToastIdRef = useRef<string | null>(null);
+  // Agent toasts - for checking if any are showing (used by ConversationIndicator)
+  const { toasts } = useAgentToast();
 
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
@@ -234,21 +230,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     setActiveQueryId(query.queryId);
   }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId]);
 
-  // Field stream hook
+  // Multi-query manager - supports concurrent background queries
   const {
     submitQuery,
-    isStreaming,
-    thinkingText,
-    finalAnswer,
-    displayTitle,
-    currentQueryId,
-    trace,
-    selectedPages,
-    currentTool,
-    error,
+    activeQuery,
+    runningCount,
     reset: resetStream,
     restore,
-  } = useFieldStream({
+    loadPages,
+  } = useQueryManager({
     projectId,
     renderedPages,
     pageMetadata,
@@ -256,19 +246,18 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     onQueryComplete: handleQueryComplete,
   });
 
-  // Detect streaming completion to mark toast complete
-  // Note: Feed items are now added in handleQueryComplete callback
-  useEffect(() => {
-    // Streaming just ended (true → false)
-    if (wasStreamingRef.current && !isStreaming) {
-      // Mark agent toast as complete
-      if (currentToastIdRef.current) {
-        markComplete(currentToastIdRef.current);
-        currentToastIdRef.current = null;
-      }
-    }
-    wasStreamingRef.current = isStreaming;
-  }, [isStreaming, markComplete]);
+  // Derive state from active query
+  const isStreaming = activeQuery?.status === 'streaming';
+  const thinkingText = activeQuery?.thinkingText ?? '';
+  const finalAnswer = activeQuery?.finalAnswer ?? '';
+  const displayTitle = activeQuery?.displayTitle ?? null;
+  const currentQueryId = activeQuery?.id ?? null;
+  const trace = activeQuery?.trace ?? [];
+  const selectedPages = activeQuery?.selectedPages ?? [];
+  const currentTool = activeQuery?.currentTool ?? null;
+  const error = activeQuery?.error ?? null;
+
+  // Toast management is now handled internally by useQueryManager
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback(async (prompt: string) => {
@@ -298,11 +287,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
     ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
-    // Create agent toast for background notification
-    const toastId = addToast(prompt, conversationId);
-    currentToastIdRef.current = toastId;
+    // Toast management handled by useQueryManager
     submitQuery(prompt, conversationId ?? undefined, selectedPageId);
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, addToast, selectedPageId, tutorialActive, currentStep, advanceStep]);
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -799,9 +786,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
                       ]);
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
-                      // Create agent toast for background notification
-                      const toastId = addToast(trimmedQuery, conversationId);
-                      currentToastIdRef.current = toastId;
+                      // Toast management handled by useQueryManager
                       submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId);
                       setQueryInput('');
                     }
