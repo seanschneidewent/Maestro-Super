@@ -1,6 +1,7 @@
 import { ContextMindMap } from '../mind-map';
 import { DisciplineDetail } from './DisciplineDetail';
 import { PageDetail } from './PageDetail';
+import { PageContextView } from './PageContextView';
 import { PointerDetail } from './PointerDetail';
 import type { ProjectHierarchy, DisciplineInHierarchy, PageInHierarchy } from '../../../types';
 
@@ -127,19 +128,10 @@ export function ContextPanel({
   if (panelView.type === 'page') {
     const discipline = getDiscipline(panelView.disciplineId);
     return (
-      <PageDetail
+      <PageContextView
         pageId={panelView.pageId}
         disciplineName={discipline?.displayName || 'Unknown'}
         onBack={goBack}
-        onPointerClick={(pointerId) => {
-          setPanelView({
-            type: 'pointer',
-            pointerId,
-            pageId: panelView.pageId,
-            disciplineId: panelView.disciplineId,
-          });
-          onHighlightPointer?.(pointerId);
-        }}
         onViewPage={() => {
           onNavigateToPage(panelView.pageId);
         }}

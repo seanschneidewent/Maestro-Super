@@ -123,6 +123,20 @@ export interface PointerSummary {
   title: string;
 }
 
+// Detail extracted from sheet-analyzer processing
+export interface DetailSummary {
+  id: string;
+  title: string;
+  number: string | null;
+  shows: string | null;
+  materials: string[];
+  dimensions: string[];
+  notes: string | null;
+}
+
+// Processing status for Brain Mode
+export type PageProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
 export interface PageInHierarchy {
   id: string;
   pageName: string;
@@ -131,6 +145,9 @@ export interface PageInHierarchy {
   processedPass2: boolean;
   pointerCount: number;
   pointers: PointerSummary[];
+  // Brain Mode fields
+  processingStatus?: PageProcessingStatus;
+  details?: DetailSummary[];
 }
 
 export interface DisciplineInHierarchy {

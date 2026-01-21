@@ -46,6 +46,12 @@ class PageResponse(BaseModel):
     full_page_text: str | None = Field(default=None, alias="fullPageText")
     ocr_data: list[dict] | None = Field(default=None, alias="ocrData")
     processed_ocr: bool = Field(default=False, alias="processedOcr")
+    # Brain Mode fields (sheet-analyzer pipeline)
+    semantic_index: dict | None = Field(default=None, alias="semanticIndex")
+    context_markdown: str | None = Field(default=None, alias="contextMarkdown")
+    details: list[dict] | None = Field(default=None, alias="details")
+    processing_status: str | None = Field(default="pending", alias="processingStatus")
+    processed_at: datetime | None = Field(default=None, alias="processedAt")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 

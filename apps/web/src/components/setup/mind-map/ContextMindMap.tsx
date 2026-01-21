@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-import { ProjectNode, DisciplineNode, PageNode, PointerNode } from './nodes';
+import { ProjectNode, DisciplineNode, PageNode, PointerNode, DetailNode } from './nodes';
 import { layoutHierarchy, getInitialExpandedState } from './layout';
 import { NODE_DIMENSIONS } from './types';
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
@@ -22,6 +22,7 @@ const nodeTypes: NodeTypes = {
   discipline: DisciplineNode,
   page: PageNode,
   pointer: PointerNode,
+  detail: DetailNode,
 };
 
 interface ContextMindMapProps {
@@ -30,6 +31,7 @@ interface ContextMindMapProps {
   onPageClick?: (pageId: string, disciplineId: string) => void;
   onPointerClick?: (pointerId: string, pageId: string, disciplineId: string) => void;
   onPointerDelete?: (pointerId: string) => void;
+  onDetailClick?: (detailId: string, pageId: string, disciplineId: string) => void;
   onDisciplineClick?: (disciplineId: string) => void;
   refreshTrigger?: number;
   expandedNodes: string[];
@@ -44,6 +46,7 @@ function ContextMindMapInner({
   onPageClick,
   onPointerClick,
   onPointerDelete,
+  onDetailClick,
   onDisciplineClick,
   refreshTrigger,
   expandedNodes,
@@ -91,6 +94,7 @@ function ContextMindMapInner({
     onPageExpand: (_id: string) => {},
     onPointerClick: (_id: string, _pageId: string, _disciplineId: string) => {},
     onPointerDelete: (_id: string) => {},
+    onDetailClick: (_id: string, _pageId: string, _disciplineId: string) => {},
   });
 
   // Update the ref with current callback implementations (runs every render but doesn't trigger effects)
@@ -117,6 +121,9 @@ function ContextMindMapInner({
     onPointerDelete: (id: string) => {
       onPointerDelete?.(id);
     },
+    onDetailClick: (id: string, pageId: string, disciplineId: string) => {
+      onDetailClick?.(id, pageId, disciplineId);
+    },
   };
 
   // Create stable callbacks that delegate to the ref
@@ -128,6 +135,7 @@ function ContextMindMapInner({
     onPageExpand: (id: string) => callbacksRef.current.onPageExpand(id),
     onPointerClick: (id: string, pageId: string, disciplineId: string) => callbacksRef.current.onPointerClick(id, pageId, disciplineId),
     onPointerDelete: (id: string) => callbacksRef.current.onPointerDelete(id),
+    onDetailClick: (id: string, pageId: string, disciplineId: string) => callbacksRef.current.onDetailClick(id, pageId, disciplineId),
   }), []); // Empty deps - callbacks are stable, they delegate to ref
 
   useEffect(() => {

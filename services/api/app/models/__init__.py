@@ -14,6 +14,7 @@ from .query_page import QueryPage
 from .conversation import Conversation
 from .usage_event import UsageEvent
 from .user_usage import UserUsage
+from .processing_job import ProcessingJob
 
 __all__ = [
     # Event type constants
@@ -32,4 +33,5 @@ __all__ = [
     "Conversation",
     "UsageEvent",
     "UserUsage",
+    "ProcessingJob",
 ]

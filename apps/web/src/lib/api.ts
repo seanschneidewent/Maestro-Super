@@ -269,6 +269,41 @@ export interface DisciplineResponse {
   updatedAt?: string;
 }
 
+// Semantic word from sheet-analyzer
+export interface SemanticWord {
+  id: number;
+  text: string;
+  confidence: number;
+  bbox: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    width: number;
+    height: number;
+  };
+  region_type?: string;  // detail, notes, schedule, title_block, legend, plan_area
+  role?: string;  // detail_title, dimension, material_spec, note_text, sheet_number, etc.
+}
+
+// Semantic index from sheet-analyzer
+export interface SemanticIndex {
+  words: SemanticWord[];
+  tile_bounds?: Array<{ x: number; y: number; width: number; height: number }>;
+  quadrant_classifications?: Record<string, unknown>;
+}
+
+// Detail extracted from context markdown
+export interface PageDetail {
+  id?: string;
+  title: string;
+  number: string | null;
+  shows: string | null;
+  materials: string[];
+  dimensions: string[];
+  notes: string | null;
+}
+
 // Page types (matching backend schema)
 export interface PageResponse {
   id: string;
@@ -286,6 +321,12 @@ export interface PageResponse {
   fullPageText?: string;
   ocrData?: OcrSpan[];
   processedOcr: boolean;
+  // Brain Mode fields (sheet-analyzer pipeline)
+  semanticIndex?: SemanticIndex;
+  contextMarkdown?: string;
+  details?: PageDetail[];
+  processingStatus?: 'pending' | 'processing' | 'completed' | 'failed';
+  processedAt?: string;
   createdAt: string;
   updatedAt?: string;
 }

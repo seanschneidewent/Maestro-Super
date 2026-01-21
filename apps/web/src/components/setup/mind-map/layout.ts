@@ -10,6 +10,7 @@ interface LayoutCallbacks {
   onPageExpand: (id: string) => void;
   onPointerClick: (id: string, pageId: string, disciplineId: string) => void;
   onPointerDelete: (id: string) => void;
+  onDetailClick?: (detailId: string, pageId: string, disciplineId: string) => void;
 }
 
 interface LayoutOptions {
@@ -162,6 +163,9 @@ export function layoutHierarchy(
             isExpanded: isPageExpanded,
             isActive: page.id === activePageId,
             animationKey: `${pageNodeId}-${isDisciplineExpanded}`,
+            // Brain Mode fields
+            processingStatus: page.processingStatus,
+            detailCount: page.details?.length ?? 0,
           },
         });
 
@@ -207,6 +211,51 @@ export function layoutHierarchy(
               pageNodeId,
               pointerNodeId,
               '#8b5cf6',
+              1
+            ));
+          });
+        }
+
+        // Render detail nodes (Brain Mode - from sheet-analyzer processing)
+        if (isPageExpanded && page.details && page.details.length > 0) {
+          const DETAIL_DAGRE_HEIGHT_PADDING = 16;
+
+          page.details.forEach((detail, index) => {
+            const detailNodeId = detail.id || `detail-${page.id}-${index}`;
+
+            g.setNode(detailNodeId, {
+              width: NODE_DIMENSIONS.detail.width,
+              height: NODE_DIMENSIONS.detail.height + DETAIL_DAGRE_HEIGHT_PADDING,
+            });
+
+            g.setEdge(pageNodeId, detailNodeId);
+
+            nodes.push({
+              id: detailNodeId,
+              key: `${detailNodeId}-${isPageExpanded}`,
+              type: 'detail',
+              position: { x: 0, y: 0 },
+              data: {
+                type: 'detail',
+                id: detailNodeId,
+                title: detail.title,
+                number: detail.number,
+                shows: detail.shows,
+                materials: detail.materials,
+                dimensions: detail.dimensions,
+                notes: detail.notes,
+                pageId: page.id,
+                disciplineId: discipline.id,
+                onClick: () => callbacks.onDetailClick?.(detailNodeId, page.id, discipline.id),
+                animationKey: `${detailNodeId}-${isPageExpanded}`,
+                staggerIndex: index, // For staggered animation (50ms delay per detail)
+              },
+            });
+
+            edges.push(createEdge(
+              pageNodeId,
+              detailNodeId,
+              '#06b6d4', // Cyan for details
               1
             ));
           });

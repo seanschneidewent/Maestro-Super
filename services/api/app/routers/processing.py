@@ -554,3 +554,163 @@ async def retry_page_png(
         return {"success": True, "pageImagePath": storage_path}
     else:
         return {"success": False, "error": error or "Unknown error"}
+
+
+# =============================================================================
+# Brain Mode: Sheet-analyzer processing endpoints
+# =============================================================================
+
+from app.models.processing_job import ProcessingJob
+from app.services.processing_job import (
+    create_job_queue,
+    get_active_job_for_project,
+    process_project_pages,
+    sse_event_generator,
+    start_processing_job,
+)
+
+
+@router.post("/projects/{project_id}/process")
+async def start_project_processing(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Start background processing of all pages in a project.
+
+    This creates a processing job that runs the sheet-analyzer pipeline
+    on each page. Processing continues even if the browser closes.
+
+    Returns:
+        {"job_id": "...", "total_pages": N, "status": "pending"}
+    """
+    # Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check for existing active job
+    existing_job = get_active_job_for_project(project_id, db)
+    if existing_job:
+        return {
+            "job_id": existing_job.id,
+            "total_pages": existing_job.total_pages,
+            "processed_pages": existing_job.processed_pages,
+            "status": existing_job.status,
+            "message": "Processing already in progress",
+        }
+
+    # Create new job
+    job = start_processing_job(project_id, db)
+
+    # Create event queue and start background task
+    create_job_queue(job.id)
+    asyncio.create_task(process_project_pages(job.id))
+
+    return {
+        "job_id": job.id,
+        "total_pages": job.total_pages,
+        "status": job.status,
+    }
+
+
+@router.get("/projects/{project_id}/process/stream")
+async def stream_project_processing(
+    project_id: str,
+):
+    """
+    SSE endpoint for streaming processing progress updates.
+
+    Connects to the active processing job for a project (if any)
+    and streams events as pages are processed.
+
+    SSE events:
+    - {"type": "init", "status": "...", "total_pages": N, "processed_pages": M}
+    - {"type": "page_started", "page_id": "...", "page_name": "...", "current": N, "total": T}
+    - {"type": "page_completed", "page_id": "...", "page_name": "...", "details": [...]}
+    - {"type": "page_failed", "page_id": "...", "error": "..."}
+    - {"type": "job_completed", "processed_pages": N, "total_pages": T}
+    - {"type": "job_failed", "error": "..."}
+
+    Heartbeat comment sent every 3 seconds to prevent connection timeout.
+    """
+    # Find active job for project
+    with SessionLocal() as db:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        job = get_active_job_for_project(project_id, db)
+        if not job:
+            # Check for most recent completed job
+            job = (
+                db.query(ProcessingJob)
+                .filter(ProcessingJob.project_id == project_id)
+                .order_by(ProcessingJob.created_at.desc())
+                .first()
+            )
+            if not job:
+                raise HTTPException(status_code=404, detail="No processing job found")
+
+        job_id = job.id
+
+    return StreamingResponse(
+        sse_event_generator(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/projects/{project_id}/process/status")
+async def get_processing_status(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get current processing status for a project.
+
+    Returns:
+        {"status": "...", "job_id": "...", "total_pages": N, "processed_pages": M, ...}
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check for active job
+    job = get_active_job_for_project(project_id, db)
+    if job:
+        return {
+            "status": job.status,
+            "job_id": job.id,
+            "total_pages": job.total_pages,
+            "processed_pages": job.processed_pages,
+            "current_page_name": job.current_page_name,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+        }
+
+    # Check for most recent completed job
+    job = (
+        db.query(ProcessingJob)
+        .filter(ProcessingJob.project_id == project_id)
+        .order_by(ProcessingJob.created_at.desc())
+        .first()
+    )
+
+    if job:
+        return {
+            "status": job.status,
+            "job_id": job.id,
+            "total_pages": job.total_pages,
+            "processed_pages": job.processed_pages,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "error_message": job.error_message,
+        }
+
+    return {
+        "status": "none",
+        "message": "No processing jobs found for this project",
+    }

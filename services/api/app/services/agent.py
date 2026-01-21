@@ -1,5 +1,6 @@
 """Query agent for navigating construction plan graph with Grok 4.1 Fast via OpenRouter."""
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncIterator
@@ -322,7 +323,7 @@ async def run_agent_query(
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
     """
-    from app.services.tools import search_pages, search_pointers, list_project_pages
+    from app.services.tools import search_pages, search_pointers, get_project_structure_summary
 
     settings = get_settings()
     if not settings.openrouter_api_key:
@@ -337,22 +338,22 @@ async def run_agent_query(
 
     # PRE-FETCH: Run searches + project structure before LLM call to eliminate roundtrips
     # This runs in parallel using asyncio
-    import asyncio
+    # NOTE: Using get_project_structure_summary (lightweight) instead of list_project_pages
+    # to avoid loading all pointers into memory
 
     # Yield pre-fetch status
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
     yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
     yield {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}}
 
-    # Run all three in parallel
-    project_structure, page_results, pointer_results = await asyncio.gather(
-        list_project_pages(db, project_id=project_id),
+    # Run all three in parallel - using lightweight summary for project structure
+    project_structure_dict, page_results, pointer_results = await asyncio.gather(
+        get_project_structure_summary(db, project_id=project_id),
         search_pages(db, query=query, project_id=project_id, limit=10),
         search_pointers(db, query=query, project_id=project_id, limit=10),
     )
 
-    # Convert project structure to dict for JSON serialization
-    project_structure_dict = project_structure.model_dump() if project_structure else None
+    # project_structure_dict is already a dict (not Pydantic), no conversion needed
 
     # Yield pre-fetch results
     yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
@@ -421,14 +422,23 @@ CURRENT VIEW: The user is currently viewing page {page_name}. This may or may no
 
     try:
         while True:
-            stream = await client.chat.completions.create(
-                model="x-ai/grok-4.1-fast",
-                max_tokens=4096,
-                tools=TOOL_DEFINITIONS,
-                messages=messages,
-                stream=True,
-                temperature=0,  # More consistent results
-            )
+            # 60 second timeout for API connection + first response
+            try:
+                stream = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model="x-ai/grok-4.1-fast",
+                        max_tokens=4096,
+                        tools=TOOL_DEFINITIONS,
+                        messages=messages,
+                        stream=True,
+                        temperature=0,  # More consistent results
+                    ),
+                    timeout=60.0,
+                )
+            except asyncio.TimeoutError:
+                logger.error("OpenRouter API timeout after 60 seconds")
+                yield {"type": "error", "message": "Request timed out. Please try again."}
+                return
 
             # Collect streaming response
             current_text = ""

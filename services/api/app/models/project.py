@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.query import Query
     from app.models.conversation import Conversation
+    from app.models.processing_job import ProcessingJob
 
 
 class Project(Base):
@@ -46,6 +47,12 @@ class Project(Base):
     )
     conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    processing_jobs: Mapped[list["ProcessingJob"]] = relationship(
+        "ProcessingJob",
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
