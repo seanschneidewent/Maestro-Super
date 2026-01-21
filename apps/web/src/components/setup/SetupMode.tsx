@@ -4,14 +4,17 @@ import { FolderTree } from './FolderTree';
 import { PdfViewer } from './PdfViewer';
 import { ContextPanel, PanelView } from './context-panel';
 import { UploadProgressModal } from './UploadProgressModal';
+import { ProcessingBar } from './ProcessingBar';
+import { ProcessingNotification } from './ProcessingNotification';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
-import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2 } from 'lucide-react';
+import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2, Brain } from 'lucide-react';
 import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
 import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
+import { useProcessingStream } from '../../hooks/useProcessingStream';
 import { DriveImportButton, DriveImportFile } from './DriveImportButton';
 import { DisciplineCode, getDisciplineDisplayName } from '../../lib/disciplineClassifier';
 
@@ -100,6 +103,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   // Mutations for creating/deleting pointers
   const createPointerMutation = useCreatePointer(projectId);
   const deletePointerMutation = useDeletePointer(projectId);
+
+  // Brain Mode processing state
+  const processing = useProcessingStream(projectId);
 
   // Convert discipline hierarchy to ProjectFile format for tree display
   const convertDisciplinesToProjectFiles = (
@@ -1189,6 +1195,40 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                   onFilesSelected={handleDriveImport}
                 />
               </div>
+
+              {/* Brain Mode: Process All button */}
+              {uploadedFiles.length > 0 && !processing.isProcessing && !processing.isComplete && processing.status !== 'failed' && (
+                <button
+                  onClick={() => processing.start()}
+                  className="w-full mt-3 py-3 rounded-lg bg-gradient-to-r from-purple-600/20 to-cyan-600/20 border border-purple-500/30 text-purple-200 text-sm font-medium hover:border-purple-400/50 hover:from-purple-600/30 hover:to-cyan-600/30 transition-all shadow-lg shadow-purple-900/10 group flex items-center justify-center gap-2"
+                >
+                  <Brain size={16} className="group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] transition-all" />
+                  <span className="group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] transition-all">Process All Pages</span>
+                </button>
+              )}
+              {processing.status === 'failed' && (
+                <div className="w-full mt-3 rounded-lg bg-red-600/10 border border-red-500/30 overflow-hidden">
+                  <div className="px-3 py-2 text-red-300 text-xs">
+                    {processing.error || 'Processing failed'}
+                  </div>
+                  <button
+                    onClick={() => {
+                      processing.reset();
+                      processing.start();
+                    }}
+                    className="w-full py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-200 text-sm font-medium flex items-center justify-center gap-2 transition-all border-t border-red-500/30"
+                  >
+                    <Brain size={16} />
+                    <span>Retry Processing</span>
+                  </button>
+                </div>
+              )}
+              {processing.isComplete && (
+                <div className="w-full mt-3 py-3 rounded-lg bg-green-600/10 border border-green-500/30 text-green-300 text-sm font-medium flex items-center justify-center gap-2">
+                  <Brain size={16} />
+                  <span>Processing complete</span>
+                </div>
+              )}
           </div>
         </div>
       </CollapsiblePanel>
@@ -1223,6 +1263,21 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                     </div>
                 </div>
             )}
+
+            {/* Processing notification (appears when page completes) */}
+            <ProcessingNotification
+              pageName={processing.lastCompletedPage?.pageName ?? null}
+              detailCount={processing.lastCompletedPage?.details?.length ?? 0}
+              onDismiss={processing.clearLastCompleted}
+            />
+
+            {/* Processing progress bar (shown during processing) */}
+            <ProcessingBar
+              currentPageName={processing.currentPage?.name ?? null}
+              current={processing.progress.current}
+              total={processing.progress.total}
+              isVisible={processing.isProcessing}
+            />
          </div>
 
       </div>

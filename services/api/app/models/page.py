@@ -48,6 +48,13 @@ class Page(Base):
     ocr_data: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Word positions [{text, x, y, w, h}]
     processed_ocr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Sheet-analyzer pipeline fields (Brain Mode)
+    semantic_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Words with bboxes, region_type, role
+    context_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Gemini-generated sheet summary
+    details: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Extracted detail nodes from markdown
+    processing_status: Mapped[Optional[str]] = mapped_column(String(50), default="pending", nullable=True)  # pending|processing|completed|failed
+    processed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)  # When processing completed
+
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()
 

@@ -43,6 +43,8 @@ export interface AgentSelectedPage {
   filePath: string
   disciplineId: string
   pointers: AgentSelectedPointer[]
+  // Brain Mode: processing status for graceful degradation
+  processingStatus?: 'pending' | 'processing' | 'completed' | 'failed'
 }
 
 export interface CompletedQuery {

@@ -64,11 +64,14 @@
               'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
               'fade-in': 'fadeIn 0.3s ease-out',
               'slide-up': 'slideUp 0.3s ease-out',
+              'slide-down': 'slideDown 0.3s ease-out',
               'slide-in-right': 'slideInRight 0.3s ease-out',
               'scale-in': 'scaleIn 0.2s ease-out',
               'glow-pulse': 'glowPulse 2s ease-in-out infinite',
               'status-blink': 'statusBlink 1.5s ease-in-out infinite',
               'cursor-blink': 'cursorBlink 530ms step-end infinite',
+              'detail-zap': 'detailZap 0.3s ease-out backwards',
+              'checkmark-pulse': 'checkmarkPulse 0.4s ease-out',
             },
             keyframes: {
               fadeIn: {
@@ -98,6 +101,19 @@
               cursorBlink: {
                 '0%, 100%': { opacity: '1' },
                 '50%': { opacity: '0' },
+              },
+              slideDown: {
+                '0%': { opacity: '0', transform: 'translateY(-10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              detailZap: {
+                '0%': { opacity: '0', transform: 'scale(0.8) translateX(-10px)' },
+                '100%': { opacity: '1', transform: 'scale(1) translateX(0)' },
+              },
+              checkmarkPulse: {
+                '0%': { transform: 'scale(0)' },
+                '50%': { transform: 'scale(1.2)' },
+                '100%': { transform: 'scale(1)' },
               },
             },
             backdropBlur: {

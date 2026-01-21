@@ -1,6 +1,9 @@
 import { Node, Edge } from 'reactflow';
 
-export type MindMapNodeType = 'project' | 'discipline' | 'page' | 'pointer';
+export type MindMapNodeType = 'project' | 'discipline' | 'page' | 'pointer' | 'detail';
+
+// Processing status for pages
+export type PageProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface ProjectNodeData {
   type: 'project';
@@ -38,6 +41,9 @@ export interface PageNodeData {
   isExpanded: boolean;
   isActive: boolean;
   animationKey?: string;
+  // Brain Mode processing state
+  processingStatus?: PageProcessingStatus;
+  detailCount?: number;
 }
 
 export interface PointerNodeData {
@@ -51,11 +57,28 @@ export interface PointerNodeData {
   animationKey?: string;
 }
 
+export interface DetailNodeData {
+  type: 'detail';
+  id: string;
+  title: string;
+  number: string | null;
+  shows: string | null;
+  materials: string[];
+  dimensions: string[];
+  notes: string | null;
+  pageId: string;
+  disciplineId: string;
+  onClick: () => void;
+  animationKey?: string;
+  staggerIndex?: number; // For staggered animation (50ms delay per detail)
+}
+
 export type MindMapNodeData =
   | ProjectNodeData
   | DisciplineNodeData
   | PageNodeData
-  | PointerNodeData;
+  | PointerNodeData
+  | DetailNodeData;
 
 export type MindMapNode = Node<MindMapNodeData> & { key?: string };
 export type MindMapEdge = Edge;
@@ -78,4 +101,5 @@ export const NODE_DIMENSIONS = {
   discipline: { width: 160, height: 52 },
   page: { width: 140, height: 44 },
   pointer: { width: 120, height: 36 },
+  detail: { width: 160, height: 36 },
 };

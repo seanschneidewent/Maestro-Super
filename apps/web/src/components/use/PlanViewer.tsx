@@ -383,8 +383,27 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
                     draggable={false}
                   />
 
+                  {/* Processing indicator for pages not yet processed (Brain Mode graceful degradation) */}
+                  {currentAgentPage?.processingStatus && currentAgentPage.processingStatus !== 'completed' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40 backdrop-blur-[1px]">
+                      <div className="bg-slate-800/90 backdrop-blur-md px-4 py-3 rounded-lg border border-slate-700/50 flex items-center gap-3">
+                        {currentAgentPage.processingStatus === 'processing' ? (
+                          <>
+                            <Loader2 size={20} className="text-cyan-400 animate-spin" />
+                            <span className="text-sm text-slate-300">Processing page...</span>
+                          </>
+                        ) : currentAgentPage.processingStatus === 'failed' ? (
+                          <span className="text-sm text-red-400">Processing failed</span>
+                        ) : (
+                          <span className="text-sm text-slate-400">Waiting for processing</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Pointer overlays - simplified for iOS Safari compatibility */}
-                  {showPointers && currentAgentPage?.pointers.map((pointer) => (
+                  {/* Only show pointers if page is processed or processingStatus is not set (legacy) */}
+                  {showPointers && (!currentAgentPage?.processingStatus || currentAgentPage.processingStatus === 'completed') && currentAgentPage?.pointers.map((pointer) => (
                     <div
                       key={pointer.pointerId}
                       className="absolute border-2 border-cyan-500/70 bg-cyan-500/10 hover:bg-cyan-500/20 cursor-pointer group"
