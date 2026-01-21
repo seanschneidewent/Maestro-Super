@@ -1,19 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FolderTree } from './FolderTree';
-import { PdfViewer } from './PdfViewer';
-import { ContextPanel, PanelView } from './context-panel';
+import { ContextMindMap } from './mind-map';
+import { PageContextView } from './context-panel';
 import { UploadProgressModal } from './UploadProgressModal';
 import { ProcessingBar } from './ProcessingBar';
 import { ProcessingNotification } from './ProcessingNotification';
 import { ModeToggle } from '../ModeToggle';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
-import { AppMode, ContextPointer, ProjectFile, FileType, ProjectHierarchy } from '../../types';
+import { AppMode, ProjectFile, FileType, ProjectHierarchy } from '../../types';
 import { Upload, Plus, BrainCircuit, FolderOpen, Layers, X, Loader2, Trash2, Brain } from 'lucide-react';
 import { api, DisciplineWithPagesResponse } from '../../lib/api';
 import { downloadFile, blobToFile, uploadFile } from '../../lib/storage';
 import { buildUploadPlan, planToApiRequest } from '../../lib/disciplineClassifier';
-import { usePagePointersAsContext, useCreatePointer, useDeletePointer, toContextPointer } from '../../hooks/usePointers';
 import { useProcessingStream } from '../../hooks/useProcessingStream';
 import { DriveImportButton, DriveImportFile } from './DriveImportButton';
 import { DisciplineCode, getDisciplineDisplayName } from '../../lib/disciplineClassifier';
@@ -44,18 +43,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   setSetupState,
 }) => {
   const queryClient = useQueryClient();
-  const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
 
-  // Use lifted state from props (but keep local versions for smooth updates)
-  const selectedPointerId = setupState.selectedPointerId;
-  const isDrawingEnabled = setupState.isDrawingEnabled;
-
-  const setSelectedPointerId = (id: string | null) => {
-    setSetupState(prev => ({ ...prev, selectedPointerId: id }));
-  };
-  const setIsDrawingEnabled = (enabled: boolean) => {
-    setSetupState(prev => ({ ...prev, isDrawingEnabled: enabled }));
-  };
+  // Mind map expanded nodes state (lifted to persist across mode switches)
   const expandedNodes = setupState.expandedNodes;
   const setExpandedNodes = (updater: string[] | ((prev: string[]) => string[])) => {
     if (typeof updater === 'function') {
@@ -64,17 +53,22 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       setSetupState(prev => ({ ...prev, expandedNodes: updater }));
     }
   };
+
+  // Right panel: selected page to show details
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
+  const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
+
+  // File tree and upload state
   const [uploadedFiles, setUploadedFiles] = useState<ProjectFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
-  const [isLoadingFile, setIsLoadingFile] = useState(false);
-  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedForDeletion, setSelectedForDeletion] = useState<Set<string>>(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [hierarchyRefresh, setHierarchyRefresh] = useState(0);
   const [hierarchy, setHierarchy] = useState<ProjectHierarchy | null>(null);
+
   // Pipeline progress with 2 progress bars (upload + PNG rendering)
   const [uploadProgress, setUploadProgress] = useState<{
     upload: { current: number; total: number };
@@ -84,25 +78,12 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pngStageComplete, setPngStageComplete] = useState(false);
   const [failedPageIds, setFailedPageIds] = useState<Set<string>>(new Set());
-  const [panelView, setPanelView] = useState<PanelView>({ type: 'mindmap' });
-  const [highlightedPointer, setHighlightedPointer] = useState<{
-    bounds: { x: number; y: number; w: number; h: number };
-  } | null>(null);
-  const [focusPointerId, setFocusPointerId] = useState<string | null>(null);
-  // Track sidebar widths for visible-area centering
+
+  // Track sidebar widths
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(288);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(400);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
-  // Note: localFileMapRef is now passed as a prop from App.tsx to persist across mode switches
-
-  // Get pointers from React Query cache (single source of truth)
-  const pageId = selectedFile?.type !== FileType.FOLDER ? selectedFile?.id ?? null : null;
-  const { data: pointers = [], isLoading: isLoadingPointers } = usePagePointersAsContext(pageId);
-
-  // Mutations for creating/deleting pointers
-  const createPointerMutation = useCreatePointer(projectId);
-  const deletePointerMutation = useDeletePointer(projectId);
 
   // Brain Mode processing state
   const processing = useProcessingStream(projectId);
@@ -166,19 +147,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     return null;
   }, [hierarchy]);
 
-  // Clear focus pointer ID after scroll completes
-  const handleFocusComplete = useCallback(() => {
-    setFocusPointerId(null);
-  }, []);
-
-  // Sync selectedFileId to parent when selection changes
-  const handleFileSelect = (file: ProjectFile) => {
-    setSelectedFile(file);
-    setSetupState(prev => ({ ...prev, selectedFileId: file.id }));
-  };
-
-  // Load hierarchy and files together on mount (hierarchy first for pointer counts)
-  // Delay loading if upload is in progress and PNG stage hasn't completed
+  // Load hierarchy and files on mount
   useEffect(() => {
     // Skip loading if upload is in progress and PNG stage isn't complete
     if (showProgressModal && !pngStageComplete) {
@@ -189,25 +158,16 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       try {
         setIsLoadingFiles(true);
 
-        // Load hierarchy FIRST (has pointer counts)
+        // Load hierarchy (has pointer counts)
         const hierarchyData = await api.projects.getHierarchy(projectId);
         setHierarchy(hierarchyData);
 
-        // Then load file structure with counts from hierarchy
+        // Load file structure for tree display
         const response = await api.projects.getFull(projectId);
         const convertedFiles = convertDisciplinesToProjectFiles(response.disciplines, hierarchyData);
         setUploadedFiles(sortFiles(convertedFiles));
-
-        // Restore file selection if we have a saved selectedFileId
-        if (setupState.selectedFileId && !selectedFile) {
-          const foundFile = findFileById(convertedFiles, setupState.selectedFileId);
-          if (foundFile) {
-            setSelectedFile(foundFile);
-          }
-        }
       } catch (err) {
         console.error('Failed to load files:', err);
-        // Project might not have any disciplines yet - that's OK
         setUploadedFiles([]);
       } finally {
         setIsLoadingFiles(false);
@@ -260,62 +220,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     setUploadedFiles(prev => updatePointerCounts(prev));
   }, [hierarchy]);
 
-  // Fetch file from storage when page is selected
-  useEffect(() => {
-    if (!selectedFile || selectedFile.file || selectedFile.type === FileType.FOLDER) {
-      setFileLoadError(null);
-      setIsLoadingFile(false);
-      return;
-    }
-
-    async function fetchFile() {
-      try {
-        setIsLoadingFile(true);
-        setFileLoadError(null);
-
-        // First check if we have it in local memory (from current session upload)
-        const localFile = localFileMapRef.current.get(selectedFile.id);
-        if (localFile) {
-          // Update the selectedFile with the File object
-          setSelectedFile(prev => prev ? { ...prev, file: localFile } : null);
-
-          // Also update in the tree
-          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file: localFile }));
-          setIsLoadingFile(false);
-          return;
-        }
-
-        // Otherwise, try to fetch from storage (for previously uploaded files)
-        // Use the storagePath from the ProjectFile if available, or fetch page info
-        let storagePath = selectedFile.storagePath;
-        if (!storagePath) {
-          const pageInfo = await api.pages.get(selectedFile.id);
-          storagePath = pageInfo.filePath;
-        }
-
-        if (storagePath) {
-          const blob = await downloadFile(storagePath);
-          const file = blobToFile(blob, selectedFile.name);
-
-          // Update the selectedFile with the File object
-          setSelectedFile(prev => prev ? { ...prev, file, storagePath } : null);
-
-          // Also update in the tree
-          setUploadedFiles(prev => updateFileInTree(prev, selectedFile.id, { file, storagePath }));
-        } else {
-          // Page exists in DB but not uploaded to storage
-          setFileLoadError('File not found in cloud storage. This may happen if the browser was refreshed during upload. Please re-upload the file.');
-        }
-      } catch (err) {
-        console.error('Failed to fetch file:', err);
-        setFileLoadError('Failed to load file. Please try again.');
-      } finally {
-        setIsLoadingFile(false);
-      }
-    }
-    fetchFile();
-  }, [selectedFile?.id]);
-
   // Helper to update a file in the tree structure
   const updateFileInTree = (files: ProjectFile[], fileId: string, updates: Partial<ProjectFile>): ProjectFile[] => {
     return files.map(f => {
@@ -328,142 +232,6 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       return f;
     });
   };
-
-  // Update pointer with debounced API call
-  const updatePointer = useCallback((id: string, updates: Partial<ContextPointer>) => {
-    // Clear existing timeout for this pointer
-    if (updateTimeoutRef.current[id]) {
-      clearTimeout(updateTimeoutRef.current[id]);
-    }
-
-    // Debounce API call - React Query will handle cache invalidation
-    updateTimeoutRef.current[id] = setTimeout(async () => {
-      try {
-        await api.pointers.update(id, {
-          title: updates.title,
-          description: updates.description,
-        });
-        // Invalidate cache to refresh the pointer data
-        queryClient.invalidateQueries({ queryKey: ['pointers', pageId] });
-      } catch (err) {
-        console.error('Failed to update pointer:', err);
-      }
-    }, 300);
-  }, [pageId, queryClient]);
-
-  // Handle highlighting a pointer (from context panel)
-  const handleHighlightPointer = useCallback(async (pointerId: string) => {
-    try {
-      const pointer = await api.pointers.get(pointerId);
-      setHighlightedPointer({
-        bounds: {
-          x: pointer.bboxX,
-          y: pointer.bboxY,
-          w: pointer.bboxWidth,
-          h: pointer.bboxHeight,
-        },
-      });
-      // Also select the pointer
-      setSelectedPointerId(pointerId);
-    } catch (err) {
-      console.error('Failed to load pointer for highlighting:', err);
-    }
-  }, []);
-
-  // Clear highlight when panel view changes to something other than pointer
-  useEffect(() => {
-    if (panelView.type !== 'pointer') {
-      setHighlightedPointer(null);
-    }
-  }, [panelView.type]);
-
-  // Navigate to a page from context panel
-  const handleNavigateToPage = useCallback((pageId: string) => {
-    const file = findFileById(uploadedFiles, pageId);
-    if (file) {
-      handleFileSelect(file);
-    }
-  }, [uploadedFiles]);
-
-  // Delete pointer - uses mutation with optimistic update
-  const deletePointer = useCallback((id: string) => {
-    if (selectedPointerId === id) {
-      setSelectedPointerId(null);
-    }
-
-    // Use the mutation - it handles optimistic updates and cache invalidation
-    deletePointerMutation.mutate({
-      pointerId: id,
-      pageId: pageId!,
-    });
-  }, [selectedPointerId, deletePointerMutation, pageId]);
-
-  // Create pointer via API (with AI analysis) - uses mutation with optimistic UI
-  const handlePointerCreate = useCallback(async (data: {
-    pageNumber: number;
-    bounds: { xNorm: number; yNorm: number; wNorm: number; hNorm: number };
-  }): Promise<ContextPointer | null> => {
-    if (!selectedFile || !pageId) return null;
-
-    const tempId = `temp-${crypto.randomUUID()}`;
-
-    try {
-      const result = await createPointerMutation.mutateAsync({
-        pageId,
-        bounds: {
-          bboxX: data.bounds.xNorm,
-          bboxY: data.bounds.yNorm,
-          bboxWidth: data.bounds.wNorm,
-          bboxHeight: data.bounds.hNorm,
-        },
-        tempId,
-        onCreated: (created) => {
-          // Check if user is still on the same page before applying side effects
-          // Use setSetupState's functional form to access current state at execution time
-          // (avoids stale closure issues when user switches pages during generation)
-          setSetupState(prev => {
-            const isStillOnSamePage = prev.selectedFileId === created.pageId;
-
-            if (isStillOnSamePage) {
-              // User is still on the same page - select the new pointer and focus on it
-              setFocusPointerId(created.id);
-
-              // Auto-expand path to new pointer in mind map
-              const disciplineId = findDisciplineIdForPage(created.pageId);
-              if (disciplineId && hierarchy) {
-                const projectNodeId = `project-${hierarchy.name}`;
-                setExpandedNodes(prevNodes => {
-                  const newSet = new Set(prevNodes);
-                  newSet.add(projectNodeId);
-                  newSet.add(disciplineId);
-                  newSet.add(created.pageId);
-                  return Array.from(newSet);
-                });
-              }
-
-              return {
-                ...prev,
-                selectedPointerId: created.id,
-              };
-            }
-
-            // User switched to a different page - don't change selection or focus
-            return prev;
-          });
-
-          // Always refresh hierarchy to update file tree pointer counts
-          // (regardless of which page the user is on)
-          setHierarchyRefresh(h => h + 1);
-        },
-      });
-
-      // Convert API response to ContextPointer
-      return toContextPointer(result);
-    } catch (err) {
-      console.error('Failed to create pointer:', err);
-      return null;
-    }
-  }, [selectedFile, pageId, hierarchy, findDisciplineIdForPage, setExpandedNodes, createPointerMutation]);
 
   const getFileType = (filename: string): FileType | null => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -614,10 +382,10 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         localFileMapRef.current.delete(itemId);
       }
 
-      // Clear selected file if it was deleted
-      if (selectedFile && selectedForDeletion.has(selectedFile.id)) {
-        setSelectedFile(null);
-        // Pointers will be cleared automatically since pageId becomes null
+      // Clear selected page if it was deleted
+      if (selectedPageId && selectedForDeletion.has(selectedPageId)) {
+        setSelectedPageId(null);
+        setSelectedDisciplineId(null);
       }
 
       // Reload disciplines and pages
@@ -634,7 +402,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
     } finally {
       setIsDeleting(false);
     }
-  }, [selectedForDeletion, uploadedFiles, selectedFile, projectId]);
+  }, [selectedForDeletion, uploadedFiles, selectedPageId, projectId]);
 
   // Cancel delete mode
   const cancelDeleteMode = useCallback(() => {
@@ -1154,9 +922,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
           ) : (
             <FolderTree
               files={uploadedFiles}
-              onFileSelect={handleFileSelect}
-              selectedFileId={selectedFile?.id || null}
-              expandToFileId={setupState.selectedFileId}
+              onFileSelect={(file) => {
+                // Sync file tree selection with mind map
+                if (file.type !== FileType.FOLDER) {
+                  setSelectedPageId(file.id);
+                  setSelectedDisciplineId(file.parentId ?? null);
+                }
+              }}
+              selectedFileId={selectedPageId}
+              expandToFileId={selectedPageId}
               isDeleteMode={isDeleteMode}
               selectedForDeletion={selectedForDeletion}
               onToggleSelection={toggleFileSelection}
@@ -1233,36 +1007,28 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         </div>
       </CollapsiblePanel>
 
-      {/* Main Content (full width, sidebars overlay on top) */}
-      <div className="w-full h-full flex flex-col blueprint-grid-dark">
-         {/* PDF Viewer */}
+      {/* Main Content: Mind Map (center) */}
+      <div className="w-full h-full flex flex-col blueprint-grid-dark relative">
          <div className="flex-1 relative overflow-hidden">
-            {selectedFile ? (
-                <PdfViewer
-                    file={selectedFile.file}
-                    fileId={selectedFile.id}
-                    pageIndex={selectedFile.pageIndex ?? 0}
-                    pointers={pointers}
-                    selectedPointerId={selectedPointerId}
-                    setSelectedPointerId={setSelectedPointerId}
-                    isDrawingEnabled={isDrawingEnabled}
-                    setIsDrawingEnabled={setIsDrawingEnabled}
-                    onPointerCreate={handlePointerCreate}
-                    isLoadingFile={isLoadingFile}
-                    fileLoadError={fileLoadError}
-                    highlightedBounds={highlightedPointer?.bounds}
-                    refreshTrigger={hierarchyRefresh}
-                    leftSidebarWidth={leftSidebarWidth}
-                    rightSidebarWidth={rightSidebarWidth}
-                />
-            ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-fade-in">
-                    <div className="p-6 rounded-2xl bg-slate-800/30 border border-slate-700/30 backdrop-blur-sm">
-                      <BrainCircuit size={56} className="mb-4 mx-auto text-slate-600" />
-                      <p className="text-slate-400 text-center">Select a file to begin<br/><span className="text-cyan-400/70">context extraction</span></p>
-                    </div>
-                </div>
-            )}
+            <ContextMindMap
+              projectId={projectId}
+              activePageId={selectedPageId ?? undefined}
+              refreshTrigger={hierarchyRefresh}
+              expandedNodes={expandedNodes}
+              setExpandedNodes={setExpandedNodes}
+              onPageClick={(pageId, disciplineId) => {
+                setSelectedPageId(pageId);
+                setSelectedDisciplineId(disciplineId);
+              }}
+              onDisciplineClick={(disciplineId) => {
+                setSelectedPageId(null);
+                setSelectedDisciplineId(disciplineId);
+              }}
+              onDetailClick={(detailId, pageId, disciplineId) => {
+                setSelectedPageId(pageId);
+                setSelectedDisciplineId(disciplineId);
+              }}
+            />
 
             {/* Processing notification (appears when page completes) */}
             <ProcessingNotification
@@ -1279,17 +1045,16 @@ export const SetupMode: React.FC<SetupModeProps> = ({
               isVisible={processing.isProcessing}
             />
          </div>
-
       </div>
 
-      {/* Context Panel (absolute positioned overlay) */}
+      {/* Right Panel: Page Details */}
       <CollapsiblePanel
         side="right"
         defaultWidth={400}
         minWidth={320}
         maxWidth={600}
         collapsedIcon={<Layers size={20} />}
-        collapsedLabel="Context"
+        collapsedLabel="Details"
         className="border-l border-slate-800/50 glass-panel"
         onWidthChange={setRightSidebarWidth}
       >
@@ -1297,25 +1062,31 @@ export const SetupMode: React.FC<SetupModeProps> = ({
            <div className="p-4 border-b border-white/5">
               <h2 className="font-semibold text-slate-100 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>
-                Project Context
+                Page Details
               </h2>
            </div>
            <div className="flex-1 overflow-hidden">
-              <ContextPanel
-                projectId={projectId}
-                hierarchy={hierarchy}
-                panelView={panelView}
-                setPanelView={setPanelView}
-                activePageId={selectedFile?.id}
-                refreshTrigger={hierarchyRefresh}
-                onNavigateToPage={handleNavigateToPage}
-                onHighlightPointer={handleHighlightPointer}
-                onPointerDelete={deletePointer}
-                expandedNodes={expandedNodes}
-                setExpandedNodes={setExpandedNodes}
-                focusNodeId={focusPointerId}
-                onFocusComplete={handleFocusComplete}
-              />
+              {selectedPageId && selectedDisciplineId ? (
+                <PageContextView
+                  pageId={selectedPageId}
+                  disciplineName={hierarchy?.disciplines.find(d => d.id === selectedDisciplineId)?.displayName ?? 'Unknown'}
+                  onBack={() => {
+                    setSelectedPageId(null);
+                    setSelectedDisciplineId(null);
+                  }}
+                  onViewPage={() => {
+                    // Could open a modal or navigate - for now just log
+                    console.log('View page:', selectedPageId);
+                  }}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-500 p-6">
+                  <div className="text-center">
+                    <BrainCircuit size={40} className="mx-auto mb-3 text-slate-600" />
+                    <p className="text-sm">Click a page in the mind map<br/>to see its details</p>
+                  </div>
+                </div>
+              )}
            </div>
         </div>
       </CollapsiblePanel>
