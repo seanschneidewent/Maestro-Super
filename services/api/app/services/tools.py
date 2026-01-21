@@ -326,7 +326,7 @@ async def _get_project_structure_impl(db: Session, project_id: str) -> dict | No
                         "sheet_number": p.page_name,
                         "title": p.page_title,
                     }
-                    for p in sorted(d.pages, key=lambda x: x.page_name)[:30]  # Limit to 30 pages per discipline
+                    for p in sorted(d.pages, key=lambda x: x.page_name)
                 ],
             }
             for d in sorted(disciplines, key=lambda x: x.display_name)

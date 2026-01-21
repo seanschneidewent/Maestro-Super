@@ -30,6 +30,22 @@ def get_engine() -> Engine:
             "Database not configured. Set DB_HOST or DATABASE_URL environment variable."
         )
 
+    # Postgres-specific connection args (keepalives, timeouts)
+    # Only apply for PostgreSQL - SQLite doesn't support these
+    is_postgres = settings.db_host or (
+        settings.database_url and "postgresql" in str(settings.database_url)
+    )
+
+    connect_args = {}
+    if is_postgres:
+        connect_args = {
+            "connect_timeout": 10,      # 10s connection timeout
+            "keepalives": 1,            # Enable TCP keepalives
+            "keepalives_idle": 30,      # Start keepalives after 30s idle
+            "keepalives_interval": 10,  # Send keepalive every 10s
+            "keepalives_count": 5,      # Drop after 5 failed keepalives
+        }
+
     return create_engine(
         url,
         pool_pre_ping=True,
@@ -37,13 +53,7 @@ def get_engine() -> Engine:
         pool_size=10,       # Increased from 5 to handle concurrent requests
         max_overflow=20,    # Increased from 10 for burst capacity
         pool_timeout=10,    # Wait max 10s for connection from pool
-        connect_args={
-            "connect_timeout": 10,      # 10s connection timeout
-            "keepalives": 1,            # Enable TCP keepalives
-            "keepalives_idle": 30,      # Start keepalives after 30s idle
-            "keepalives_interval": 10,  # Send keepalive every 10s
-            "keepalives_count": 5,      # Drop after 5 failed keepalives
-        },
+        connect_args=connect_args,
         echo=False,
     )
 
