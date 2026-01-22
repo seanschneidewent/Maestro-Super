@@ -4,29 +4,48 @@ Universal memory layer for Claude across all interfaces — Claude Code, Cowork,
 
 ## Setup (New Machine)
 
-1. Clone the repo:
+### Option A: MCP Server (Recommended for Claude Code)
+
+1. Install the MCP server dependencies:
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-memory.git
-cd claude-memory
+cd claude-memory/mcp-server
+npm install
 ```
 
-2. Configure environment:
+2. The `.mcp.json` in the project root is already configured. Claude Code will automatically load the server.
+
+3. In Claude Code, use the `sync_memory` tool at the start of each session.
+
+### Option B: Shell Scripts (Fallback)
+
+1. Configure environment:
 ```bash
 cp .env.example .env
 # Edit .env with your Supabase credentials
 ```
 
-3. Make scripts executable:
+2. Make scripts executable:
 ```bash
 chmod +x scripts/*.sh
 ```
 
-4. Sync memory:
+3. Sync memory:
 ```bash
 ./scripts/sync-memory.sh
 ```
 
 ## Usage
+
+### With MCP Server (Claude Code)
+
+The MCP server provides these tools:
+
+- **sync_memory** - Fetch full context from Supabase (call at session start)
+- **write_decision** - Log a decision with domain, decision, and rationale
+- **log_session** - Log a session summary at the end of work
+- **update_current_edge** - Update what you're working on and next step
+
+### With Shell Scripts
 
 **Start of any Claude Code or Cowork session:**
 ```bash
