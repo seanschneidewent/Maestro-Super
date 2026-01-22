@@ -1,16 +1,31 @@
 """
-OCR service using pdf2image (Poppler) + Tesseract hybrid extraction.
+OCR service using pdf2image (Poppler) + EasyOCR hybrid extraction.
 """
 
 import io
 import logging
+from typing import Optional
 
-import pytesseract
+import easyocr
+import numpy as np
 from PIL import Image
 
 from app.services.pdf_renderer import crop_pdf_region
 
 logger = logging.getLogger(__name__)
+
+# Global EasyOCR reader - loaded lazily on first use
+_easyocr_reader: Optional[easyocr.Reader] = None
+
+
+def get_easyocr_reader() -> easyocr.Reader:
+    """Get or create the global EasyOCR reader (lazy loading)."""
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        logger.info("[OCR] Loading EasyOCR model (first use)...")
+        _easyocr_reader = easyocr.Reader(['en'], gpu=False)
+        logger.info("[OCR] EasyOCR model loaded")
+    return _easyocr_reader
 
 
 # Re-export crop_pdf_region from pdf_renderer for backwards compatibility
@@ -19,7 +34,7 @@ __all__ = ["crop_pdf_region", "extract_text_with_positions", "extract_full_page_
 
 def extract_text_with_positions(image_bytes: bytes) -> list[dict]:
     """
-    Run Tesseract OCR and return text spans with positions.
+    Run EasyOCR and return text spans with positions.
 
     Returns list of word-level OCR results:
     {
@@ -36,27 +51,37 @@ def extract_text_with_positions(image_bytes: bytes) -> list[dict]:
     try:
         image = Image.open(io.BytesIO(image_bytes))
         width, height = image.size
+        image_array = np.array(image)
 
-        # Get word-level bounding boxes from Tesseract
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        # Get bounding boxes from EasyOCR
+        reader = get_easyocr_reader()
+        results = reader.readtext(image_array)
 
         spans = []
-        for i in range(len(data["text"])):
-            text = data["text"][i].strip()
-            conf = int(data["conf"][i])
+        for bbox_points, text, confidence in results:
+            text = text.strip()
+            conf = int(confidence * 100)
 
             # Skip empty text or low confidence results
             if not text or conf < 30:
                 continue
 
+            # Convert 4-point bbox to x, y, w, h
+            xs = [p[0] for p in bbox_points]
+            ys = [p[1] for p in bbox_points]
+            x0 = min(xs)
+            y0 = min(ys)
+            x1 = max(xs)
+            y1 = max(ys)
+
             # Normalize coordinates to 0-1
             spans.append(
                 {
                     "text": text,
-                    "x": data["left"][i] / width,
-                    "y": data["top"][i] / height,
-                    "w": data["width"][i] / width,
-                    "h": data["height"][i] / height,
+                    "x": x0 / width,
+                    "y": y0 / height,
+                    "w": (x1 - x0) / width,
+                    "h": (y1 - y0) / height,
                     "confidence": conf,
                 }
             )
