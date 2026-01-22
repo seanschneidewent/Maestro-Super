@@ -14,6 +14,7 @@ We only need bboxes - Gemini relabels all text anyway.
 
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import Optional
@@ -301,39 +302,51 @@ If you cannot read the text clearly, return your best guess."""
         contents.append(crop_img)
 
     all_results = {}
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2  # seconds
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=contents
-        )
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=contents
+            )
 
-        response_text = response.text.strip()
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-            response_text = response_text.strip()
+            response_text = response.text.strip()
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
 
-        results = json.loads(response_text)
+            results = json.loads(response_text)
 
-        if isinstance(results, list):
-            for r in results:
-                if "id" in r and "text" in r:
-                    idx = r["id"]
-                    if 0 <= idx < len(prepared_crops):
-                        bbox_id = prepared_crops[idx][0]
-                        all_results[bbox_id] = {
-                            "text": (r["text"] or "").strip(),
-                            "confidence": 0.9
-                        }
+            if isinstance(results, list):
+                for r in results:
+                    if "id" in r and "text" in r:
+                        idx = r["id"]
+                        if 0 <= idx < len(prepared_crops):
+                            bbox_id = prepared_crops[idx][0]
+                            all_results[bbox_id] = {
+                                "text": (r["text"] or "").strip(),
+                                "confidence": 0.9
+                            }
 
-        logger.info(f"[OCR] Pass 2 complete: {len(all_results)} texts extracted")
+            logger.info(f"[OCR] Pass 2 complete: {len(all_results)} texts extracted")
+            break  # Success, exit retry loop
 
-    except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse Gemini response: {e}")
-    except Exception as e:
-        logger.warning(f"Gemini API error: {e}")
+        except json.JSONDecodeError as e:
+            if attempt < MAX_RETRIES - 1:
+                logger.warning(f"[OCR] Pass 2 attempt {attempt + 1} failed (JSON parse): {e}, retrying...")
+                time.sleep(RETRY_DELAY * (attempt + 1))
+            else:
+                logger.error(f"[OCR] Pass 2 failed after {MAX_RETRIES} attempts (JSON parse): {e}")
+        except Exception as e:
+            if attempt < MAX_RETRIES - 1:
+                logger.warning(f"[OCR] Pass 2 attempt {attempt + 1} failed: {e}, retrying...")
+                time.sleep(RETRY_DELAY * (attempt + 1))
+            else:
+                logger.error(f"[OCR] Pass 2 failed after {MAX_RETRIES} attempts: {e}")
 
     # Ensure all bbox IDs have results (fallback to empty)
     for bbox_id, _ in crops:
