@@ -2,12 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for psycopg2, Tesseract OCR, and Poppler (for pdf2image)
+# Install system dependencies for psycopg2 and Poppler (for pdf2image)
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
-    tesseract-ocr \
-    tesseract-ocr-eng \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
