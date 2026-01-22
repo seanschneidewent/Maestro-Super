@@ -2,116 +2,104 @@
 Sheet Analyzer Service - OCR + Semantic Classification for Construction Sheets
 
 Pipeline:
-1. Tiled Tesseract for bbox detection (PARALLEL - fast!)
+1. Tiled EasyOCR for bbox detection (sequential - reliable!)
 2. Geometric bbox stitching across tile boundaries
 3. Gemini text labeling (handles vertical/rotated text)
 4. Quadrant-based semantic classification (region_type, role)
 5. Context markdown generation
 
-Performance: Tesseract is ~20-50x faster than EasyOCR for bbox extraction.
-We only need bboxes - Gemini relabels all text anyway.
+EasyOCR is more reliable than Tesseract for construction drawings.
+Gemini relabels all text anyway, so we just need good bboxes.
 """
 
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import Optional
 
+import easyocr
 import numpy as np
-import pytesseract
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
+# Global EasyOCR reader - loaded lazily on first use
+_easyocr_reader: Optional[easyocr.Reader] = None
+
+
+def get_easyocr_reader() -> easyocr.Reader:
+    """Get or create the global EasyOCR reader (lazy loading)."""
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        logger.info("[OCR] Loading EasyOCR model (first use)...")
+        _easyocr_reader = easyocr.Reader(['en'], gpu=False)
+        logger.info("[OCR] EasyOCR model loaded")
+    return _easyocr_reader
+
 
 # =============================================================================
-# Pass 1: Tiled Tesseract for bbox detection (PARALLEL)
+# Pass 1: Tiled EasyOCR for bbox detection (sequential - reader not thread-safe)
 # =============================================================================
 
 
-def process_tile_for_bboxes(args: tuple) -> dict:
+def process_tile_for_bboxes(tile_idx: int, tile_image: Image.Image, tile_bounds: dict, reader: easyocr.Reader) -> dict:
     """
-    Process a single tile with Tesseract to extract LINE-LEVEL bounding boxes.
-    Groups words by Tesseract's hierarchical data (block_num, par_num, line_num).
-    Designed for parallel execution via ThreadPoolExecutor.
+    Process a single tile with EasyOCR to extract bounding boxes.
 
     Args:
-        args: tuple of (tile_idx, tile_image, tile_bounds)
-              tile_image is a PIL Image (not numpy array)
+        tile_idx: Index of this tile
+        tile_image: PIL Image of the tile
+        tile_bounds: dict with x0, y0, x1, y1 of tile in full image
+        reader: EasyOCR Reader instance
 
     Returns:
-        dict with tile_idx, bboxes list (line-level), and tile_bounds
+        dict with tile_idx, bboxes list, and tile_bounds
     """
-    tile_idx, tile_image, tile_bounds = args
     x0, y0 = tile_bounds["x0"], tile_bounds["y0"]
 
     try:
-        data = pytesseract.image_to_data(tile_image, output_type=pytesseract.Output.DICT)
+        # Convert PIL to numpy for EasyOCR
+        tile_array = np.array(tile_image)
+
+        # EasyOCR returns: [([[x1,y1], [x2,y1], [x2,y2], [x1,y2]], 'text', confidence), ...]
+        results = reader.readtext(tile_array)
     except Exception as e:
-        logger.warning(f"Tesseract failed on tile {tile_idx}: {e}")
+        logger.warning(f"EasyOCR failed on tile {tile_idx}: {e}")
         return {"tile_idx": tile_idx, "tile_bounds": tile_bounds, "bboxes": []}
 
-    # Group words by line: (block_num, par_num, line_num) -> list of word data
-    lines = {}
-    n_boxes = len(data['text'])
-
-    for i in range(n_boxes):
-        text = data['text'][i].strip()
-        conf = int(data['conf'][i]) if data['conf'][i] != '-1' else 0
-
-        if not text or conf < 10:
+    bboxes = []
+    for bbox_points, text, confidence in results:
+        text = text.strip()
+        if not text:
             continue
 
-        left = data['left'][i]
-        top = data['top'][i]
-        width = data['width'][i]
-        height = data['height'][i]
+        # Convert 4-point bbox to x0, y0, x1, y1
+        # bbox_points is [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+        xs = [p[0] for p in bbox_points]
+        ys = [p[1] for p in bbox_points]
 
+        box_x0 = int(min(xs))
+        box_y0 = int(min(ys))
+        box_x1 = int(max(xs))
+        box_y1 = int(max(ys))
+
+        width = box_x1 - box_x0
+        height = box_y1 - box_y0
+
+        # Skip tiny boxes (likely noise)
         if width < 5 or height < 5:
             continue
 
-        # Line key from Tesseract hierarchy
-        line_key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
-
-        if line_key not in lines:
-            lines[line_key] = []
-
-        lines[line_key].append({
-            "x0": left + x0,
-            "y0": top + y0,
-            "x1": left + width + x0,
-            "y1": top + height + y0,
-            "text": text,
-            "conf": conf,
-            "word_num": int(data['word_num'][i])  # Cast to int for proper numeric sorting
-        })
-
-    # Merge words into line-level bboxes
-    bboxes = []
-    for line_key, words in lines.items():
-        # Sort by word_num to maintain reading order
-        words.sort(key=lambda w: w["word_num"])
-
-        # Merge bbox coordinates
-        x0_min = min(w["x0"] for w in words)
-        y0_min = min(w["y0"] for w in words)
-        x1_max = max(w["x1"] for w in words)
-        y1_max = max(w["y1"] for w in words)
-
-        # Concatenate text
-        line_text = " ".join(w["text"] for w in words)
-        avg_conf = sum(w["conf"] for w in words) / len(words)
-
+        # Offset coordinates to full image space
         bboxes.append({
-            "x0": int(x0_min),
-            "y0": int(y0_min),
-            "x1": int(x1_max),
-            "y1": int(y1_max),
+            "x0": box_x0 + x0,
+            "y0": box_y0 + y0,
+            "x1": box_x1 + x0,
+            "y1": box_y1 + y0,
             "tile_idx": tile_idx,
-            "original_text": line_text,
-            "original_confidence": avg_conf / 100.0
+            "original_text": text,
+            "original_confidence": float(confidence)
         })
 
     return {"tile_idx": tile_idx, "tile_bounds": tile_bounds, "bboxes": bboxes}
@@ -385,7 +373,7 @@ If you cannot read the text clearly, return your best guess."""
 def run_ocr(image: Image.Image, api_key: str) -> dict:
     """
     Run hybrid OCR pipeline:
-    - Pass 1: Tiled Tesseract for bbox detection (PARALLEL)
+    - Pass 1: Tiled EasyOCR for bbox detection (sequential)
     - Stitch bboxes across tile boundaries
     - Pass 2: Gemini for text labeling (handles vertical text)
 
@@ -398,7 +386,7 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
     """
     width, height = image.size
 
-    # Tesseract is fast - can use larger tiles (fewer API calls for Gemini later)
+    # EasyOCR handles larger tiles well
     MAX_TILE_SIZE = 2000
 
     cols = max(1, (width + MAX_TILE_SIZE - 1) // MAX_TILE_SIZE)
@@ -416,35 +404,26 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
             y1 = height if row == rows - 1 else (row + 1) * tile_height
             tile_bounds.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
 
-    logger.info(f"[OCR] Pass 1: Processing {len(tile_bounds)} tiles ({cols}x{rows} grid) in PARALLEL...")
+    logger.info(f"[OCR] Pass 1: Processing {len(tile_bounds)} tiles ({cols}x{rows} grid) with EasyOCR...")
 
-    # Pass 1: Extract bboxes from tiles IN PARALLEL
-    # Prepare tile images and args for parallel processing
-    tile_args = []
+    # Get the shared EasyOCR reader
+    reader = get_easyocr_reader()
+
+    # Pass 1: Extract bboxes from tiles SEQUENTIALLY (EasyOCR Reader not thread-safe)
+    tile_results = []
     for tile_idx, bounds in enumerate(tile_bounds):
         tile_image = image.crop((bounds["x0"], bounds["y0"], bounds["x1"], bounds["y1"]))
-        tile_args.append((tile_idx, tile_image, bounds))
-
-    # Process all tiles in parallel using ThreadPoolExecutor
-    tile_results = []
-    with ThreadPoolExecutor(max_workers=min(len(tile_args), 8)) as executor:
-        futures = {executor.submit(process_tile_for_bboxes, args): args[0] for args in tile_args}
-        for future in as_completed(futures):
-            tile_idx = futures[future]
-            try:
-                result = future.result()
-                tile_results.append(result)
-            except Exception as e:
-                logger.error(f"Tile {tile_idx} failed: {e}")
-                # Add empty result for failed tile
-                tile_results.append({
-                    "tile_idx": tile_idx,
-                    "tile_bounds": tile_bounds[tile_idx],
-                    "bboxes": []
-                })
-
-    # Sort by tile_idx to maintain order for stitching
-    tile_results.sort(key=lambda r: r["tile_idx"])
+        try:
+            result = process_tile_for_bboxes(tile_idx, tile_image, bounds, reader)
+            tile_results.append(result)
+            logger.info(f"[OCR] Tile {tile_idx + 1}/{len(tile_bounds)}: {len(result['bboxes'])} bboxes")
+        except Exception as e:
+            logger.error(f"Tile {tile_idx} failed: {e}")
+            tile_results.append({
+                "tile_idx": tile_idx,
+                "tile_bounds": bounds,
+                "bboxes": []
+            })
 
     total_raw_bboxes = sum(len(r["bboxes"]) for r in tile_results)
     logger.info(f"[OCR] Pass 1 complete: {total_raw_bboxes} raw bboxes detected")
