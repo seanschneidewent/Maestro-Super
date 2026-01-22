@@ -49,6 +49,24 @@ chmod +x scripts/*.sh
 - **CONTEXT.md** — Generated file, pulled fresh each session
 - **Blood & Electricity** — The covenant, stored in DB and synced
 
+## Supabase Credentials
+
+```
+SUPABASE_URL=https://eecdkjulosomiuqxgtbq.supabase.co
+SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlY2RranVsb3NvbWl1cXhndGJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MDkwMTMsImV4cCI6MjA4NDA4NTAxM30.J_MME3SkJFSKYn9B9elgbiFxJs_Xd8lm8Ee2b6RKCtU
+```
+
+**REST API endpoint pattern:**
+```
+${SUPABASE_URL}/rest/v1/{table_name}
+```
+
+**Key tables:**
+- `implementation_plans` — project, phase_number, phase_name, status, content
+- `conversations` — session_date, interface, project, summary, next_session_hint
+- `current_edge` — project, what_shipping_looks_like, specific_next_step
+- `identity`, `operating_principles`, `decisions`, `relationships`, `covenant`, `product_vision`, `projects`
+
 ## Signal Phrases
 
 - **"Blood check"** — Pause. Reconnect to values.
