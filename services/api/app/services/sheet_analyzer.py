@@ -2,13 +2,14 @@
 Sheet Analyzer Service - OCR + Semantic Classification for Construction Sheets
 
 Pipeline:
-1. Tiled EasyOCR for bbox detection (handles large images)
+1. Tiled Tesseract for bbox detection (PARALLEL - fast!)
 2. Geometric bbox stitching across tile boundaries
 3. Gemini text labeling (handles vertical/rotated text)
 4. Quadrant-based semantic classification (region_type, role)
 5. Context markdown generation
 
-Based on ~/Downloads/sheet-analyzer/main.py - production-ready implementation.
+Performance: Tesseract is ~20-50x faster than EasyOCR for bbox extraction.
+We only need bboxes - Gemini relabels all text anyway.
 """
 
 import json
@@ -18,67 +19,73 @@ from io import BytesIO
 from typing import Optional
 
 import numpy as np
+import pytesseract
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded EasyOCR instance
-_ocr_instance = None
-
-
-def get_ocr_instance():
-    """Get or create EasyOCR reader (lazy loading - models are ~1.5GB)."""
-    global _ocr_instance
-    if _ocr_instance is None:
-        import easyocr
-        logger.info("Loading EasyOCR models (first time only)...")
-        _ocr_instance = easyocr.Reader(['en'], gpu=False)
-        logger.info("EasyOCR models loaded")
-    return _ocr_instance
-
 
 # =============================================================================
-# Pass 1: Tiled EasyOCR for bbox detection
+# Pass 1: Tiled Tesseract for bbox detection (PARALLEL)
 # =============================================================================
 
 
 def process_tile_for_bboxes(args: tuple) -> dict:
     """
-    Process a single tile with EasyOCR to extract bounding boxes.
+    Process a single tile with Tesseract to extract bounding boxes.
     Designed for parallel execution via ThreadPoolExecutor.
 
     Args:
-        args: tuple of (tile_idx, tile_array, tile_bounds, reader)
+        args: tuple of (tile_idx, tile_image, tile_bounds)
+              tile_image is a PIL Image (not numpy array)
 
     Returns:
         dict with tile_idx, bboxes list, and tile_bounds
     """
-    tile_idx, tile_array, tile_bounds, reader = args
+    tile_idx, tile_image, tile_bounds = args
     x0, y0 = tile_bounds["x0"], tile_bounds["y0"]
 
-    results = reader.readtext(
-        tile_array,
-        text_threshold=0.3,
-        low_text=0.2,
-        link_threshold=0.4
-    )
+    # Use Tesseract to get word-level bounding boxes
+    # Output format: dict with keys like 'text', 'left', 'top', 'width', 'height', 'conf'
+    try:
+        data = pytesseract.image_to_data(tile_image, output_type=pytesseract.Output.DICT)
+    except Exception as e:
+        logger.warning(f"Tesseract failed on tile {tile_idx}: {e}")
+        return {
+            "tile_idx": tile_idx,
+            "tile_bounds": tile_bounds,
+            "bboxes": []
+        }
 
     bboxes = []
-    for bbox, text, confidence in results:
-        xs = [p[0] for p in bbox]
-        ys = [p[1] for p in bbox]
-        bx0, bx1 = min(xs), max(xs)
-        by0, by1 = min(ys), max(ys)
+    n_boxes = len(data['text'])
+
+    for i in range(n_boxes):
+        # Skip empty text or low confidence
+        text = data['text'][i].strip()
+        conf = int(data['conf'][i]) if data['conf'][i] != '-1' else 0
+
+        if not text or conf < 10:  # Skip very low confidence
+            continue
+
+        left = data['left'][i]
+        top = data['top'][i]
+        width = data['width'][i]
+        height = data['height'][i]
+
+        # Skip tiny boxes (likely noise)
+        if width < 5 or height < 5:
+            continue
 
         # Offset coordinates to full image space
         bboxes.append({
-            "x0": int(bx0 + x0),
-            "y0": int(by0 + y0),
-            "x1": int(bx1 + x0),
-            "y1": int(by1 + y0),
+            "x0": int(left + x0),
+            "y0": int(top + y0),
+            "x1": int(left + width + x0),
+            "y1": int(top + height + y0),
             "tile_idx": tile_idx,
             "original_text": text,
-            "original_confidence": float(confidence)
+            "original_confidence": float(conf) / 100.0
         })
 
     return {
@@ -355,7 +362,7 @@ If you cannot read the text clearly, return your best guess."""
 def run_ocr(image: Image.Image, api_key: str) -> dict:
     """
     Run hybrid OCR pipeline:
-    - Pass 1: Tiled EasyOCR for bbox detection
+    - Pass 1: Tiled Tesseract for bbox detection (PARALLEL)
     - Stitch bboxes across tile boundaries
     - Pass 2: Gemini for text labeling (handles vertical text)
 
@@ -366,10 +373,10 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
     Returns:
         dict with words array, tile_bounds, grid info
     """
-    reader = get_ocr_instance()
     width, height = image.size
 
-    MAX_TILE_SIZE = 1400
+    # Tesseract is fast - can use larger tiles (fewer API calls for Gemini later)
+    MAX_TILE_SIZE = 2000
 
     cols = max(1, (width + MAX_TILE_SIZE - 1) // MAX_TILE_SIZE)
     rows = max(1, (height + MAX_TILE_SIZE - 1) // MAX_TILE_SIZE)
@@ -386,15 +393,35 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
             y1 = height if row == rows - 1 else (row + 1) * tile_height
             tile_bounds.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
 
-    logger.info(f"[OCR] Pass 1: Processing {len(tile_bounds)} tiles ({cols}x{rows} grid)...")
+    logger.info(f"[OCR] Pass 1: Processing {len(tile_bounds)} tiles ({cols}x{rows} grid) in PARALLEL...")
 
-    # Pass 1: Extract bboxes from tiles
-    tile_results = []
+    # Pass 1: Extract bboxes from tiles IN PARALLEL
+    # Prepare tile images and args for parallel processing
+    tile_args = []
     for tile_idx, bounds in enumerate(tile_bounds):
-        tile = image.crop((bounds["x0"], bounds["y0"], bounds["x1"], bounds["y1"]))
-        tile_array = np.array(tile)
-        result = process_tile_for_bboxes((tile_idx, tile_array, bounds, reader))
-        tile_results.append(result)
+        tile_image = image.crop((bounds["x0"], bounds["y0"], bounds["x1"], bounds["y1"]))
+        tile_args.append((tile_idx, tile_image, bounds))
+
+    # Process all tiles in parallel using ThreadPoolExecutor
+    tile_results = []
+    with ThreadPoolExecutor(max_workers=min(len(tile_args), 8)) as executor:
+        futures = {executor.submit(process_tile_for_bboxes, args): args[0] for args in tile_args}
+        for future in as_completed(futures):
+            tile_idx = futures[future]
+            try:
+                result = future.result()
+                tile_results.append(result)
+            except Exception as e:
+                logger.error(f"Tile {tile_idx} failed: {e}")
+                # Add empty result for failed tile
+                tile_results.append({
+                    "tile_idx": tile_idx,
+                    "tile_bounds": tile_bounds[tile_idx],
+                    "bboxes": []
+                })
+
+    # Sort by tile_idx to maintain order for stitching
+    tile_results.sort(key=lambda r: r["tile_idx"])
 
     total_raw_bboxes = sum(len(r["bboxes"]) for r in tile_results)
     logger.info(f"[OCR] Pass 1 complete: {total_raw_bboxes} raw bboxes detected")
