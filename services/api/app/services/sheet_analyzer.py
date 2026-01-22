@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 def process_tile_for_bboxes(args: tuple) -> dict:
     """
-    Process a single tile with Tesseract to extract bounding boxes.
+    Process a single tile with Tesseract to extract LINE-LEVEL bounding boxes.
+    Groups words by Tesseract's hierarchical data (block_num, par_num, line_num).
     Designed for parallel execution via ThreadPoolExecutor.
 
     Args:
@@ -41,32 +42,26 @@ def process_tile_for_bboxes(args: tuple) -> dict:
               tile_image is a PIL Image (not numpy array)
 
     Returns:
-        dict with tile_idx, bboxes list, and tile_bounds
+        dict with tile_idx, bboxes list (line-level), and tile_bounds
     """
     tile_idx, tile_image, tile_bounds = args
     x0, y0 = tile_bounds["x0"], tile_bounds["y0"]
 
-    # Use Tesseract to get word-level bounding boxes
-    # Output format: dict with keys like 'text', 'left', 'top', 'width', 'height', 'conf'
     try:
         data = pytesseract.image_to_data(tile_image, output_type=pytesseract.Output.DICT)
     except Exception as e:
         logger.warning(f"Tesseract failed on tile {tile_idx}: {e}")
-        return {
-            "tile_idx": tile_idx,
-            "tile_bounds": tile_bounds,
-            "bboxes": []
-        }
+        return {"tile_idx": tile_idx, "tile_bounds": tile_bounds, "bboxes": []}
 
-    bboxes = []
+    # Group words by line: (block_num, par_num, line_num) -> list of word data
+    lines = {}
     n_boxes = len(data['text'])
 
     for i in range(n_boxes):
-        # Skip empty text or low confidence
         text = data['text'][i].strip()
         conf = int(data['conf'][i]) if data['conf'][i] != '-1' else 0
 
-        if not text or conf < 10:  # Skip very low confidence
+        if not text or conf < 10:
             continue
 
         left = data['left'][i]
@@ -74,26 +69,52 @@ def process_tile_for_bboxes(args: tuple) -> dict:
         width = data['width'][i]
         height = data['height'][i]
 
-        # Skip tiny boxes (likely noise)
         if width < 5 or height < 5:
             continue
 
-        # Offset coordinates to full image space
-        bboxes.append({
-            "x0": int(left + x0),
-            "y0": int(top + y0),
-            "x1": int(left + width + x0),
-            "y1": int(top + height + y0),
-            "tile_idx": tile_idx,
-            "original_text": text,
-            "original_confidence": float(conf) / 100.0
+        # Line key from Tesseract hierarchy
+        line_key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
+
+        if line_key not in lines:
+            lines[line_key] = []
+
+        lines[line_key].append({
+            "x0": left + x0,
+            "y0": top + y0,
+            "x1": left + width + x0,
+            "y1": top + height + y0,
+            "text": text,
+            "conf": conf,
+            "word_num": data['word_num'][i]
         })
 
-    return {
-        "tile_idx": tile_idx,
-        "tile_bounds": tile_bounds,
-        "bboxes": bboxes
-    }
+    # Merge words into line-level bboxes
+    bboxes = []
+    for line_key, words in lines.items():
+        # Sort by word_num to maintain reading order
+        words.sort(key=lambda w: w["word_num"])
+
+        # Merge bbox coordinates
+        x0_min = min(w["x0"] for w in words)
+        y0_min = min(w["y0"] for w in words)
+        x1_max = max(w["x1"] for w in words)
+        y1_max = max(w["y1"] for w in words)
+
+        # Concatenate text
+        line_text = " ".join(w["text"] for w in words)
+        avg_conf = sum(w["conf"] for w in words) / len(words)
+
+        bboxes.append({
+            "x0": int(x0_min),
+            "y0": int(y0_min),
+            "x1": int(x1_max),
+            "y1": int(y1_max),
+            "tile_idx": tile_idx,
+            "original_text": line_text,
+            "original_confidence": avg_conf / 100.0
+        })
+
+    return {"tile_idx": tile_idx, "tile_bounds": tile_bounds, "bboxes": bboxes}
 
 
 def y_coordinates_overlap(bbox1: dict, bbox2: dict, tolerance: int = 20) -> bool:
