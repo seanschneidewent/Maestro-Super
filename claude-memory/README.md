@@ -2,6 +2,13 @@
 
 Universal memory layer for Claude across all interfaces — Claude Code, Cowork, SMS, claude.ai.
 
+## Database Credentials
+
+```
+SUPABASE_URL=https://eecdkjulosomiuqxgtbq.supabase.co
+SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlY2RranVsb3NvbWl1cXhndGJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MDkwMTMsImV4cCI6MjA4NDA4NTAxM30.J_MME3SkJFSKYn9B9elgbiFxJs_Xd8lm8Ee2b6RKCtU
+```
+
 ## Setup (New Machine)
 
 1. Clone the repo:
