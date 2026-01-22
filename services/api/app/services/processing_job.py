@@ -12,10 +12,12 @@ Status flow: pending -> processing -> completed/failed/paused
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime
 from io import BytesIO
 from typing import AsyncGenerator, Callable, Optional
+from uuid import UUID
 
 from PIL import Image
 from sqlalchemy.orm import Session
@@ -31,6 +33,15 @@ from app.services.sheet_analyzer import process_page
 from app.services.storage import download_file
 
 logger = logging.getLogger(__name__)
+
+
+class UUIDEncoder(json.JSONEncoder):
+    """JSON encoder that handles UUID objects."""
+    def default(self, obj):
+        if isinstance(obj, UUID):
+            return str(obj)
+        return super().default(obj)
+
 
 # Global dict to track active jobs and their event queues
 # Key: job_id, Value: asyncio.Queue for SSE events
@@ -311,8 +322,6 @@ async def sse_event_generator(job_id: str) -> AsyncGenerator[str, None]:
     Yields:
         SSE-formatted event strings
     """
-    import json
-
     # Get or create queue for this job
     queue = get_job_queue(job_id)
     if not queue:
@@ -322,28 +331,26 @@ async def sse_event_generator(job_id: str) -> AsyncGenerator[str, None]:
     with SessionLocal() as db:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if not job:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'}, cls=UUIDEncoder)}\n\n"
             return
 
         # Send initial state
-        yield f"data: {json.dumps({'type': 'init', 'status': job.status, 'total_pages': job.total_pages, 'processed_pages': job.processed_pages, 'current_page_name': job.current_page_name})}\n\n"
+        yield f"data: {json.dumps({'type': 'init', 'status': job.status, 'total_pages': job.total_pages, 'processed_pages': job.processed_pages, 'current_page_name': job.current_page_name}, cls=UUIDEncoder)}\n\n"
 
         # If job is already completed, send completion event
         if job.status == "completed":
-            yield f"data: {json.dumps({'type': 'job_completed', 'job_id': job_id, 'processed_pages': job.processed_pages, 'total_pages': job.total_pages})}\n\n"
+            yield f"data: {json.dumps({'type': 'job_completed', 'job_id': job_id, 'processed_pages': job.processed_pages, 'total_pages': job.total_pages}, cls=UUIDEncoder)}\n\n"
             return
         elif job.status == "failed":
-            yield f"data: {json.dumps({'type': 'job_failed', 'error': job.error_message})}\n\n"
+            yield f"data: {json.dumps({'type': 'job_failed', 'error': job.error_message}, cls=UUIDEncoder)}\n\n"
             return
 
     # Stream events from queue
-    last_heartbeat = asyncio.get_event_loop().time()
-
     while True:
         try:
             # Wait for event with timeout for heartbeat
             event = await asyncio.wait_for(queue.get(), timeout=3.0)
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"data: {json.dumps(event, cls=UUIDEncoder)}\n\n"
 
             # Check for terminal events
             if event.get("type") in ("job_completed", "job_failed"):
@@ -352,16 +359,15 @@ async def sse_event_generator(job_id: str) -> AsyncGenerator[str, None]:
         except asyncio.TimeoutError:
             # Send heartbeat
             yield ": heartbeat\n\n"
-            last_heartbeat = asyncio.get_event_loop().time()
 
             # Check if job is still active
             with SessionLocal() as db:
                 job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
                 if job and job.status in ("completed", "failed"):
                     if job.status == "completed":
-                        yield f"data: {json.dumps({'type': 'job_completed', 'job_id': job_id, 'processed_pages': job.processed_pages, 'total_pages': job.total_pages})}\n\n"
+                        yield f"data: {json.dumps({'type': 'job_completed', 'job_id': job_id, 'processed_pages': job.processed_pages, 'total_pages': job.total_pages}, cls=UUIDEncoder)}\n\n"
                     else:
-                        yield f"data: {json.dumps({'type': 'job_failed', 'error': job.error_message})}\n\n"
+                        yield f"data: {json.dumps({'type': 'job_failed', 'error': job.error_message}, cls=UUIDEncoder)}\n\n"
                     break
 
 
