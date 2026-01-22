@@ -54,190 +54,6 @@ export function useProcessingStream(projectId: string | null) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Start processing job
-  const startProcessing = useCallback(async () => {
-    if (!projectId) return null;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(`${API_URL}/projects/${projectId}/process`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Failed to start processing' }));
-        throw new Error(errorData.detail || 'Failed to start processing');
-      }
-
-      const data = await response.json();
-
-      setState(prev => ({
-        ...prev,
-        status: 'pending',
-        jobId: data.job_id,
-        progress: { current: 0, total: data.total_pages },
-        error: null,
-      }));
-
-      return data.job_id;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start processing';
-      setState(prev => ({ ...prev, status: 'failed', error: message }));
-      return null;
-    }
-  }, [projectId]);
-
-  // Pause processing job
-  const pauseProcessing = useCallback(async () => {
-    if (!projectId) return false;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(`${API_URL}/projects/${projectId}/process/pause`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Failed to pause processing' }));
-        throw new Error(errorData.detail || 'Failed to pause processing');
-      }
-
-      setState(prev => ({
-        ...prev,
-        status: 'paused',
-      }));
-
-      return true;
-    } catch (err) {
-      console.error('Failed to pause processing:', err);
-      return false;
-    }
-  }, [projectId]);
-
-  // Resume processing job
-  const resumeProcessing = useCallback(async () => {
-    if (!projectId) return null;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(`${API_URL}/projects/${projectId}/process/resume`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Failed to resume processing' }));
-        throw new Error(errorData.detail || 'Failed to resume processing');
-      }
-
-      const data = await response.json();
-
-      setState(prev => ({
-        ...prev,
-        status: 'processing',
-        jobId: data.job_id,
-      }));
-
-      // Reconnect to the stream
-      await connectToStream(data.job_id);
-
-      return data.job_id;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to resume processing';
-      setState(prev => ({ ...prev, error: message }));
-      return null;
-    }
-  }, [projectId, connectToStream]);
-
-  // Connect to SSE stream
-  const connectToStream = useCallback(async (jobId: string) => {
-    if (!projectId || eventSourceRef.current) return;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      // EventSource doesn't support custom headers, so we use fetch for the initial connection
-      // and then parse the SSE stream manually
-      const url = `${API_URL}/projects/${projectId}/process/stream?job_id=${jobId}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'text/event-stream',
-          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to connect to processing stream');
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const processStream = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            // Skip heartbeat comments
-            if (line.startsWith(':')) continue;
-
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                handleEvent(data);
-              } catch (parseErr) {
-                console.error('Failed to parse SSE event:', parseErr);
-              }
-            }
-          }
-        }
-      };
-
-      processStream().catch(err => {
-        console.error('Stream processing error:', err);
-        // Attempt reconnect after 3 seconds
-        if (state.status === 'processing') {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connectToStream(jobId);
-          }, 3000);
-        }
-      });
-
-    } catch (err) {
-      console.error('Failed to connect to SSE stream:', err);
-      setState(prev => ({
-        ...prev,
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Connection failed',
-      }));
-    }
-  }, [projectId, state.status]);
-
   // Handle SSE events
   const handleEvent = useCallback((event: Record<string, unknown>) => {
     const eventType = event.type as string;
@@ -358,6 +174,186 @@ export function useProcessingStream(projectId: string | null) {
         break;
     }
   }, []);
+
+  // Connect to SSE stream (defined before functions that use it)
+  const connectToStream = useCallback(async (jobId: string) => {
+    if (!projectId || eventSourceRef.current) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const url = `${API_URL}/projects/${projectId}/process/stream?job_id=${jobId}`;
+
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'text/event-stream',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to connect to processing stream');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const processStream = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith(':')) continue;
+
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                handleEvent(data);
+              } catch (parseErr) {
+                console.error('Failed to parse SSE event:', parseErr);
+              }
+            }
+          }
+        }
+      };
+
+      processStream().catch(err => {
+        console.error('Stream processing error:', err);
+        if (state.status === 'processing') {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connectToStream(jobId);
+          }, 3000);
+        }
+      });
+
+    } catch (err) {
+      console.error('Failed to connect to SSE stream:', err);
+      setState(prev => ({
+        ...prev,
+        status: 'failed',
+        error: err instanceof Error ? err.message : 'Connection failed',
+      }));
+    }
+  }, [projectId, state.status, handleEvent]);
+
+  // Start processing job
+  const startProcessing = useCallback(async () => {
+    if (!projectId) return null;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`${API_URL}/projects/${projectId}/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to start processing' }));
+        throw new Error(errorData.detail || 'Failed to start processing');
+      }
+
+      const data = await response.json();
+
+      setState(prev => ({
+        ...prev,
+        status: 'pending',
+        jobId: data.job_id,
+        progress: { current: 0, total: data.total_pages },
+        error: null,
+      }));
+
+      return data.job_id;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start processing';
+      setState(prev => ({ ...prev, status: 'failed', error: message }));
+      return null;
+    }
+  }, [projectId]);
+
+  // Pause processing job
+  const pauseProcessing = useCallback(async () => {
+    if (!projectId) return false;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`${API_URL}/projects/${projectId}/process/pause`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to pause processing' }));
+        throw new Error(errorData.detail || 'Failed to pause processing');
+      }
+
+      setState(prev => ({
+        ...prev,
+        status: 'paused',
+      }));
+
+      return true;
+    } catch (err) {
+      console.error('Failed to pause processing:', err);
+      return false;
+    }
+  }, [projectId]);
+
+  // Resume processing job (connectToStream is now defined above)
+  const resumeProcessing = useCallback(async () => {
+    if (!projectId) return null;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`${API_URL}/projects/${projectId}/process/resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to resume processing' }));
+        throw new Error(errorData.detail || 'Failed to resume processing');
+      }
+
+      const data = await response.json();
+
+      setState(prev => ({
+        ...prev,
+        status: 'processing',
+        jobId: data.job_id,
+      }));
+
+      // Reconnect to the stream
+      await connectToStream(data.job_id);
+
+      return data.job_id;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to resume processing';
+      setState(prev => ({ ...prev, error: message }));
+      return null;
+    }
+  }, [projectId, connectToStream]);
 
   // Check for active job on mount
   useEffect(() => {
