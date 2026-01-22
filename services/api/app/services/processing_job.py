@@ -229,8 +229,19 @@ async def process_project_pages(job_id: str):
             if image.mode != "RGB":
                 image = image.convert("RGB")
 
+            # Create progress callback to emit SSE events during page processing
+            async def page_progress_callback(stage: str, current: int, total: int):
+                await emit_event(job_id, {
+                    "type": "page_progress",
+                    "page_id": page_id,
+                    "page_name": page_name,
+                    "stage": stage,
+                    "current": current,
+                    "total": total,
+                })
+
             # Run sheet-analyzer pipeline
-            result = await process_page(image, api_key, page_name)
+            result = await process_page(image, api_key, page_name, progress_callback=page_progress_callback)
 
             # Parse details from markdown
             details = parse_context_markdown(result["context_markdown"])

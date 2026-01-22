@@ -132,6 +132,12 @@ export function useProcessingStream(projectId: string | null) {
         }));
         break;
 
+      case 'page_progress':
+        // Intermediate progress events keep the connection alive
+        // Optionally update UI with detailed progress stage info
+        // Stages: ocr_tile, ocr_stitch, ocr_gemini, ai_semantic_start, ai_semantic_complete, ai_markdown_start, ai_markdown_complete
+        break;
+
       case 'job_completed':
         setState(prev => ({
           ...prev,

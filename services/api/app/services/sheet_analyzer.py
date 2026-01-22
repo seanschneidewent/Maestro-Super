@@ -16,11 +16,14 @@ import json
 import logging
 import time
 from io import BytesIO
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import easyocr
 import numpy as np
 from PIL import Image, ImageDraw
+
+# Type alias for progress callback
+ProgressCallback = Optional[Callable[[str, int, int], Awaitable[None]]]
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +373,11 @@ If you cannot read the text clearly, return your best guess."""
 # =============================================================================
 
 
-def run_ocr(image: Image.Image, api_key: str) -> dict:
+async def run_ocr(
+    image: Image.Image,
+    api_key: str,
+    progress_callback: ProgressCallback = None
+) -> dict:
     """
     Run hybrid OCR pipeline:
     - Pass 1: Tiled EasyOCR for bbox detection (sequential)
@@ -380,10 +387,12 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
     Args:
         image: PIL Image object
         api_key: Gemini API key
+        progress_callback: Optional async callback(stage, current, total) for progress updates
 
     Returns:
         dict with words array, tile_bounds, grid info
     """
+    import asyncio
     width, height = image.size
 
     # EasyOCR handles larger tiles well
@@ -411,12 +420,13 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
 
     # Pass 1: Extract bboxes from tiles SEQUENTIALLY (EasyOCR Reader not thread-safe)
     tile_results = []
+    total_tiles = len(tile_bounds)
     for tile_idx, bounds in enumerate(tile_bounds):
         tile_image = image.crop((bounds["x0"], bounds["y0"], bounds["x1"], bounds["y1"]))
         try:
-            result = process_tile_for_bboxes(tile_idx, tile_image, bounds, reader)
+            result = await asyncio.to_thread(process_tile_for_bboxes, tile_idx, tile_image, bounds, reader)
             tile_results.append(result)
-            logger.info(f"[OCR] Tile {tile_idx + 1}/{len(tile_bounds)}: {len(result['bboxes'])} bboxes")
+            logger.info(f"[OCR] Tile {tile_idx + 1}/{total_tiles}: {len(result['bboxes'])} bboxes")
         except Exception as e:
             logger.error(f"Tile {tile_idx} failed: {e}")
             tile_results.append({
@@ -424,6 +434,10 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
                 "tile_bounds": bounds,
                 "bboxes": []
             })
+
+        # Emit progress after each tile
+        if progress_callback:
+            await progress_callback("ocr_tile", tile_idx + 1, total_tiles)
 
     total_raw_bboxes = sum(len(r["bboxes"]) for r in tile_results)
     logger.info(f"[OCR] Pass 1 complete: {total_raw_bboxes} raw bboxes detected")
@@ -434,11 +448,19 @@ def run_ocr(image: Image.Image, api_key: str) -> dict:
     stitched_bboxes = stitch_bboxes_across_tiles(tile_results, grid)
     logger.info(f"[OCR] Stitching complete: {len(stitched_bboxes)} bboxes after merging")
 
+    # Emit progress after stitching
+    if progress_callback:
+        await progress_callback("ocr_stitch", len(stitched_bboxes), len(stitched_bboxes))
+
     # Pass 2: Extract text using Gemini
     logger.info(f"[OCR] Pass 2: Labeling {len(stitched_bboxes)} bboxes with Gemini...")
     crops = crop_all_bboxes(image, stitched_bboxes, padding=0)
-    text_results = label_bboxes_with_gemini(crops, stitched_bboxes, api_key)
+    text_results = await asyncio.to_thread(label_bboxes_with_gemini, crops, stitched_bboxes, api_key)
     logger.info(f"[OCR] Pass 2 complete: text extracted for {len(text_results)} bboxes")
+
+    # Emit progress after Gemini labeling
+    if progress_callback:
+        await progress_callback("ocr_gemini", len(text_results), len(stitched_bboxes))
 
     # Combine bboxes + text into final words
     all_words = []
@@ -784,7 +806,8 @@ Focus on accuracy - use the OCR data to verify what you see in the image."""
 async def process_page(
     image: Image.Image,
     api_key: str,
-    page_name: str = "Unknown"
+    page_name: str = "Unknown",
+    progress_callback: ProgressCallback = None
 ) -> dict:
     """
     Run the full sheet-analyzer pipeline on a single page.
@@ -798,6 +821,7 @@ async def process_page(
         image: PIL Image of the page
         api_key: Gemini API key
         page_name: Page name for logging
+        progress_callback: Optional async callback(stage, current, total) for progress updates
 
     Returns:
         dict with semantic_index, context_markdown, and details
@@ -806,20 +830,28 @@ async def process_page(
 
     logger.info(f"[{page_name}] Starting sheet-analyzer pipeline...")
 
-    # Pass 1-2: OCR
+    # Pass 1-2: OCR (run_ocr is now async and handles its own progress callbacks)
     logger.info(f"[{page_name}] Running OCR...")
-    ocr_result = await asyncio.to_thread(run_ocr, image, api_key)
+    ocr_result = await run_ocr(image, api_key, progress_callback)
     logger.info(f"[{page_name}] OCR complete: {ocr_result['word_count']} words")
 
     # Pass 3: Semantic classification
     logger.info(f"[{page_name}] Running semantic analysis...")
+    if progress_callback:
+        await progress_callback("ai_semantic_start", 0, 4)
     semantic_index = await asyncio.to_thread(run_semantic_analysis, image, ocr_result, api_key)
     logger.info(f"[{page_name}] Semantic analysis complete")
+    if progress_callback:
+        await progress_callback("ai_semantic_complete", 4, 4)
 
     # Pass 4: Context markdown
     logger.info(f"[{page_name}] Generating context markdown...")
+    if progress_callback:
+        await progress_callback("ai_markdown_start", 0, 1)
     context_markdown = await asyncio.to_thread(generate_context_markdown, image, semantic_index, api_key)
     logger.info(f"[{page_name}] Context markdown complete")
+    if progress_callback:
+        await progress_callback("ai_markdown_complete", 1, 1)
 
     return {
         "semantic_index": semantic_index,
