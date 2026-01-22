@@ -85,7 +85,7 @@ def process_tile_for_bboxes(args: tuple) -> dict:
             "y1": top + height + y0,
             "text": text,
             "conf": conf,
-            "word_num": data['word_num'][i]
+            "word_num": int(data['word_num'][i])  # Cast to int for proper numeric sorting
         })
 
     # Merge words into line-level bboxes
