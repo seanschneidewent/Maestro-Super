@@ -4,8 +4,11 @@ Processing Job Service - Background job system for sheet-analyzer pipeline.
 Handles:
 - Starting processing jobs
 - Processing pages sequentially with progress tracking
+- Pause/resume functionality
 - Updating job status
 - SSE event emission for live progress updates
+
+Status flow: pending -> processing -> completed/failed/paused
 """
 
 import asyncio
@@ -164,6 +167,21 @@ async def process_project_pages(job_id: str):
     processed_count = 0
 
     for page_data in page_data_list:
+        # Check if job was paused before processing next page
+        with SessionLocal() as db:
+            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+            if job and job.status == "paused":
+                logger.info(f"[{job_id}] Job paused at page {processed_count}/{total_pages}")
+                await emit_event(job_id, {
+                    "type": "job_paused",
+                    "job_id": job_id,
+                    "processed_pages": processed_count,
+                    "total_pages": total_pages,
+                })
+                # Exit the processing loop - job can be resumed later
+                remove_job_queue(job_id)
+                return
+
         page_id = page_data["id"]
         page_name = page_data["page_name"]
         page_image_path = page_data["page_image_path"]
@@ -357,3 +375,42 @@ def get_active_job_for_project(project_id: str, db: Session) -> Optional[Process
         )
         .first()
     )
+
+
+def pause_processing_job(project_id: str, db: Session) -> Optional[ProcessingJob]:
+    """
+    Pause an active processing job.
+
+    The job will stop after completing the current page.
+    Returns the job if paused, None if no active job found.
+    """
+    job = get_active_job_for_project(project_id, db)
+    if job:
+        job.status = "paused"
+        db.commit()
+        db.refresh(job)
+        logger.info(f"Paused processing job {job.id} for project {project_id}")
+    return job
+
+
+def resume_processing_job(project_id: str, db: Session) -> Optional[ProcessingJob]:
+    """
+    Resume a paused processing job.
+
+    Creates a new background task to continue processing from where it left off.
+    Returns the job if resumed, None if no paused job found.
+    """
+    job = (
+        db.query(ProcessingJob)
+        .filter(
+            ProcessingJob.project_id == project_id,
+            ProcessingJob.status == "paused",
+        )
+        .first()
+    )
+    if job:
+        job.status = "processing"
+        db.commit()
+        db.refresh(job)
+        logger.info(f"Resumed processing job {job.id} for project {project_id}")
+    return job

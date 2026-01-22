@@ -1037,12 +1037,15 @@ export const SetupMode: React.FC<SetupModeProps> = ({
               onDismiss={processing.clearLastCompleted}
             />
 
-            {/* Processing progress bar (shown during processing) */}
+            {/* Processing progress bar (shown during processing or paused) */}
             <ProcessingBar
               currentPageName={processing.currentPage?.name ?? null}
               current={processing.progress.current}
               total={processing.progress.total}
-              isVisible={processing.isProcessing}
+              isVisible={processing.isProcessing || processing.isPaused}
+              isPaused={processing.isPaused}
+              onPause={processing.pause}
+              onResume={processing.resume}
             />
          </div>
       </div>

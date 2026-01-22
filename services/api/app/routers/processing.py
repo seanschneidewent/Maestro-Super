@@ -564,7 +564,9 @@ from app.models.processing_job import ProcessingJob
 from app.services.processing_job import (
     create_job_queue,
     get_active_job_for_project,
+    pause_processing_job,
     process_project_pages,
+    resume_processing_job,
     sse_event_generator,
     start_processing_job,
 )
@@ -713,4 +715,69 @@ async def get_processing_status(
     return {
         "status": "none",
         "message": "No processing jobs found for this project",
+    }
+
+
+@router.post("/projects/{project_id}/process/pause")
+async def pause_project_processing(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Pause an active processing job.
+
+    The job will stop after completing the current page.
+    Can be resumed later with /process/resume.
+
+    Returns:
+        {"success": true, "job_id": "...", "processed_pages": N, "total_pages": T}
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    job = pause_processing_job(project_id, db)
+    if not job:
+        raise HTTPException(status_code=404, detail="No active processing job to pause")
+
+    return {
+        "success": True,
+        "job_id": job.id,
+        "processed_pages": job.processed_pages,
+        "total_pages": job.total_pages,
+        "status": "paused",
+    }
+
+
+@router.post("/projects/{project_id}/process/resume")
+async def resume_project_processing(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Resume a paused processing job.
+
+    Continues processing from where it left off.
+
+    Returns:
+        {"success": true, "job_id": "...", "processed_pages": N, "total_pages": T}
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    job = resume_processing_job(project_id, db)
+    if not job:
+        raise HTTPException(status_code=404, detail="No paused processing job to resume")
+
+    # Create event queue and restart background task
+    create_job_queue(job.id)
+    asyncio.create_task(process_project_pages(job.id))
+
+    return {
+        "success": True,
+        "job_id": job.id,
+        "processed_pages": job.processed_pages,
+        "total_pages": job.total_pages,
+        "status": "processing",
     }

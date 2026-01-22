@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
-export type ProcessingStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
+export type ProcessingStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed' | 'paused';
 
 export interface ProcessingProgress {
   current: number;
@@ -91,6 +91,77 @@ export function useProcessingStream(projectId: string | null) {
       return null;
     }
   }, [projectId]);
+
+  // Pause processing job
+  const pauseProcessing = useCallback(async () => {
+    if (!projectId) return false;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`${API_URL}/projects/${projectId}/process/pause`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to pause processing' }));
+        throw new Error(errorData.detail || 'Failed to pause processing');
+      }
+
+      setState(prev => ({
+        ...prev,
+        status: 'paused',
+      }));
+
+      return true;
+    } catch (err) {
+      console.error('Failed to pause processing:', err);
+      return false;
+    }
+  }, [projectId]);
+
+  // Resume processing job
+  const resumeProcessing = useCallback(async () => {
+    if (!projectId) return null;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`${API_URL}/projects/${projectId}/process/resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to resume processing' }));
+        throw new Error(errorData.detail || 'Failed to resume processing');
+      }
+
+      const data = await response.json();
+
+      setState(prev => ({
+        ...prev,
+        status: 'processing',
+        jobId: data.job_id,
+      }));
+
+      // Reconnect to the stream
+      await connectToStream(data.job_id);
+
+      return data.job_id;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to resume processing';
+      setState(prev => ({ ...prev, error: message }));
+      return null;
+    }
+  }, [projectId, connectToStream]);
 
   // Connect to SSE stream
   const connectToStream = useCallback(async (jobId: string) => {
@@ -266,6 +337,18 @@ export function useProcessingStream(projectId: string | null) {
         }));
         break;
 
+      case 'job_paused':
+        setState(prev => ({
+          ...prev,
+          status: 'paused',
+          currentPage: null,
+          progress: {
+            current: event.processed_pages as number,
+            total: event.total_pages as number,
+          },
+        }));
+        break;
+
       case 'error':
         setState(prev => ({
           ...prev,
@@ -312,6 +395,18 @@ export function useProcessingStream(projectId: string | null) {
             if (data.job_id) {
               connectToStream(data.job_id);
             }
+          } else if (data.status === 'paused') {
+            // Show paused state so user can resume
+            setState(prev => ({
+              ...prev,
+              status: 'paused',
+              jobId: data.job_id,
+              progress: {
+                current: data.processed_pages || 0,
+                total: data.total_pages || 0,
+              },
+              currentPage: null,
+            }));
           }
         }
       } catch (err) {
@@ -362,7 +457,10 @@ export function useProcessingStream(projectId: string | null) {
     ...state,
     isProcessing: state.status === 'processing' || state.status === 'pending',
     isComplete: state.status === 'completed',
+    isPaused: state.status === 'paused',
     start,
+    pause: pauseProcessing,
+    resume: resumeProcessing,
     reset,
     clearLastCompleted,
     connectToStream,
