@@ -14,6 +14,7 @@ We only need bboxes - Gemini relabels all text anyway.
 
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import Optional
@@ -237,18 +238,16 @@ def crop_all_bboxes(image: Image.Image, bboxes: list, padding: int = 0) -> list:
 def label_bboxes_with_gemini(
     crops: list,
     bboxes: list,
-    api_key: str,
-    batch_size: int = 100
+    api_key: str
 ) -> dict:
     """
-    Use Gemini to read text from all cropped bbox images.
+    Single Gemini call to read text from ALL cropped bbox images.
     Rotates vertical crops 90° CCW so text is horizontal.
 
     Args:
         crops: List of (bbox_id, PIL Image crop) tuples
         bboxes: List of bbox dicts with id, width, height
         api_key: Gemini API key
-        batch_size: Max images per Gemini call
 
     Returns:
         Dict mapping bbox_id -> {"text": str, "confidence": float}
@@ -272,18 +271,11 @@ def label_bboxes_with_gemini(
 
         prepared_crops.append((bbox_id, crop))
 
-    all_results = {}
-    total_batches = (len(prepared_crops) + batch_size - 1) // batch_size
+    logger.info(f"[OCR] Pass 2: Single Gemini call for {len(prepared_crops)} bbox crops")
+
     client = genai.Client(api_key=api_key)
 
-    for batch_idx in range(total_batches):
-        start = batch_idx * batch_size
-        end = min(start + batch_size, len(prepared_crops))
-        batch = prepared_crops[start:end]
-
-        logger.info(f"[OCR] Pass 2: Gemini batch {batch_idx + 1}/{total_batches} ({len(batch)} images)")
-
-        prompt = f"""Read the text in each of the {len(batch)} cropped images from a construction sheet.
+    prompt = f"""Read the text in each of the {len(prepared_crops)} cropped images from a construction sheet.
 
 For each image, return the exact text you see. These are cropped regions from architectural/engineering drawings.
 
@@ -304,11 +296,16 @@ Return ONLY valid JSON (no markdown):
 Return one entry for EACH image using the 0-based index as "id".
 If you cannot read the text clearly, return your best guess."""
 
-        contents = [prompt]
-        for idx, (bbox_id, crop_img) in enumerate(batch):
-            contents.append(f"Image {idx}:")
-            contents.append(crop_img)
+    contents = [prompt]
+    for idx, (bbox_id, crop_img) in enumerate(prepared_crops):
+        contents.append(f"Image {idx}:")
+        contents.append(crop_img)
 
+    all_results = {}
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2  # seconds
+
+    for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -328,25 +325,30 @@ If you cannot read the text clearly, return your best guess."""
                 for r in results:
                     if "id" in r and "text" in r:
                         idx = r["id"]
-                        if 0 <= idx < len(batch):
-                            bbox_id = batch[idx][0]
+                        if 0 <= idx < len(prepared_crops):
+                            bbox_id = prepared_crops[idx][0]
                             all_results[bbox_id] = {
                                 "text": (r["text"] or "").strip(),
                                 "confidence": 0.9
                             }
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse Gemini response for batch {batch_idx + 1}: {e}")
-            for bbox_id, _ in batch:
-                if bbox_id not in all_results:
-                    all_results[bbox_id] = {"text": "", "confidence": 0.0}
-        except Exception as e:
-            logger.warning(f"Gemini API error for batch {batch_idx + 1}: {e}")
-            for bbox_id, _ in batch:
-                if bbox_id not in all_results:
-                    all_results[bbox_id] = {"text": "", "confidence": 0.0}
+            logger.info(f"[OCR] Pass 2 complete: {len(all_results)} texts extracted")
+            break  # Success, exit retry loop
 
-    # Ensure all bbox IDs have results
+        except json.JSONDecodeError as e:
+            if attempt < MAX_RETRIES - 1:
+                logger.warning(f"[OCR] Pass 2 attempt {attempt + 1} failed (JSON parse): {e}, retrying...")
+                time.sleep(RETRY_DELAY * (attempt + 1))
+            else:
+                logger.error(f"[OCR] Pass 2 failed after {MAX_RETRIES} attempts (JSON parse): {e}")
+        except Exception as e:
+            if attempt < MAX_RETRIES - 1:
+                logger.warning(f"[OCR] Pass 2 attempt {attempt + 1} failed: {e}, retrying...")
+                time.sleep(RETRY_DELAY * (attempt + 1))
+            else:
+                logger.error(f"[OCR] Pass 2 failed after {MAX_RETRIES} attempts: {e}")
+
+    # Ensure all bbox IDs have results (fallback to empty)
     for bbox_id, _ in crops:
         if bbox_id not in all_results:
             all_results[bbox_id] = {"text": "", "confidence": 0.0}
