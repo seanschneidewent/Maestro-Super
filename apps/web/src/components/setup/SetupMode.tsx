@@ -867,7 +867,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         onWidthChange={setLeftSidebarWidth}
       >
         <div className="flex flex-col h-full">
-          <div className="p-4 border-b border-white/5 space-y-3">
+          <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5 space-y-3">
               <ModeToggle mode={mode} setMode={setMode} />
               <div>
                 <h1 className="font-bold text-lg tracking-tight text-white">
@@ -1062,7 +1062,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         onWidthChange={setRightSidebarWidth}
       >
         <div className="flex flex-col h-full">
-           <div className="p-4 border-b border-white/5">
+           <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5">
               <h2 className="font-semibold text-slate-100 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>
                 Page Details
