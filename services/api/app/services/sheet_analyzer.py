@@ -468,10 +468,16 @@ async def run_ocr(
         bbox_id = bbox["id"]
         text_data = text_results.get(bbox_id, {"text": "", "confidence": 0.0})
 
+        # Use Gemini text, fall back to EasyOCR original_text if empty
+        gemini_text = text_data["text"]
+        original_text = bbox.get("original_text", "")
+        final_text = gemini_text if gemini_text else original_text
+        final_confidence = text_data["confidence"] if gemini_text else bbox.get("original_confidence", 0.0)
+
         all_words.append({
             "id": bbox_id,
-            "text": text_data["text"],
-            "confidence": text_data["confidence"],
+            "text": final_text,
+            "confidence": final_confidence,
             "bbox": {
                 "x0": bbox["x0"],
                 "y0": bbox["y0"],
