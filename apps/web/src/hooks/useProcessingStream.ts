@@ -233,9 +233,49 @@ export function useProcessingStream(projectId: string | null) {
         }
       };
 
-      processStream().catch(err => {
+      processStream().catch(async err => {
         console.error('Stream processing error:', err);
         if (state.status === 'processing') {
+          // Fetch fresh progress from server before reconnecting
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const statusResponse = await fetch(`${API_URL}/projects/${projectId}/process/status`, {
+              headers: session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {},
+            });
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              if (statusData.status === 'processing' || statusData.status === 'pending') {
+                setState(prev => ({
+                  ...prev,
+                  progress: {
+                    current: statusData.processed_pages ?? prev.progress.current,
+                    total: statusData.total_pages ?? prev.progress.total,
+                  },
+                }));
+              } else if (statusData.status === 'completed') {
+                // Job finished while we were disconnected
+                setState(prev => ({
+                  ...prev,
+                  status: 'completed',
+                  progress: {
+                    current: statusData.processed_pages ?? prev.progress.current,
+                    total: statusData.total_pages ?? prev.progress.total,
+                  },
+                }));
+                return; // Don't reconnect
+              } else if (statusData.status === 'failed') {
+                setState(prev => ({
+                  ...prev,
+                  status: 'failed',
+                  error: statusData.error || 'Processing failed',
+                }));
+                return; // Don't reconnect
+              }
+            }
+          } catch (statusErr) {
+            console.error('Failed to fetch status before reconnect:', statusErr);
+          }
+
           reconnectTimeoutRef.current = setTimeout(() => {
             connectToStream(jobId);
           }, 3000);

@@ -12,6 +12,7 @@ EasyOCR is more reliable than Tesseract for construction drawings.
 Gemini relabels all text anyway, so we just need good bboxes.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -26,6 +27,31 @@ from PIL import Image, ImageDraw
 ProgressCallback = Optional[Callable[[str, int, int], Awaitable[None]]]
 
 logger = logging.getLogger(__name__)
+
+
+async def run_with_heartbeat(coro_or_thread, progress_callback: ProgressCallback, stage_name: str):
+    """
+    Run a coroutine/thread with heartbeat events every 15 seconds.
+
+    This prevents Railway's HTTP/2 proxy from timing out during long-running
+    Gemini API calls by keeping the SSE stream active with progress events.
+    """
+    async def heartbeat():
+        while True:
+            await asyncio.sleep(15)
+            if progress_callback:
+                await progress_callback(f"{stage_name}_heartbeat", 0, 0)
+                logger.debug(f"[Heartbeat] Sent {stage_name}_heartbeat")
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        return await coro_or_thread
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 
 # Global EasyOCR reader - loaded lazily on first use
 _easyocr_reader: Optional[easyocr.Reader] = None
@@ -392,7 +418,6 @@ async def run_ocr(
     Returns:
         dict with words array, tile_bounds, grid info
     """
-    import asyncio
     width, height = image.size
 
     # EasyOCR handles larger tiles well
@@ -452,10 +477,14 @@ async def run_ocr(
     if progress_callback:
         await progress_callback("ocr_stitch", len(stitched_bboxes), len(stitched_bboxes))
 
-    # Pass 2: Extract text using Gemini
+    # Pass 2: Extract text using Gemini (with heartbeat to prevent proxy timeout)
     logger.info(f"[OCR] Pass 2: Labeling {len(stitched_bboxes)} bboxes with Gemini...")
     crops = crop_all_bboxes(image, stitched_bboxes, padding=0)
-    text_results = await asyncio.to_thread(label_bboxes_with_gemini, crops, stitched_bboxes, api_key)
+    text_results = await run_with_heartbeat(
+        asyncio.to_thread(label_bboxes_with_gemini, crops, stitched_bboxes, api_key),
+        progress_callback,
+        "ocr_gemini"
+    )
     logger.info(f"[OCR] Pass 2 complete: text extracted for {len(text_results)} bboxes")
 
     # Emit progress after Gemini labeling
@@ -832,8 +861,6 @@ async def process_page(
     Returns:
         dict with semantic_index, context_markdown, and details
     """
-    import asyncio
-
     logger.info(f"[{page_name}] Starting sheet-analyzer pipeline...")
 
     # Pass 1-2: OCR (run_ocr is now async and handles its own progress callbacks)
@@ -841,20 +868,28 @@ async def process_page(
     ocr_result = await run_ocr(image, api_key, progress_callback)
     logger.info(f"[{page_name}] OCR complete: {ocr_result['word_count']} words")
 
-    # Pass 3: Semantic classification
+    # Pass 3: Semantic classification (with heartbeat to prevent proxy timeout)
     logger.info(f"[{page_name}] Running semantic analysis...")
     if progress_callback:
         await progress_callback("ai_semantic_start", 0, 4)
-    semantic_index = await asyncio.to_thread(run_semantic_analysis, image, ocr_result, api_key)
+    semantic_index = await run_with_heartbeat(
+        asyncio.to_thread(run_semantic_analysis, image, ocr_result, api_key),
+        progress_callback,
+        "ai_semantic"
+    )
     logger.info(f"[{page_name}] Semantic analysis complete")
     if progress_callback:
         await progress_callback("ai_semantic_complete", 4, 4)
 
-    # Pass 4: Context markdown
+    # Pass 4: Context markdown (with heartbeat to prevent proxy timeout)
     logger.info(f"[{page_name}] Generating context markdown...")
     if progress_callback:
         await progress_callback("ai_markdown_start", 0, 1)
-    context_markdown = await asyncio.to_thread(generate_context_markdown, image, semantic_index, api_key)
+    context_markdown = await run_with_heartbeat(
+        asyncio.to_thread(generate_context_markdown, image, semantic_index, api_key),
+        progress_callback,
+        "ai_markdown"
+    )
     logger.info(f"[{page_name}] Context markdown complete")
     if progress_callback:
         await progress_callback("ai_markdown_complete", 1, 1)
