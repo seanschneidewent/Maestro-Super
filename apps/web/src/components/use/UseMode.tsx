@@ -678,7 +678,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       {!isSidebarCollapsed && (
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
           {/* Header */}
-          <div className="p-4 border-b border-slate-200/50 bg-white/50 space-y-3">
+          <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-slate-200/50 bg-white/50 space-y-3">
             {mode === AppMode.DEMO && onGetStarted ? (
               <DemoHeader onGetStarted={onGetStarted} />
             ) : mode !== AppMode.DEMO ? (
@@ -730,7 +730,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           <button
             onClick={() => setIsSidebarCollapsed(false)}
             className={`absolute left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-              hasTopLeftOverlay ? 'top-24' : 'top-4'
+              hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
             }`}
             title="Expand sidebar"
             data-tutorial="sidebar-expand"
