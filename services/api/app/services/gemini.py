@@ -1,9 +1,10 @@
 """
-Gemini AI service for context extraction.
+Gemini AI service for context extraction and agent queries.
 """
 
 import json
 import logging
+from typing import Any
 
 from google import genai
 from google.genai import types
@@ -12,6 +13,140 @@ from app.config import get_settings
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
+
+
+AGENT_QUERY_PROMPT = '''You are a construction plan assistant. Given pre-fetched search results, select relevant pages/pointers and write a brief response.
+
+PROJECT STRUCTURE:
+{project_structure}
+
+PAGE SEARCH RESULTS:
+{page_results}
+
+POINTER SEARCH RESULTS:
+{pointer_results}
+
+{history_section}
+{viewing_section}
+USER QUERY: {query}
+
+Your task:
+1. Review the search results and project structure
+2. Select the most relevant page IDs and pointer IDs to display
+3. Generate a short, helpful response
+
+SELECTION GUIDELINES:
+- Include ALL pages relevant to the query, not just ones with pointers
+- Order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3)
+- Only include pointer_ids if they add specific value (highlight relevant details)
+- If search results are empty, look in project structure for relevant pages
+
+RESPONSE STYLE:
+You're a helpful secondary superintendent - knowledgeable, casual, and to the point. Talk like a colleague, not a robot.
+- Sound natural: "K-201 has the overview, K-211 and K-212 are the enlarged sections."
+- Add useful context: "Panel schedule's on E-3.2, but you'll want E-3.1 too for the one-line diagram."
+- Be brief: 1-2 sentences max. Superintendents are busy.
+- DON'T announce what you did: "I have displayed the pages" ❌
+- DON'T sound robotic: "The requested documents are now shown" ❌
+- DON'T repeat what the user asked for ❌
+
+TITLE GUIDELINES:
+- chat_title: 2-4 word noun phrase for THIS query (e.g., "Electrical Panels", "Kitchen Equipment")
+- conversation_title: 2-6 word phrase summarizing the conversation
+  - First query: same as chat_title
+  - Follow-ups: combine themes (e.g., "Kitchen & Electrical Plans")
+
+Return JSON with this exact structure:
+{{
+  "page_ids": ["uuid1", "uuid2"],
+  "pointer_ids": ["uuid3"],
+  "chat_title": "2-4 word title",
+  "conversation_title": "2-6 word title",
+  "response": "Brief helpful response"
+}}'''
+
+
+async def run_agent_query(
+    project_structure: dict[str, Any],
+    page_results: list[dict[str, Any]],
+    pointer_results: list[dict[str, Any]],
+    query: str,
+    history_context: str = "",
+    viewing_context: str = "",
+) -> dict[str, Any]:
+    """
+    Single-shot agent query using Gemini structured JSON output.
+
+    Args:
+        project_structure: Dict with disciplines and pages
+        page_results: List of page search results
+        pointer_results: List of pointer search results
+        query: User's question
+        history_context: Optional formatted history from previous messages
+        viewing_context: Optional context about what page user is viewing
+
+    Returns:
+        {
+            "page_ids": ["uuid1", "uuid2", ...],
+            "pointer_ids": ["uuid3", ...],
+            "chat_title": "2-4 word title",
+            "conversation_title": "2-6 word title",
+            "response": "Brief helpful response"
+        }
+    """
+    try:
+        client = _get_gemini_client()
+
+        # Build history section
+        history_section = ""
+        if history_context:
+            history_section = f"CONVERSATION HISTORY:\n{history_context}\n"
+
+        # Build viewing section
+        viewing_section = ""
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {viewing_context}\n"
+
+        prompt = AGENT_QUERY_PROMPT.format(
+            project_structure=json.dumps(project_structure, indent=2),
+            page_results=json.dumps(page_results, indent=2),
+            pointer_results=json.dumps(pointer_results, indent=2),
+            query=query,
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-preview-05-20",
+            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+            ),
+        )
+
+        result = json.loads(response.text)
+        logger.info(f"Gemini agent query complete: {result.get('chat_title', 'Unknown')}")
+
+        # Ensure expected fields exist with defaults
+        return {
+            "page_ids": result.get("page_ids", []),
+            "pointer_ids": result.get("pointer_ids", []),
+            "chat_title": result.get("chat_title", "Query"),
+            "conversation_title": result.get("conversation_title", result.get("chat_title", "Query")),
+            "response": result.get("response", "I found the relevant pages for you."),
+        }
+
+    except Exception as e:
+        logger.error(f"Gemini agent query failed: {e}")
+        # Return fallback response on failure
+        return {
+            "page_ids": [],
+            "pointer_ids": [],
+            "chat_title": "Query",
+            "conversation_title": "Query",
+            "response": f"I encountered an issue processing your query. Error: {str(e)}",
+        }
 
 
 def _get_gemini_client() -> genai.Client:
