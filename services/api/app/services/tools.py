@@ -324,7 +324,7 @@ async def _get_project_structure_impl(db: Session, project_id: str) -> dict | No
                     {
                         "page_id": str(p.id),
                         "sheet_number": p.page_name,
-                        "title": p.page_title,
+                        "title": None,  # Page model has no title field
                     }
                     for p in sorted(d.pages, key=lambda x: x.page_name)
                 ],
