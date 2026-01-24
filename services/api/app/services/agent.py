@@ -428,52 +428,57 @@ async def run_agent_query_gemini(
         return
 
     # 4. Execute selections with returned IDs
-    page_ids = gemini_response.get("page_ids", [])
-    pointer_ids = gemini_response.get("pointer_ids", [])
+    page_ids = gemini_response.get("page_ids") or []
+    pointer_ids = gemini_response.get("pointer_ids") or []
 
     if page_ids:
         yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}})
         try:
             result = await select_pages(db, page_ids=page_ids)
             # Convert Pydantic model to dict if needed
             if hasattr(result, "model_dump"):
                 result = result.model_dump(by_alias=True, mode="json")
             yield {"type": "tool_result", "tool": "select_pages", "result": result}
-            trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}})
             trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
         except Exception as e:
             logger.error(f"select_pages failed: {e}")
-            yield {"type": "tool_result", "tool": "select_pages", "result": {"error": str(e)}}
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
     if pointer_ids:
         yield {"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}})
         try:
             result = await select_pointers(db, pointer_ids=pointer_ids)
             if hasattr(result, "model_dump"):
                 result = result.model_dump(by_alias=True, mode="json")
             yield {"type": "tool_result", "tool": "select_pointers", "result": result}
-            trace.append({"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}})
             trace.append({"type": "tool_result", "tool": "select_pointers", "result": result})
         except Exception as e:
             logger.error(f"select_pointers failed: {e}")
-            yield {"type": "tool_result", "tool": "select_pointers", "result": {"error": str(e)}}
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pointers", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pointers", "result": error_result})
 
     # 5. Emit response text
-    response_text = gemini_response.get("response", "")
+    response_text = gemini_response.get("response") or ""
     if response_text:
         yield {"type": "text", "content": response_text}
         trace.append({"type": "reasoning", "content": response_text})
 
-    # 6. Done
+    # 6. Done - use token counts from Gemini response
     display_title = gemini_response.get("chat_title")
-    conversation_title = gemini_response.get("conversation_title", display_title)
+    conversation_title = gemini_response.get("conversation_title") or display_title
+    usage = gemini_response.get("usage") or {}
 
     yield {
         "type": "done",
         "trace": trace,
         "usage": {
-            "inputTokens": 0,  # Gemini doesn't return token counts in same format
-            "outputTokens": 0,
+            "inputTokens": usage.get("input_tokens", 0),
+            "outputTokens": usage.get("output_tokens", 0),
         },
         "displayTitle": display_title,
         "conversationTitle": conversation_title,

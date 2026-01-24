@@ -128,25 +128,31 @@ async def run_agent_query(
         result = json.loads(response.text)
         logger.info(f"Gemini agent query complete: {result.get('chat_title', 'Unknown')}")
 
-        # Ensure expected fields exist with defaults
+        # Extract token usage from response metadata
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
+            output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
+
+        # Ensure expected fields exist with defaults (use `or` to handle null values)
+        chat_title = result.get("chat_title") or "Query"
         return {
-            "page_ids": result.get("page_ids", []),
-            "pointer_ids": result.get("pointer_ids", []),
-            "chat_title": result.get("chat_title", "Query"),
-            "conversation_title": result.get("conversation_title", result.get("chat_title", "Query")),
-            "response": result.get("response", "I found the relevant pages for you."),
+            "page_ids": result.get("page_ids") or [],
+            "pointer_ids": result.get("pointer_ids") or [],
+            "chat_title": chat_title,
+            "conversation_title": result.get("conversation_title") or chat_title,
+            "response": result.get("response") or "I found the relevant pages for you.",
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
         }
 
     except Exception as e:
         logger.error(f"Gemini agent query failed: {e}")
-        # Return fallback response on failure
-        return {
-            "page_ids": [],
-            "pointer_ids": [],
-            "chat_title": "Query",
-            "conversation_title": "Query",
-            "response": f"I encountered an issue processing your query. Error: {str(e)}",
-        }
+        # Re-raise so caller can handle appropriately
+        raise
 
 
 def _get_gemini_client() -> genai.Client:
