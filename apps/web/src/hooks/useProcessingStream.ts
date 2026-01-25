@@ -388,6 +388,10 @@ export function useProcessingStream(projectId: string | null) {
         ...prev,
         status: 'processing',
         jobId: data.job_id,
+        progress: {
+          current: data.processed_pages ?? prev.progress.current,
+          total: data.total_pages ?? prev.progress.total,
+        },
       }));
 
       // Reconnect to the stream
