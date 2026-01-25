@@ -1,14 +1,20 @@
-"""Query agent for navigating construction plan graph with Grok 4.1 Fast via OpenRouter."""
+"""Query agent for navigating construction plan graph.
+
+Uses Gemini structured output for single-shot queries (fast path)
+with Grok 4.1 Fast via OpenRouter as fallback.
+"""
 
 import asyncio
 import json
 import logging
+import os
 from typing import Any, AsyncIterator
 
 import openai
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.services.gemini import run_agent_query as gemini_agent_query
 
 logger = logging.getLogger(__name__)
 
@@ -308,10 +314,14 @@ async def run_agent_query(
     viewing_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
-    Execute agent query with streaming events using Grok 4.1 Fast via OpenRouter.
+    Execute agent query with streaming events.
+
+    Uses AGENT_BACKEND env var to select implementation:
+    - "gemini" (default): Fast single-shot Gemini structured output
+    - "grok": Multi-turn Grok 4.1 Fast via OpenRouter (legacy)
 
     Yields events:
-    - {"type": "text", "content": "..."} - Model's reasoning
+    - {"type": "text", "content": "..."} - Model's reasoning/response
     - {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
     - {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "..."} - Final event
@@ -322,6 +332,177 @@ async def run_agent_query(
         query: User's question
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
+    """
+    backend = os.environ.get("AGENT_BACKEND", "gemini").lower()
+
+    if backend == "grok":
+        async for event in run_agent_query_grok(db, project_id, query, history_messages, viewing_context):
+            yield event
+    else:
+        async for event in run_agent_query_gemini(db, project_id, query, history_messages, viewing_context):
+            yield event
+
+
+async def run_agent_query_gemini(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+) -> AsyncIterator[dict]:
+    """
+    Fast agent query using Gemini structured JSON output.
+
+    Single LLM call returns all decisions (page/pointer selection, titles, response).
+    """
+    from app.services.tools import (
+        search_pages,
+        search_pointers,
+        get_project_structure_summary,
+        select_pages,
+        select_pointers,
+    )
+
+    # 1. Pre-fetch: Emit tool calls for frontend status
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
+    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+    yield {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}}
+
+    # Run all three in parallel
+    project_structure_dict, page_results, pointer_results = await asyncio.gather(
+        get_project_structure_summary(db, project_id=project_id),
+        search_pages(db, query=query, project_id=project_id, limit=10),
+        search_pointers(db, query=query, project_id=project_id, limit=10),
+    )
+
+    # Yield pre-fetch results
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
+    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+    yield {"type": "tool_result", "tool": "search_pointers", "result": pointer_results}
+
+    # Initialize trace
+    trace: list[dict] = [
+        {"type": "tool_call", "tool": "list_project_pages", "input": {}},
+        {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict},
+        {"type": "tool_call", "tool": "search_pages", "input": {"query": query}},
+        {"type": "tool_result", "tool": "search_pages", "result": page_results},
+        {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}},
+        {"type": "tool_result", "tool": "search_pointers", "result": pointer_results},
+    ]
+
+    # 2. Build context strings for Gemini
+    history_context = ""
+    if history_messages:
+        # Format history as simple text for Gemini
+        history_parts = []
+        for msg in history_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                history_parts.append(f"{role.upper()}: {content}")
+        history_context = "\n".join(history_parts)
+        logger.info(f"Built history context from {len(history_messages)} messages")
+
+    viewing_context_str = ""
+    if viewing_context:
+        page_name = viewing_context.get("page_name", "unknown page")
+        discipline = viewing_context.get("discipline_name")
+        if discipline:
+            viewing_context_str = f"User is viewing page {page_name} from {discipline}"
+        else:
+            viewing_context_str = f"User is viewing page {page_name}"
+
+    # 3. Single Gemini call with timeout
+    try:
+        gemini_response = await asyncio.wait_for(
+            gemini_agent_query(
+                project_structure=project_structure_dict,
+                page_results=page_results,
+                pointer_results=pointer_results,
+                query=query,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            ),
+            timeout=60.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Gemini API timeout after 60 seconds")
+        yield {"type": "error", "message": "Request timed out. Please try again."}
+        return
+    except Exception as e:
+        logger.exception(f"Gemini agent query failed: {e}")
+        yield {"type": "error", "message": f"Query failed: {str(e)}"}
+        return
+
+    # 4. Execute selections with returned IDs
+    page_ids = gemini_response.get("page_ids") or []
+    pointer_ids = gemini_response.get("pointer_ids") or []
+
+    if page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}})
+        try:
+            result = await select_pages(db, page_ids=page_ids)
+            # Convert Pydantic model to dict if needed
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            yield {"type": "tool_result", "tool": "select_pages", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
+        except Exception as e:
+            logger.error(f"select_pages failed: {e}")
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
+
+    if pointer_ids:
+        yield {"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}})
+        try:
+            result = await select_pointers(db, pointer_ids=pointer_ids)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            yield {"type": "tool_result", "tool": "select_pointers", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pointers", "result": result})
+        except Exception as e:
+            logger.error(f"select_pointers failed: {e}")
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pointers", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pointers", "result": error_result})
+
+    # 5. Emit response text
+    response_text = gemini_response.get("response") or ""
+    if response_text:
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+
+    # 6. Done - use token counts from Gemini response
+    display_title = gemini_response.get("chat_title")
+    conversation_title = gemini_response.get("conversation_title") or display_title
+    usage = gemini_response.get("usage") or {}
+
+    yield {
+        "type": "done",
+        "trace": trace,
+        "usage": {
+            "inputTokens": usage.get("input_tokens", 0),
+            "outputTokens": usage.get("output_tokens", 0),
+        },
+        "displayTitle": display_title,
+        "conversationTitle": conversation_title,
+    }
+
+
+async def run_agent_query_grok(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+) -> AsyncIterator[dict]:
+    """
+    Legacy agent query using Grok 4.1 Fast via OpenRouter with multi-turn tool calling.
+
+    Set AGENT_BACKEND=grok to use this implementation.
     """
     from app.services.tools import search_pages, search_pointers, get_project_structure_summary
 
