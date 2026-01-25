@@ -257,12 +257,6 @@ export interface OcrWord {
   region_type?: string // e.g., "detail", "notes", "schedule"
 }
 
-// Resolved highlight for a page (text matched to OCR bboxes)
-export interface FieldHighlight {
-  pageId: string
-  words: OcrWord[]
-}
-
 // Legacy pointer type (being phased out)
 export interface FieldPointer {
   id: string
@@ -298,7 +292,6 @@ export interface FieldResponse {
   summary: string
   displayTitle: string | null
   pages: FieldPage[]
-  highlights?: FieldHighlight[] // Resolved highlights from agent
 }
 
 // Tutorial types
