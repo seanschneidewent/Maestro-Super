@@ -581,6 +581,8 @@ def resolve_highlights(
             continue
 
         matched_words = []
+        matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
+
         for text_match in text_matches:
             if not text_match:
                 continue
@@ -588,20 +590,28 @@ def resolve_highlights(
             # Case-insensitive matching
             match_lower = text_match.lower().strip()
 
+            # Skip empty strings after stripping (would match everything)
+            if not match_lower:
+                continue
+
             for word in ocr_words:
+                word_id = word.get("id")
                 word_text = word.get("text", "").lower().strip()
+
+                # Skip if already matched or empty word text
+                if word_id in matched_word_ids or not word_text:
+                    continue
 
                 # Match if the OCR word contains the search text or vice versa
                 if match_lower in word_text or word_text in match_lower:
-                    # Avoid duplicates
-                    if word not in matched_words:
-                        matched_words.append({
-                            "id": word.get("id"),
-                            "text": word.get("text"),
-                            "bbox": word.get("bbox"),
-                            "role": word.get("role"),
-                            "region_type": word.get("region_type"),
-                        })
+                    matched_word_ids.add(word_id)
+                    matched_words.append({
+                        "id": word_id,
+                        "text": word.get("text"),
+                        "bbox": word.get("bbox"),
+                        "role": word.get("role"),
+                        "region_type": word.get("region_type"),
+                    })
 
         if matched_words:
             resolved.append({

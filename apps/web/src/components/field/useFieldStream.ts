@@ -409,12 +409,27 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 }
               }
 
-              // Merge with existing (avoid duplicates)
-              const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
-              const uniqueNewPages = newPages.filter((p) => !existingPageIds.has(p.pageId))
+              // Merge with existing: update prefetched pages with OCR dimensions, add new ones
+              const existingPageMap = new Map(selectedPagesRef.current.map((p) => [p.pageId, p]))
+              let hasChanges = false
 
-              if (uniqueNewPages.length > 0) {
-                selectedPagesRef.current = [...selectedPagesRef.current, ...uniqueNewPages]
+              for (const newPage of newPages) {
+                const existingPage = existingPageMap.get(newPage.pageId)
+                if (existingPage) {
+                  // Update prefetched page with OCR dimensions (they were missing on prefetch)
+                  if (newPage.imageWidth && !existingPage.imageWidth) {
+                    existingPage.imageWidth = newPage.imageWidth
+                    existingPage.imageHeight = newPage.imageHeight
+                    hasChanges = true
+                  }
+                } else {
+                  // New page - add it
+                  selectedPagesRef.current.push(newPage)
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
                 setSelectedPages([...selectedPagesRef.current])
               }
               // Don't update thinkingText for tool results - only show reasoning in the bubble
