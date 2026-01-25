@@ -97,21 +97,26 @@ async def run_agent_query(
     try:
         client = _get_gemini_client()
 
+        # Escape curly braces in user input to prevent format string errors
+        # (e.g., user query "Show me {A-1}" would crash .format())
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
         # Build history section
         history_section = ""
         if history_context:
-            history_section = f"CONVERSATION HISTORY:\n{history_context}\n"
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(history_context)}\n"
 
         # Build viewing section
         viewing_section = ""
         if viewing_context:
-            viewing_section = f"CURRENT VIEW: {viewing_context}\n"
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
 
         prompt = AGENT_QUERY_PROMPT.format(
             project_structure=json.dumps(project_structure, indent=2),
             page_results=json.dumps(page_results, indent=2),
             pointer_results=json.dumps(pointer_results, indent=2),
-            query=query,
+            query=escape_braces(query),
             history_section=history_section,
             viewing_section=viewing_section,
         )
