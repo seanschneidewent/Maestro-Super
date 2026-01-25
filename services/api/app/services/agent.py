@@ -412,16 +412,23 @@ async def run_agent_query_gemini(
         else:
             viewing_context_str = f"User is viewing page {page_name}"
 
-    # 3. Single Gemini call
+    # 3. Single Gemini call with timeout
     try:
-        gemini_response = await gemini_agent_query(
-            project_structure=project_structure_dict,
-            page_results=page_results,
-            pointer_results=pointer_results,
-            query=query,
-            history_context=history_context,
-            viewing_context=viewing_context_str,
+        gemini_response = await asyncio.wait_for(
+            gemini_agent_query(
+                project_structure=project_structure_dict,
+                page_results=page_results,
+                pointer_results=pointer_results,
+                query=query,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            ),
+            timeout=60.0,
         )
+    except asyncio.TimeoutError:
+        logger.error("Gemini API timeout after 60 seconds")
+        yield {"type": "error", "message": "Request timed out. Please try again."}
+        return
     except Exception as e:
         logger.exception(f"Gemini agent query failed: {e}")
         yield {"type": "error", "message": f"Query failed: {str(e)}"}
