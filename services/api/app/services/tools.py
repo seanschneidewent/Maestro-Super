@@ -587,6 +587,10 @@ def resolve_highlights(
             if not text_match:
                 continue
 
+            # Ensure text_match is a string (Gemini might return numbers)
+            if not isinstance(text_match, str):
+                text_match = str(text_match)
+
             # Case-insensitive matching
             match_lower = text_match.lower().strip()
 

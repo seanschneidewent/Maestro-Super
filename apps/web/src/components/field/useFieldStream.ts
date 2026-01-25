@@ -15,12 +15,6 @@ export interface AgentSelectedPointer {
   bboxHeight: number
 }
 
-// Resolved highlight with OCR words and bboxes
-export interface ResolvedHighlight {
-  pageId: string
-  words: OcrWord[]
-}
-
 // Page with its selected pointers and highlights
 export interface AgentSelectedPage {
   pageId: string
