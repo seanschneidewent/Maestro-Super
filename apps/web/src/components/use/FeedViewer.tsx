@@ -7,6 +7,7 @@ import { downloadFile, getPublicUrl } from '../../lib/storage';
 import { AgentSelectedPage } from '../field';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
+import { TextHighlightOverlay } from '../field/TextHighlightOverlay';
 import type { AgentTraceStep } from '../../types';
 
 // Set up PDF.js worker
@@ -286,7 +287,18 @@ const ExpandedPageModal: React.FC<{
                 draggable={false}
               />
 
-              {/* Pointer overlays */}
+              {/* Text highlights from agent */}
+              {page.highlights && page.highlights.length > 0 && (
+                <TextHighlightOverlay
+                  highlights={page.highlights}
+                  imageWidth={displayDimensions.width}
+                  imageHeight={displayDimensions.height}
+                  originalWidth={page.imageWidth}
+                  originalHeight={page.imageHeight}
+                />
+              )}
+
+              {/* Legacy pointer overlays */}
               {page.pointers.map((pointer) => (
                 <div
                   key={pointer.pointerId}
@@ -441,7 +453,18 @@ const FeedPageItemDisplay: React.FC<{
           draggable={false}
         />
 
-        {/* Pointer overlays */}
+        {/* Text highlights from agent */}
+        {page.highlights && page.highlights.length > 0 && (
+          <TextHighlightOverlay
+            highlights={page.highlights}
+            imageWidth={displayDimensions.width}
+            imageHeight={displayDimensions.height}
+            originalWidth={page.imageWidth}
+            originalHeight={page.imageHeight}
+          />
+        )}
+
+        {/* Legacy pointer overlays */}
         {page.pointers.map((pointer) => (
           <div
             key={pointer.pointerId}
