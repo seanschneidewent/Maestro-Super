@@ -602,13 +602,19 @@ def resolve_highlights(
                 word_id = word.get("id")
                 word_text = word.get("text", "").lower().strip()
 
-                # Skip if already matched or empty word text
-                if word_id in matched_word_ids or not word_text:
+                # Skip if empty word text
+                if not word_text:
+                    continue
+
+                # Skip if already matched (only if word has a valid ID)
+                if word_id is not None and word_id in matched_word_ids:
                     continue
 
                 # Match if the OCR word contains the search text or vice versa
                 if match_lower in word_text or word_text in match_lower:
-                    matched_word_ids.add(word_id)
+                    # Track by ID to avoid duplicates (only if word has a valid ID)
+                    if word_id is not None:
+                        matched_word_ids.add(word_id)
                     matched_words.append({
                         "id": word_id,
                         "text": word.get("text"),
