@@ -582,6 +582,7 @@ def resolve_highlights(
 
         matched_words = []
         matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
+        matched_word_keys: set[str] = set()  # Fallback for words without IDs (text+bbox)
 
         for text_match in text_matches:
             if not text_match:
@@ -606,15 +607,27 @@ def resolve_highlights(
                 if not word_text:
                     continue
 
-                # Skip if already matched (only if word has a valid ID)
-                if word_id is not None and word_id in matched_word_ids:
-                    continue
+                # Check for duplicates using ID or text+bbox fallback
+                if word_id is not None:
+                    if word_id in matched_word_ids:
+                        continue
+                else:
+                    # For words without IDs, use text+bbox as unique key
+                    bbox = word.get("bbox", {})
+                    word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                    if word_key in matched_word_keys:
+                        continue
 
                 # Match if the OCR word contains the search text or vice versa
                 if match_lower in word_text or word_text in match_lower:
-                    # Track by ID to avoid duplicates (only if word has a valid ID)
+                    # Track to avoid duplicates
                     if word_id is not None:
                         matched_word_ids.add(word_id)
+                    else:
+                        bbox = word.get("bbox", {})
+                        word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                        matched_word_keys.add(word_key)
+
                     matched_words.append({
                         "id": word_id,
                         "text": word.get("text"),
