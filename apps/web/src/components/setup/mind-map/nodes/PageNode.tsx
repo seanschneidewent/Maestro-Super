@@ -65,10 +65,10 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
 
   const statusIcon = getStatusIcon(pointerCount, processedPass2, processingStatus, detailCount);
   const hasChildren = pointerCount > 0 || (detailCount && detailCount > 0);
-  const childCount = pointerCount + (detailCount ?? 0);
 
   // Show processing glow when actively processing
   const isProcessing = processingStatus === 'processing';
+  const isCompleted = processingStatus === 'completed';
 
   return (
     <div ref={divRef} className="relative group animate-scale-in">
@@ -102,7 +102,9 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
                      ? 'border-cyan-400 shadow-cyan-900/30'
                      : isProcessing
                        ? 'border-cyan-500/50 shadow-cyan-900/20'
-                       : 'border-slate-600/50 hover:border-slate-500 shadow-slate-900/20'
+                       : isCompleted
+                         ? 'border-green-500/50 shadow-green-900/20'
+                         : 'border-slate-600/50 hover:border-slate-500 shadow-slate-900/20'
                    }`}
         onClick={onClick}
       >
@@ -113,12 +115,6 @@ function PageNodeComponent({ data }: NodeProps<PageNodeData>) {
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-slate-300 truncate">{pageName}</p>
         </div>
-
-        {childCount > 0 && (
-          <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded shrink-0">
-            {childCount}
-          </span>
-        )}
 
         {hasChildren && (
           <button

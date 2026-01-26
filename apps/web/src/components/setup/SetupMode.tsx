@@ -85,8 +85,17 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const folderInputRef = useRef<HTMLInputElement>(null);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
 
+  // Accordion state: only one panel open at a time (null = both collapsed)
+  const [activePanel, setActivePanel] = useState<'left' | 'right' | null>('left');
+
   // Brain Mode processing state
   const processing = useProcessingStream(projectId);
+
+  // Calculate unprocessed pages count from hierarchy
+  const unprocessedPagesCount = hierarchy
+    ? hierarchy.disciplines.reduce((count, disc) =>
+        count + disc.pages.filter(page => page.processingStatus !== 'completed').length, 0)
+    : 0;
 
   // Convert discipline hierarchy to ProjectFile format for tree display
   const convertDisciplinesToProjectFiles = (
@@ -855,6 +864,22 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   return (
     <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
+      {/* Fixed toggle buttons for panels */}
+      <button
+        onClick={() => setActivePanel(activePanel === 'left' ? null : 'left')}
+        className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+        title={activePanel === 'left' ? 'Collapse files panel' : 'Expand files panel'}
+      >
+        <FolderOpen size={20} />
+      </button>
+      <button
+        onClick={() => setActivePanel(activePanel === 'right' ? null : 'right')}
+        className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+        title={activePanel === 'right' ? 'Collapse details panel' : 'Expand details panel'}
+      >
+        <Layers size={20} />
+      </button>
+
       {/* Sidebar: File Tree (absolute positioned overlay) */}
       <CollapsiblePanel
         side="left"
@@ -865,6 +890,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         collapsedLabel="Files"
         className="border-r border-slate-800/50 glass-panel"
         onWidthChange={setLeftSidebarWidth}
+        collapsed={activePanel !== 'left'}
+        onCollapsedChange={(collapsed) => setActivePanel(collapsed ? null : 'left')}
       >
         <div className="flex flex-col h-full">
           <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5 space-y-3">
@@ -970,8 +997,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 />
               </div>
 
-              {/* Brain Mode: Process All button */}
-              {uploadedFiles.length > 0 && !processing.isProcessing && !processing.isComplete && processing.status !== 'failed' && (
+              {/* Brain Mode: Process All button - only show when there are unprocessed pages */}
+              {uploadedFiles.length > 0 && unprocessedPagesCount > 0 && !processing.isProcessing && processing.status !== 'failed' && (
                 <button
                   onClick={() => processing.start()}
                   className="w-full mt-3 py-3 rounded-lg bg-gradient-to-r from-purple-600/20 to-cyan-600/20 border border-purple-500/30 text-purple-200 text-sm font-medium hover:border-purple-400/50 hover:from-purple-600/30 hover:to-cyan-600/30 transition-all shadow-lg shadow-purple-900/10 group flex items-center justify-center gap-2"
@@ -1060,6 +1087,8 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         collapsedLabel="Details"
         className="border-l border-slate-800/50 glass-panel"
         onWidthChange={setRightSidebarWidth}
+        collapsed={activePanel !== 'right'}
+        onCollapsedChange={(collapsed) => setActivePanel(collapsed ? null : 'right')}
       >
         <div className="flex flex-col h-full">
            <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5">
