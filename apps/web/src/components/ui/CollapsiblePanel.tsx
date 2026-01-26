@@ -15,6 +15,8 @@ interface CollapsiblePanelProps {
   collapsed?: boolean;
   /** Callback when panel wants to collapse or expand (for accordion behavior) */
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** Hide the collapsed tab and expanded notch (use external buttons instead) */
+  hideHandles?: boolean;
 }
 
 export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
@@ -29,6 +31,7 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
   onWidthChange,
   collapsed,
   onCollapsedChange,
+  hideHandles = false,
 }) => {
   const COLLAPSED_TAB_WIDTH = 44; // Width of the collapsed tab in pixels
 
@@ -179,7 +182,7 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
       </div>
 
       {/* Expanded notch handle - spine with bulge, drag to resize, tap to collapse */}
-      {!isCollapsed && (
+      {!isCollapsed && !hideHandles && (
         <div
           className={`
             absolute inset-y-0 w-[44px] z-40
@@ -227,7 +230,7 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
       )}
 
       {/* Collapsed notch tab - spine with bulge */}
-      {isCollapsed && (
+      {isCollapsed && !hideHandles && (
         <button
           onClick={handleExpandClick}
           className={`
