@@ -672,17 +672,19 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   return (
     <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
-      {/* Fixed toggle button - always visible at top-left */}
-      <button
-        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        className={`fixed left-[max(1rem,env(safe-area-inset-left))] z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-          hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
-        }`}
-        title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        data-tutorial="sidebar-expand"
-      >
-        {isSidebarCollapsed ? <PanelLeft size={20} /> : <PanelLeftClose size={20} />}
-      </button>
+      {/* Fixed toggle button - only visible when sidebar is collapsed */}
+      {isSidebarCollapsed && (
+        <button
+          onClick={() => setIsSidebarCollapsed(false)}
+          className={`fixed left-[max(1rem,env(safe-area-inset-left))] z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
+            hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
+          }`}
+          title="Expand sidebar"
+          data-tutorial="sidebar-expand"
+        >
+          <PanelLeft size={20} />
+        </button>
+      )}
 
       {/* Left panel - PlansPanel with collapse */}
       {!isSidebarCollapsed && (
@@ -694,11 +696,20 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             ) : mode !== AppMode.DEMO ? (
               <ModeToggle mode={mode} setMode={setMode} variant="light" />
             ) : null}
-            <div>
-              <h1 className="font-bold text-lg text-slate-800">
-                Maestro<span className="text-cyan-600">Super</span>
-              </h1>
-              <p className="text-xs text-slate-500">Field Mode</p>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-sm hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200"
+                title="Collapse sidebar"
+              >
+                <PanelLeftClose size={20} />
+              </button>
+              <div className="text-right">
+                <h1 className="font-bold text-lg text-slate-800">
+                  Maestro<span className="text-cyan-600">Super</span>
+                </h1>
+                <p className="text-xs text-slate-500">Field Mode</p>
+              </div>
             </div>
           </div>
 
