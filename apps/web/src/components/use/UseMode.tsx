@@ -121,10 +121,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
   const [inputHasBeenFocused, setInputHasBeenFocused] = useState(false);
-  // Start with sidebar collapsed if tutorial is on welcome step
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
-    tutorialActive && currentStep === 'welcome'
-  );
+  // Start with sidebar collapsed by default
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
 
   // Hierarchy data
   const [disciplines, setDisciplines] = useState<DisciplineInHierarchy[]>([]);
@@ -674,6 +672,18 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   return (
     <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
+      {/* Fixed toggle button - always visible at top-left */}
+      <button
+        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        className={`fixed left-[max(1rem,env(safe-area-inset-left))] z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
+          hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
+        }`}
+        title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        data-tutorial="sidebar-expand"
+      >
+        {isSidebarCollapsed ? <PanelLeft size={20} /> : <PanelLeftClose size={20} />}
+      </button>
+
       {/* Left panel - PlansPanel with collapse */}
       {!isSidebarCollapsed && (
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
@@ -684,20 +694,11 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
             ) : mode !== AppMode.DEMO ? (
               <ModeToggle mode={mode} setMode={setMode} variant="light" />
             ) : null}
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="font-bold text-lg text-slate-800">
-                  Maestro<span className="text-cyan-600">Super</span>
-                </h1>
-                <p className="text-xs text-slate-500">Field Mode</p>
-              </div>
-              <button
-                onClick={() => setIsSidebarCollapsed(true)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                title="Collapse sidebar"
-              >
-                <PanelLeftClose size={18} />
-              </button>
+            <div>
+              <h1 className="font-bold text-lg text-slate-800">
+                Maestro<span className="text-cyan-600">Super</span>
+              </h1>
+              <p className="text-xs text-slate-500">Field Mode</p>
             </div>
           </div>
 
@@ -724,21 +725,6 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           tutorialStep={currentStep}
           onExpandedPageClose={handleExpandedPageClose}
         />
-
-        {/* Floating expand button - shows when sidebar collapsed, shifts down when toast/indicator visible */}
-        {isSidebarCollapsed && (
-          <button
-            onClick={() => setIsSidebarCollapsed(false)}
-            className={`absolute left-4 z-30 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-              hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
-            }`}
-            title="Expand sidebar"
-            data-tutorial="sidebar-expand"
-          >
-            <PanelLeft size={20} />
-          </button>
-        )}
-
 
         {/* Query input bar - bottom right */}
         <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">

@@ -169,7 +169,7 @@ export function QueryInput({
         transition-all duration-150
         ${isRecording ? 'ring-2 ring-red-500' : ''}
       `}
-      style={{ paddingLeft: 20, paddingRight: 5, paddingTop: 5, paddingBottom: 5 }}
+      style={{ paddingLeft: 'max(20px, env(safe-area-inset-left))', paddingRight: 5, paddingTop: 5, paddingBottom: 5 }}
     >
       {/* Text input */}
       <input

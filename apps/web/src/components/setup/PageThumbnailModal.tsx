@@ -1,18 +1,12 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { BboxOverlay } from './context-panel/BboxOverlay';
-import { RoleLegend } from './context-panel/RoleLegend';
-import type { SemanticWord } from '../../lib/api';
+import { X } from 'lucide-react';
 
 interface PageThumbnailModalProps {
   isOpen: boolean;
   onClose: () => void;
   imageUrl: string;
   pageName: string;
-  words?: SemanticWord[];
-  imageWidth?: number;
-  imageHeight?: number;
 }
 
 function PageThumbnailModalComponent({
@@ -20,16 +14,10 @@ function PageThumbnailModalComponent({
   onClose,
   imageUrl,
   pageName,
-  words = [],
-  imageWidth = 2550,  // Default 8.5x11 at 300 DPI
-  imageHeight = 3300,
 }: PageThumbnailModalProps) {
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [displayDimensions, setDisplayDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Get unique roles for legend
-  const visibleRoles = [...new Set(words.map((w) => w.role).filter(Boolean))] as string[];
 
   // Load image and measure dimensions
   useEffect(() => {
@@ -95,14 +83,7 @@ function PageThumbnailModalComponent({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-slate-800/90 backdrop-blur rounded-t-lg border-b border-white/5">
-          <div className="flex-1">
-            <h3 className="text-sm font-medium text-slate-200">{pageName}</h3>
-            {visibleRoles.length > 0 && (
-              <div className="mt-2">
-                <RoleLegend visibleRoles={visibleRoles} compact />
-              </div>
-            )}
-          </div>
+          <h3 className="text-sm font-medium text-slate-200">{pageName}</h3>
           <button
             onClick={onClose}
             className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
@@ -122,73 +103,34 @@ function PageThumbnailModalComponent({
               doubleClick={{ mode: 'reset' }}
               panning={{ velocityDisabled: true }}
             >
-              {({ zoomIn, zoomOut, resetTransform }) => (
-                <>
-                  {/* Zoom controls */}
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-slate-800/90 backdrop-blur px-3 py-2 rounded-lg border border-white/10">
-                    <button
-                      onClick={() => zoomOut()}
-                      className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                      title="Zoom out"
-                    >
-                      <ZoomOut size={18} />
-                    </button>
-                    <button
-                      onClick={() => resetTransform()}
-                      className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                      title="Reset zoom"
-                    >
-                      <RotateCcw size={18} />
-                    </button>
-                    <button
-                      onClick={() => zoomIn()}
-                      className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                      title="Zoom in"
-                    >
-                      <ZoomIn size={18} />
-                    </button>
-                  </div>
-
-                  <TransformComponent
-                    wrapperStyle={{
-                      width: '100%',
-                      height: '100%',
-                    }}
-                    contentStyle={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <div
-                      className="relative shadow-2xl"
-                      style={{
-                        width: displayDimensions.width,
-                        height: displayDimensions.height,
-                      }}
-                    >
-                      <img
-                        src={imageUrl}
-                        alt={pageName}
-                        className="w-full h-full"
-                        draggable={false}
-                      />
-                      {words.length > 0 && (
-                        <BboxOverlay
-                          words={words}
-                          imageWidth={imageWidth || imageDimensions.width}
-                          imageHeight={imageHeight || imageDimensions.height}
-                          displayWidth={displayDimensions.width}
-                          displayHeight={displayDimensions.height}
-                          showTooltip={true}
-                        />
-                      )}
-                    </div>
-                  </TransformComponent>
-                </>
-              )}
+              <TransformComponent
+                wrapperStyle={{
+                  width: '100%',
+                  height: '100%',
+                }}
+                contentStyle={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  className="relative shadow-2xl"
+                  style={{
+                    width: displayDimensions.width,
+                    height: displayDimensions.height,
+                  }}
+                >
+                  <img
+                    src={imageUrl}
+                    alt={pageName}
+                    className="w-full h-full"
+                    draggable={false}
+                  />
+                </div>
+              </TransformComponent>
             </TransformWrapper>
           ) : (
             <div className="flex items-center justify-center h-full">

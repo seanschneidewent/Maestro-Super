@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useEffect, useRef } from 'react';
 import ReactFlow, {
   Background,
-  Controls,
   useNodesState,
   useEdgesState,
   BackgroundVariant,
@@ -264,12 +263,6 @@ function ContextMindMapInner({
           size={1}
           color="#334155"
           className="opacity-30"
-        />
-        <Controls
-          showZoom={true}
-          showFitView={true}
-          showInteractive={false}
-          className="!bg-slate-800 !border-slate-700 !shadow-lg [&>button]:!bg-slate-800 [&>button]:!border-slate-700 [&>button]:!text-slate-400 [&>button:hover]:!bg-slate-700 [&>button:hover]:!text-white"
         />
       </ReactFlow>
     </div>

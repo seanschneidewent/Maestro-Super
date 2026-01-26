@@ -11,6 +11,10 @@ interface CollapsiblePanelProps {
   collapsedLabel?: string;
   className?: string;
   onWidthChange?: (width: number) => void;
+  /** Controlled collapsed state (optional - makes panel controlled) */
+  collapsed?: boolean;
+  /** Callback when panel wants to collapse or expand (for accordion behavior) */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
@@ -23,10 +27,21 @@ export const CollapsiblePanel: React.FC<CollapsiblePanelProps> = ({
   collapsedLabel,
   className = '',
   onWidthChange,
+  collapsed,
+  onCollapsedChange,
 }) => {
   const COLLAPSED_TAB_WIDTH = 44; // Width of the collapsed tab in pixels
 
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // Support both controlled and uncontrolled modes
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const isCollapsed = collapsed !== undefined ? collapsed : internalCollapsed;
+  const setIsCollapsed = (value: boolean) => {
+    if (onCollapsedChange) {
+      onCollapsedChange(value);
+    } else {
+      setInternalCollapsed(value);
+    }
+  };
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);

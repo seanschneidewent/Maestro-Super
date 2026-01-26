@@ -3,8 +3,6 @@ import { ArrowLeft, Eye, Maximize2, Loader2, Check, AlertCircle, FileText } from
 import { useQuery } from '@tanstack/react-query';
 import { api, PageResponse } from '../../../lib/api';
 import { getPublicUrl } from '../../../lib/storage';
-import { BboxOverlay } from './BboxOverlay';
-import { RoleLegend } from './RoleLegend';
 import { PageThumbnailModal } from '../PageThumbnailModal';
 
 interface PageContextViewProps {
@@ -35,12 +33,6 @@ function PageContextViewComponent({
 
   // Get image URL
   const imageUrl = page?.pageImagePath ? getPublicUrl(page.pageImagePath) : page?.filePath ? getPublicUrl(page.filePath) : null;
-
-  // Get semantic words from the page
-  const words = page?.semanticIndex?.words || [];
-
-  // Get unique roles for legend
-  const visibleRoles = [...new Set(words.map((w) => w.role).filter(Boolean))] as string[];
 
   // Load image and measure dimensions
   useEffect(() => {
@@ -140,8 +132,8 @@ function PageContextViewComponent({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b border-white/5">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 p-4 border-b border-white/5 bg-slate-900/95 backdrop-blur-sm">
         <button
           onClick={onBack}
           className="text-sm text-slate-400 hover:text-slate-300 flex items-center gap-1 mb-2"
@@ -149,14 +141,20 @@ function PageContextViewComponent({
           <ArrowLeft size={14} /> Back
         </button>
         <h2 className="text-lg font-semibold text-slate-100">{page.pageName}</h2>
-        <p className="text-xs text-slate-500 mt-1">{disciplineName}</p>
-        <div className="flex items-center gap-2 mt-2 text-xs">
-          {getStatusBadge()}
-        </div>
       </div>
 
-      {/* Thumbnail with bboxes */}
-      <div className="p-4 border-b border-white/5">
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto dark-scroll">
+        {/* Page metadata */}
+        <div className="px-4 pt-3 pb-4 border-b border-white/5">
+          <p className="text-xs text-slate-500">{disciplineName}</p>
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            {getStatusBadge()}
+          </div>
+        </div>
+
+        {/* Thumbnail */}
+        <div className="p-4 border-b border-white/5">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-slate-300">Sheet Preview</h3>
           {imageLoaded && (
@@ -188,16 +186,6 @@ function PageContextViewComponent({
                   alt={page.pageName}
                   className="w-full h-full"
                 />
-                {words.length > 0 && (
-                  <BboxOverlay
-                    words={words}
-                    imageWidth={imageDimensions.width}
-                    imageHeight={imageDimensions.height}
-                    displayWidth={thumbnailDimensions.width}
-                    displayHeight={thumbnailDimensions.height}
-                    showTooltip={false}
-                  />
-                )}
                 {/* Hover overlay */}
                 <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <span className="text-white text-sm font-medium flex items-center gap-1">
@@ -216,20 +204,13 @@ function PageContextViewComponent({
             </div>
           )}
         </div>
-
-        {/* Legend */}
-        {visibleRoles.length > 0 && (
-          <div className="mt-3">
-            <RoleLegend visibleRoles={visibleRoles} compact />
-          </div>
-        )}
       </div>
 
-      {/* Context Markdown */}
-      <div className="flex-1 overflow-y-auto p-4 dark-scroll">
-        <h3 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
-          <FileText size={14} /> Sheet Analysis
-        </h3>
+        {/* Context Markdown */}
+        <div className="p-4 pb-0">
+          <h3 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+            <FileText size={14} /> Sheet Analysis
+          </h3>
 
         {page.contextMarkdown ? (
           <div className="prose prose-sm prose-invert prose-slate max-w-none">
@@ -337,18 +318,20 @@ function PageContextViewComponent({
             </div>
           </div>
         )}
-      </div>
 
-      {/* View Page Button */}
-      <div className="p-4 border-t border-white/5">
-        <button
-          onClick={onViewPage}
-          className="w-full py-2 px-4 bg-slate-700 hover:bg-slate-600 text-white
-                     rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-        >
-          <Eye size={16} />
-          View Page in PDF
-        </button>
+        </div>
+
+        {/* View Page Button */}
+        <div className="p-4 pt-2">
+          <button
+            onClick={onViewPage}
+            className="w-full py-2 px-4 bg-slate-700 hover:bg-slate-600 text-white
+                       rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+          >
+            <Eye size={16} />
+            View Page in PDF
+          </button>
+        </div>
       </div>
 
       {/* Thumbnail Modal */}
@@ -358,9 +341,6 @@ function PageContextViewComponent({
           onClose={() => setModalOpen(false)}
           imageUrl={imageUrl}
           pageName={page.pageName}
-          words={words}
-          imageWidth={imageDimensions.width}
-          imageHeight={imageDimensions.height}
         />
       )}
     </div>
