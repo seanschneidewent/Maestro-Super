@@ -92,10 +92,21 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   const processing = useProcessingStream(projectId);
 
   // Calculate unprocessed pages count from hierarchy
+  // Note: processingStatus may be undefined if backend doesn't populate it yet
+  // In that case, fall back to checking if processing.isComplete is false
   const unprocessedPagesCount = hierarchy
     ? hierarchy.disciplines.reduce((count, disc) =>
-        count + disc.pages.filter(page => page.processingStatus !== 'completed').length, 0)
+        count + disc.pages.filter(page =>
+          page.processingStatus !== 'completed' && page.processingStatus !== undefined
+        ).length, 0)
     : 0;
+
+  // Check if any page has processingStatus populated (to know if we can rely on it)
+  const hasProcessingStatusData = hierarchy
+    ? hierarchy.disciplines.some(disc =>
+        disc.pages.some(page => page.processingStatus !== undefined)
+      )
+    : false;
 
   // Convert discipline hierarchy to ProjectFile format for tree display
   const convertDisciplinesToProjectFiles = (
@@ -998,7 +1009,11 @@ export const SetupMode: React.FC<SetupModeProps> = ({
               </div>
 
               {/* Brain Mode: Process All button - only show when there are unprocessed pages */}
-              {uploadedFiles.length > 0 && unprocessedPagesCount > 0 && !processing.isProcessing && processing.status !== 'failed' && (
+              {/* If processingStatus data exists, use unprocessedPagesCount; otherwise fall back to !processing.isComplete */}
+              {uploadedFiles.length > 0 &&
+               !processing.isProcessing &&
+               processing.status !== 'failed' &&
+               (hasProcessingStatusData ? unprocessedPagesCount > 0 : !processing.isComplete) && (
                 <button
                   onClick={() => processing.start()}
                   className="w-full mt-3 py-3 rounded-lg bg-gradient-to-r from-purple-600/20 to-cyan-600/20 border border-purple-500/30 text-purple-200 text-sm font-medium hover:border-purple-400/50 hover:from-purple-600/30 hover:to-cyan-600/30 transition-all shadow-lg shadow-purple-900/10 group flex items-center justify-center gap-2"

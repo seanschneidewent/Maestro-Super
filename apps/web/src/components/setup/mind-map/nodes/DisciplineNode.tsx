@@ -44,7 +44,7 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
         <div className="absolute inset-0 rounded-lg bg-amber-400/10 blur-lg group-hover:bg-amber-400/20 transition-all pointer-events-none" />
       )}
 
-      {/* Node body - click to expand/collapse */}
+      {/* Node body - click to select and expand/collapse */}
       <div
         className={`relative flex items-center gap-2 px-4 py-2.5 rounded-lg
                    bg-slate-800 border-2 min-w-[140px] max-w-[180px]
@@ -53,7 +53,10 @@ function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
                      ? 'border-amber-400/50 hover:border-amber-400 shadow-amber-900/20'
                      : 'border-slate-600 hover:border-slate-500 shadow-slate-900/30'
                    }`}
-        onClick={onExpand}
+        onClick={() => {
+          onClick(); // Select the discipline
+          onExpand(); // Toggle expand/collapse
+        }}
       >
         {processed && (
           <Star size={14} className="text-amber-400 fill-amber-400 shrink-0" />
