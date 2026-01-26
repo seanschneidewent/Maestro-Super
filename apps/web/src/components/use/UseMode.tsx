@@ -726,8 +726,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           onExpandedPageClose={handleExpandedPageClose}
         />
 
-        {/* Query input bar - bottom right */}
-        <div className="absolute bottom-6 right-6 z-30 w-full max-w-xl">
+        {/* Query input bar - bottom */}
+        <div className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1.5rem,env(safe-area-inset-left))] right-[max(1.5rem,env(safe-area-inset-right))] z-30">
           {/* Suggested prompts - show in demo mode after page loaded in tutorial, after input focused, or after tutorial completed */}
           {mode === AppMode.DEMO && (
             inputHasBeenFocused ||
