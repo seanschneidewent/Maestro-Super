@@ -10,14 +10,19 @@ import {
   TransformComponent,
   ReactZoomPanPinchRef,
 } from 'react-zoom-pan-pinch'
-import { FieldPointer } from '../../types'
+import { FieldPointer, OcrWord } from '../../types'
 import { PointerOverlay } from './PointerOverlay'
+import { TextHighlightOverlay } from './TextHighlightOverlay'
 
 interface PageViewerProps {
   pngDataUrl: string | null
   pointers: FieldPointer[]
   activePointerId: string | null
   onPointerTap: (pointer: FieldPointer) => void
+  // New: text highlighting from agent
+  highlights?: OcrWord[]
+  originalImageWidth?: number   // Original image width from OCR
+  originalImageHeight?: number  // Original image height from OCR
 }
 
 export interface PageViewerHandle {
@@ -25,7 +30,15 @@ export interface PageViewerHandle {
 }
 
 export const PageViewer = forwardRef<PageViewerHandle, PageViewerProps>(
-  function PageViewer({ pngDataUrl, pointers, activePointerId, onPointerTap }, ref) {
+  function PageViewer({
+    pngDataUrl,
+    pointers,
+    activePointerId,
+    onPointerTap,
+    highlights,
+    originalImageWidth,
+    originalImageHeight,
+  }, ref) {
     const transformRef = useRef<ReactZoomPanPinchRef>(null)
     const imageRef = useRef<HTMLImageElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
@@ -95,6 +108,17 @@ export const PageViewer = forwardRef<PageViewerHandle, PageViewerProps>(
                 className="max-w-full max-h-full object-contain"
                 draggable={false}
               />
+              {/* Text highlights from agent */}
+              {imageDimensions.width > 0 && highlights && highlights.length > 0 && (
+                <TextHighlightOverlay
+                  highlights={highlights}
+                  imageWidth={imageRef.current?.clientWidth || imageDimensions.width}
+                  imageHeight={imageRef.current?.clientHeight || imageDimensions.height}
+                  originalWidth={originalImageWidth}
+                  originalHeight={originalImageHeight}
+                />
+              )}
+              {/* Legacy pointer overlays */}
               {imageDimensions.width > 0 &&
                 pointers.map((pointer) => (
                   <PointerOverlay

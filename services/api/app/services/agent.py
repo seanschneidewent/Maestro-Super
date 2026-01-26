@@ -353,32 +353,33 @@ async def run_agent_query_gemini(
     """
     Fast agent query using Gemini structured JSON output.
 
-    Single LLM call returns all decisions (page/pointer selection, titles, response).
+    Flow:
+    1. RAG pre-fetch: search_pages returns full page content
+    2. Gemini reads content and returns page_ids + highlights (text to highlight)
+    3. select_pages returns pages with semantic_index (OCR words + bboxes)
+    4. resolve_highlights matches text_matches to OCR bboxes
+    5. Return resolved highlights to frontend for rendering
     """
     from app.services.tools import (
         search_pages,
-        search_pointers,
         get_project_structure_summary,
         select_pages,
-        select_pointers,
+        resolve_highlights,
     )
 
     # 1. Pre-fetch: Emit tool calls for frontend status
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
     yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
-    yield {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}}
 
-    # Run all three in parallel
-    project_structure_dict, page_results, pointer_results = await asyncio.gather(
+    # Run both in parallel (no more pointer search)
+    project_structure_dict, page_results = await asyncio.gather(
         get_project_structure_summary(db, project_id=project_id),
         search_pages(db, query=query, project_id=project_id, limit=10),
-        search_pointers(db, query=query, project_id=project_id, limit=10),
     )
 
     # Yield pre-fetch results
     yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
     yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
-    yield {"type": "tool_result", "tool": "search_pointers", "result": pointer_results}
 
     # Initialize trace
     trace: list[dict] = [
@@ -386,8 +387,6 @@ async def run_agent_query_gemini(
         {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict},
         {"type": "tool_call", "tool": "search_pages", "input": {"query": query}},
         {"type": "tool_result", "tool": "search_pages", "result": page_results},
-        {"type": "tool_call", "tool": "search_pointers", "input": {"query": query}},
-        {"type": "tool_result", "tool": "search_pointers", "result": pointer_results},
     ]
 
     # 2. Build context strings for Gemini
@@ -418,7 +417,6 @@ async def run_agent_query_gemini(
             gemini_agent_query(
                 project_structure=project_structure_dict,
                 page_results=page_results,
-                pointer_results=pointer_results,
                 query=query,
                 history_context=history_context,
                 viewing_context=viewing_context_str,
@@ -436,8 +434,9 @@ async def run_agent_query_gemini(
 
     # 4. Execute selections with returned IDs
     page_ids = gemini_response.get("page_ids") or []
-    pointer_ids = gemini_response.get("pointer_ids") or []
+    highlight_specs = gemini_response.get("highlights") or []
 
+    pages_result = None
     if page_ids:
         yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}}
         trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}})
@@ -446,6 +445,7 @@ async def run_agent_query_gemini(
             # Convert Pydantic model to dict if needed
             if hasattr(result, "model_dump"):
                 result = result.model_dump(by_alias=True, mode="json")
+            pages_result = result
             yield {"type": "tool_result", "tool": "select_pages", "result": result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
         except Exception as e:
@@ -454,28 +454,24 @@ async def run_agent_query_gemini(
             yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
-    if pointer_ids:
-        yield {"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}}
-        trace.append({"type": "tool_call", "tool": "select_pointers", "input": {"pointer_ids": pointer_ids}})
-        try:
-            result = await select_pointers(db, pointer_ids=pointer_ids)
-            if hasattr(result, "model_dump"):
-                result = result.model_dump(by_alias=True, mode="json")
-            yield {"type": "tool_result", "tool": "select_pointers", "result": result}
-            trace.append({"type": "tool_result", "tool": "select_pointers", "result": result})
-        except Exception as e:
-            logger.error(f"select_pointers failed: {e}")
-            error_result = {"error": str(e)}
-            yield {"type": "tool_result", "tool": "select_pointers", "result": error_result}
-            trace.append({"type": "tool_result", "tool": "select_pointers", "result": error_result})
+    # 5. Resolve highlights: match text_matches to OCR bboxes
+    resolved_highlights = []
+    if pages_result and highlight_specs:
+        pages_data = pages_result.get("pages", [])
+        resolved_highlights = resolve_highlights(pages_data, highlight_specs)
+        if resolved_highlights:
+            yield {"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs}}
+            yield {"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}}
+            trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs}})
+            trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}})
 
-    # 5. Emit response text
+    # 6. Emit response text
     response_text = gemini_response.get("response") or ""
     if response_text:
         yield {"type": "text", "content": response_text}
         trace.append({"type": "reasoning", "content": response_text})
 
-    # 6. Done - use token counts from Gemini response
+    # 7. Done - use token counts from Gemini response
     display_title = gemini_response.get("chat_title")
     conversation_title = gemini_response.get("conversation_title") or display_title
     usage = gemini_response.get("usage") or {}
@@ -489,6 +485,7 @@ async def run_agent_query_gemini(
         },
         "displayTitle": display_title,
         "conversationTitle": conversation_title,
+        "highlights": resolved_highlights,  # Include resolved highlights for frontend
     }
 
 

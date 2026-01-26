@@ -1,11 +1,11 @@
 import { useState, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep } from '../../types'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../../types'
 import { transformAgentResponse, extractLatestThinking } from './transformResponse'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Pointer data from select_pointers tool result
+// Pointer data from select_pointers tool result (legacy - being phased out)
 export interface AgentSelectedPointer {
   pointerId: string
   title: string
@@ -15,13 +15,16 @@ export interface AgentSelectedPointer {
   bboxHeight: number
 }
 
-// Page with its selected pointers
+// Page with its selected pointers and highlights
 export interface AgentSelectedPage {
   pageId: string
   pageName: string
   filePath: string
   disciplineId: string
-  pointers: AgentSelectedPointer[]
+  pointers: AgentSelectedPointer[]  // Legacy - being phased out
+  highlights?: OcrWord[]            // New - text highlighting from agent
+  imageWidth?: number               // For normalizing OCR coordinates
+  imageHeight?: number
   // Brain Mode: processing status for graceful degradation
   processingStatus?: 'pending' | 'processing' | 'completed' | 'failed'
 }
@@ -350,6 +353,11 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 file_path: string
                 discipline_id: string
                 discipline_name?: string
+                semantic_index?: {
+                  image_width?: number
+                  image_height?: number
+                  words?: OcrWord[]
+                }
               }>
             }
 
@@ -387,17 +395,35 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                     pageName: p.page_name || 'Unknown',
                     filePath: p.file_path,
                     disciplineId: p.discipline_id || '',
-                    pointers: [], // No pointers for select_pages
+                    pointers: [], // Legacy pointers - being phased out
+                    highlights: [], // New text highlighting
+                    imageWidth: p.semantic_index?.image_width,
+                    imageHeight: p.semantic_index?.image_height,
                   })
                 }
               }
 
-              // Merge with existing (avoid duplicates)
-              const existingPageIds = new Set(selectedPagesRef.current.map((p) => p.pageId))
-              const uniqueNewPages = newPages.filter((p) => !existingPageIds.has(p.pageId))
+              // Merge with existing: update prefetched pages with OCR dimensions, add new ones
+              const existingPageMap = new Map(selectedPagesRef.current.map((p) => [p.pageId, p]))
+              let hasChanges = false
 
-              if (uniqueNewPages.length > 0) {
-                selectedPagesRef.current = [...selectedPagesRef.current, ...uniqueNewPages]
+              for (const newPage of newPages) {
+                const existingPage = existingPageMap.get(newPage.pageId)
+                if (existingPage) {
+                  // Update prefetched page with OCR dimensions (they were missing on prefetch)
+                  if (newPage.imageWidth && !existingPage.imageWidth) {
+                    existingPage.imageWidth = newPage.imageWidth
+                    existingPage.imageHeight = newPage.imageHeight
+                    hasChanges = true
+                  }
+                } else {
+                  // New page - add it
+                  selectedPagesRef.current.push(newPage)
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
                 setSelectedPages([...selectedPagesRef.current])
               }
               // Don't update thinkingText for tool results - only show reasoning in the bubble
@@ -503,6 +529,33 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
                 setSelectedPages([...selectedPagesRef.current])
               }
               // Don't update thinkingText for tool results - only show reasoning in the bubble
+            }
+          }
+          // Extract highlights from resolve_highlights tool
+          else if (data.tool === 'resolve_highlights') {
+            const result = data.result as {
+              highlights?: Array<{
+                page_id: string
+                words: OcrWord[]
+              }>
+            }
+
+            if (result?.highlights && Array.isArray(result.highlights)) {
+              // Merge highlights into existing pages
+              const pageMap = new Map(selectedPagesRef.current.map((p) => [p.pageId, p]))
+              let hasChanges = false
+
+              for (const highlight of result.highlights) {
+                const page = pageMap.get(highlight.page_id)
+                if (page && highlight.words && highlight.words.length > 0) {
+                  page.highlights = highlight.words
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
+                setSelectedPages([...selectedPagesRef.current])
+              }
             }
           }
           // Don't update thinkingText for any tool results - only show reasoning in the bubble

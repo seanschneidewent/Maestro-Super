@@ -45,6 +45,9 @@ async def search_pages(
     """
     Search pages by name or context content.
 
+    Returns full page content for RAG - Gemini reads this to answer queries
+    and identify which text to highlight.
+
     Args:
         db: Database session
         query: Search query (matches page_name, initial_context, full_context)
@@ -53,7 +56,7 @@ async def search_pages(
         limit: Max results (default 10)
 
     Returns:
-        List of matching pages with id, name, discipline, and context snippet
+        List of matching pages with id, name, discipline, and full content
     """
     from sqlalchemy import or_, func
 
@@ -101,12 +104,15 @@ async def search_pages(
                 Page.initial_context.ilike(singular_pattern),
                 Page.full_context.ilike(word_pattern),
                 Page.full_context.ilike(singular_pattern),
+                Page.context_markdown.ilike(word_pattern),
+                Page.context_markdown.ilike(singular_pattern),
             )
         else:
             word_condition = or_(
                 Page.page_name.ilike(word_pattern),
                 Page.initial_context.ilike(word_pattern),
                 Page.full_context.ilike(word_pattern),
+                Page.context_markdown.ilike(word_pattern),
             )
 
         word_conditions.append(word_condition)
@@ -119,26 +125,15 @@ async def search_pages(
 
     results = []
     for page in pages:
-        # Find a relevant snippet from context
-        context = page.full_context or page.initial_context or ""
-        snippet = ""
-        if context:
-            # Try to find the query term and extract surrounding text
-            lower_context = context.lower()
-            lower_query = query.lower()
-            idx = lower_context.find(lower_query)
-            if idx >= 0:
-                start = max(0, idx - 50)
-                end = min(len(context), idx + len(query) + 100)
-                snippet = ("..." if start > 0 else "") + context[start:end] + ("..." if end < len(context) else "")
-            else:
-                snippet = context[:150] + "..." if len(context) > 150 else context
+        # Return full content for RAG - prefer context_markdown (from sheet analyzer)
+        # Fall back to full_context or initial_context
+        content = page.context_markdown or page.full_context or page.initial_context or ""
 
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
             "discipline": page.discipline.display_name,
-            "context_snippet": snippet,
+            "content": content,  # Full content for Gemini to read
         })
 
     return results
@@ -475,12 +470,14 @@ async def select_pages(db: Session, page_ids: list[str]) -> dict:
     """
     Return page details for display in the frontend viewer.
 
+    Includes semantic_index with OCR words and bboxes for text highlighting.
+
     Args:
         db: Database session
         page_ids: List of page UUIDs to display
 
     Returns:
-        Dict with pages list containing page info for the viewer
+        Dict with pages list containing page info and OCR data for highlighting
     """
     pages = (
         db.query(Page)
@@ -497,6 +494,8 @@ async def select_pages(db: Session, page_ids: list[str]) -> dict:
                 "file_path": p.page_image_path or p.file_path,  # Prefer PNG, fall back to PDF
                 "discipline_id": str(p.discipline_id) if p.discipline_id else None,
                 "discipline_name": p.discipline.display_name if p.discipline else None,
+                # Include semantic_index for text highlighting
+                "semantic_index": p.semantic_index,
             }
             for p in pages
         ],
@@ -539,6 +538,111 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
             for p in pointers
         ],
     }
+
+
+def resolve_highlights(
+    pages_data: list[dict],
+    highlights: list[dict],
+) -> list[dict]:
+    """
+    Match text_matches from Gemini response to OCR words with bboxes.
+
+    Args:
+        pages_data: List of page dicts from select_pages (with semantic_index)
+        highlights: List of highlight specs from Gemini [{page_id, text_matches}]
+
+    Returns:
+        List of resolved highlights with matched words and bboxes:
+        [{
+            page_id: str,
+            words: [{id, text, bbox: {x0, y0, x1, y1, width, height}, role}]
+        }]
+    """
+    # Build lookup: page_id -> semantic_index words
+    page_words_lookup: dict[str, list[dict]] = {}
+    for page in pages_data:
+        page_id = page.get("page_id")
+        semantic_index = page.get("semantic_index")
+        if page_id and semantic_index:
+            words = semantic_index.get("words", [])
+            page_words_lookup[page_id] = words
+
+    resolved = []
+    for highlight in highlights:
+        page_id = highlight.get("page_id")
+        text_matches = highlight.get("text_matches", [])
+
+        if not page_id or not text_matches:
+            continue
+
+        ocr_words = page_words_lookup.get(page_id, [])
+        if not ocr_words:
+            logger.warning(f"No OCR words found for page {page_id}")
+            continue
+
+        matched_words = []
+        matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
+        matched_word_keys: set[str] = set()  # Fallback for words without IDs (text+bbox)
+
+        for text_match in text_matches:
+            if not text_match:
+                continue
+
+            # Ensure text_match is a string (Gemini might return numbers)
+            if not isinstance(text_match, str):
+                text_match = str(text_match)
+
+            # Case-insensitive matching
+            match_lower = text_match.lower().strip()
+
+            # Skip empty strings after stripping (would match everything)
+            if not match_lower:
+                continue
+
+            for word in ocr_words:
+                word_id = word.get("id")
+                word_text = word.get("text", "").lower().strip()
+
+                # Skip if empty word text
+                if not word_text:
+                    continue
+
+                # Check for duplicates using ID or text+bbox fallback
+                if word_id is not None:
+                    if word_id in matched_word_ids:
+                        continue
+                else:
+                    # For words without IDs, use text+bbox as unique key
+                    bbox = word.get("bbox", {})
+                    word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                    if word_key in matched_word_keys:
+                        continue
+
+                # Match if the OCR word contains the search text or vice versa
+                if match_lower in word_text or word_text in match_lower:
+                    # Track to avoid duplicates
+                    if word_id is not None:
+                        matched_word_ids.add(word_id)
+                    else:
+                        bbox = word.get("bbox", {})
+                        word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                        matched_word_keys.add(word_key)
+
+                    matched_words.append({
+                        "id": word_id,
+                        "text": word.get("text"),
+                        "bbox": word.get("bbox"),
+                        "role": word.get("role"),
+                        "region_type": word.get("region_type"),
+                    })
+
+        if matched_words:
+            resolved.append({
+                "page_id": page_id,
+                "words": matched_words,
+            })
+
+    return resolved
 
 
 # Tool Registry - maps tool names to functions

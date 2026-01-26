@@ -15,30 +15,33 @@ from app.utils.retry import with_retry
 logger = logging.getLogger(__name__)
 
 
-AGENT_QUERY_PROMPT = '''You are a construction plan assistant. Given pre-fetched search results, select relevant pages/pointers and write a brief response.
+AGENT_QUERY_PROMPT = '''You are a construction plan assistant. Read the page content from RAG search results and answer the user's question.
 
 PROJECT STRUCTURE:
 {project_structure}
 
-PAGE SEARCH RESULTS:
+PAGE SEARCH RESULTS (with full content):
 {page_results}
-
-POINTER SEARCH RESULTS:
-{pointer_results}
 
 {history_section}
 {viewing_section}
 USER QUERY: {query}
 
 Your task:
-1. Review the search results and project structure
-2. Select the most relevant page IDs and pointer IDs to display
-3. Generate a short, helpful response
+1. READ the page content carefully to find the answer
+2. Select which pages to display to the user
+3. Identify specific text to HIGHLIGHT on the drawings (dimensions, specs, labels, etc.)
+4. Write a brief, helpful response
+
+HIGHLIGHTING GUIDELINES:
+- For each page you display, identify text that answers the user's question
+- Include specific values: dimensions like "200A", "3'-6\"", specs like "MAIN PANEL", "GYP. BD."
+- Don't over-highlight - pick the 3-8 most relevant text items per page
+- Text must appear EXACTLY as written in the page content (case-insensitive matching)
 
 SELECTION GUIDELINES:
-- Include ALL pages relevant to the query, not just ones with pointers
+- Include ALL pages relevant to the query
 - Order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3)
-- Only include pointer_ids if they add specific value (highlight relevant details)
 - If search results are empty, look in project structure for relevant pages
 
 RESPONSE STYLE:
@@ -59,7 +62,10 @@ TITLE GUIDELINES:
 Return JSON with this exact structure:
 {{
   "page_ids": ["uuid1", "uuid2"],
-  "pointer_ids": ["uuid3"],
+  "highlights": [
+    {{"page_id": "uuid1", "text_matches": ["200A", "MAIN PANEL", "480V"]}},
+    {{"page_id": "uuid2", "text_matches": ["3'-6\\"", "GYP. BD."]}}
+  ],
   "chat_title": "2-4 word title",
   "conversation_title": "2-6 word title",
   "response": "Brief helpful response"
@@ -69,7 +75,6 @@ Return JSON with this exact structure:
 async def run_agent_query(
     project_structure: dict[str, Any],
     page_results: list[dict[str, Any]],
-    pointer_results: list[dict[str, Any]],
     query: str,
     history_context: str = "",
     viewing_context: str = "",
@@ -77,10 +82,14 @@ async def run_agent_query(
     """
     Single-shot agent query using Gemini structured JSON output.
 
+    Gemini reads the full page content from RAG and returns:
+    - Which pages to display
+    - Which text to highlight on each page
+    - A brief response
+
     Args:
         project_structure: Dict with disciplines and pages
-        page_results: List of page search results
-        pointer_results: List of pointer search results
+        page_results: List of page search results WITH full content
         query: User's question
         history_context: Optional formatted history from previous messages
         viewing_context: Optional context about what page user is viewing
@@ -88,7 +97,7 @@ async def run_agent_query(
     Returns:
         {
             "page_ids": ["uuid1", "uuid2", ...],
-            "pointer_ids": ["uuid3", ...],
+            "highlights": [{"page_id": "uuid1", "text_matches": ["200A", "MAIN PANEL"]}],
             "chat_title": "2-4 word title",
             "conversation_title": "2-6 word title",
             "response": "Brief helpful response"
@@ -115,7 +124,6 @@ async def run_agent_query(
         prompt = AGENT_QUERY_PROMPT.format(
             project_structure=json.dumps(project_structure, indent=2),
             page_results=json.dumps(page_results, indent=2),
-            pointer_results=json.dumps(pointer_results, indent=2),
             query=escape_braces(query),
             history_section=history_section,
             viewing_section=viewing_section,
@@ -144,7 +152,7 @@ async def run_agent_query(
         chat_title = result.get("chat_title") or "Query"
         return {
             "page_ids": result.get("page_ids") or [],
-            "pointer_ids": result.get("pointer_ids") or [],
+            "highlights": result.get("highlights") or [],
             "chat_title": chat_title,
             "conversation_title": result.get("conversation_title") or chat_title,
             "response": result.get("response") or "I found the relevant pages for you.",
