@@ -220,7 +220,7 @@ const ExpandedPageModal: React.FC<{
       {/* Close button - highlight during tutorial */}
       <button
         onClick={onClose}
-        className={`absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-10 p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors ${
+        className={`absolute top-12 right-4 z-10 p-2 rounded-full bg-white/90 hover:bg-white shadow-lg transition-colors ${
           tutorialStep === 'result-page' ? 'ring-2 ring-cyan-400' : ''
         }`}
         style={tutorialStep === 'result-page' ? { animation: 'pulse-glow 2s ease-in-out infinite' } : undefined}
@@ -239,7 +239,7 @@ const ExpandedPageModal: React.FC<{
       )}
 
       {/* Page name header */}
-      <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
+      <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-lg">
         <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
       </div>
 

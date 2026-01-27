@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -119,10 +119,6 @@
             backdropBlur: {
               xs: '2px',
             },
-            spacing: {
-              'safe-top': 'max(1rem, env(safe-area-inset-top))',
-              'safe-top-5': 'max(1.25rem, env(safe-area-inset-top))',
-            },
           }
         }
       }
@@ -134,7 +130,7 @@
         width: 100%;
         margin: 0;
         padding: 0;
-/* No background - let app control all colors */
+background: transparent;
       }
 
       #root {
