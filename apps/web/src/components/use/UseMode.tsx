@@ -673,11 +673,12 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   return (
     <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
       {/* Fixed toggle button - only visible when sidebar is collapsed */}
+      {/* Positioned to align with toggle button location when panel is expanded (below ModeToggle) */}
       {isSidebarCollapsed && (
         <button
           onClick={() => setIsSidebarCollapsed(false)}
           className={`fixed left-[max(1rem,env(safe-area-inset-left))] z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-            hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+5rem)]' : 'top-[max(1rem,env(safe-area-inset-top))]'
+            hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+8.5rem)]' : 'top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)]'
           }`}
           title="Expand sidebar"
           data-tutorial="sidebar-expand"
