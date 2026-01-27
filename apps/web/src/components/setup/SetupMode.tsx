@@ -875,21 +875,25 @@ export const SetupMode: React.FC<SetupModeProps> = ({
 
   return (
     <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
-      {/* Fixed toggle buttons for panels */}
-      <button
-        onClick={() => setActivePanel(activePanel === 'left' ? null : 'left')}
-        className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
-        title={activePanel === 'left' ? 'Collapse files panel' : 'Expand files panel'}
-      >
-        <FolderOpen size={20} />
-      </button>
-      <button
-        onClick={() => setActivePanel(activePanel === 'right' ? null : 'right')}
-        className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
-        title={activePanel === 'right' ? 'Collapse details panel' : 'Expand details panel'}
-      >
-        <Layers size={20} />
-      </button>
+      {/* Fixed toggle buttons for panels - only visible when panel is collapsed */}
+      {activePanel !== 'left' && (
+        <button
+          onClick={() => setActivePanel('left')}
+          className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          title="Expand files panel"
+        >
+          <FolderOpen size={20} />
+        </button>
+      )}
+      {activePanel !== 'right' && (
+        <button
+          onClick={() => setActivePanel('right')}
+          className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          title="Expand details panel"
+        >
+          <Layers size={20} />
+        </button>
+      )}
 
       {/* Sidebar: File Tree (absolute positioned overlay) */}
       <CollapsiblePanel
@@ -903,15 +907,25 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         onWidthChange={setLeftSidebarWidth}
         collapsed={activePanel !== 'left'}
         onCollapsedChange={(collapsed) => setActivePanel(collapsed ? null : 'left')}
+        hideHandles
       >
         <div className="flex flex-col h-full">
           <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5 space-y-3">
               <ModeToggle mode={mode} setMode={setMode} />
-              <div>
-                <h1 className="font-bold text-lg tracking-tight text-white">
-                  Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Super</span>
-                </h1>
-                <p className="text-xs text-slate-400">Setup Mode</p>
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setActivePanel(null)}
+                  className="p-2 rounded-xl bg-slate-700/50 backdrop-blur-md border border-slate-600/30 shadow-sm hover:bg-slate-600/50 text-slate-400 hover:text-white transition-all duration-200"
+                  title="Collapse files panel"
+                >
+                  <FolderOpen size={20} />
+                </button>
+                <div className="text-right">
+                  <h1 className="font-bold text-lg tracking-tight text-white">
+                    Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Super</span>
+                  </h1>
+                  <p className="text-xs text-slate-400">Setup Mode</p>
+                </div>
               </div>
           </div>
 
@@ -1104,13 +1118,23 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         onWidthChange={setRightSidebarWidth}
         collapsed={activePanel !== 'right'}
         onCollapsedChange={(collapsed) => setActivePanel(collapsed ? null : 'right')}
+        hideHandles
       >
         <div className="flex flex-col h-full">
            <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5">
-              <h2 className="font-semibold text-slate-100 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>
-                Page Details
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-slate-100 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>
+                  Page Details
+                </h2>
+                <button
+                  onClick={() => setActivePanel(null)}
+                  className="p-2 rounded-xl bg-slate-700/50 backdrop-blur-md border border-slate-600/30 shadow-sm hover:bg-slate-600/50 text-slate-400 hover:text-white transition-all duration-200"
+                  title="Collapse details panel"
+                >
+                  <Layers size={20} />
+                </button>
+              </div>
            </div>
            <div className="flex-1 overflow-hidden">
               {selectedPageId && selectedDisciplineId ? (
