@@ -675,7 +675,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
 
   return (
-    <div className="h-dvh w-dvw flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
+    <div className="h-full w-full flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans relative blueprint-grid">
       {/* Fixed toggle button - only visible when sidebar is collapsed */}
       {/* Positioned to align with toggle button location when panel is expanded (below ModeToggle) */}
       {isSidebarCollapsed && (
@@ -748,7 +748,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           style={{
             bottom: keyboardHeight > 0
               ? `${keyboardHeight + 12}px` // 12px padding above keyboard
-              : 'max(1.5rem, env(safe-area-inset-bottom))',
+              : '1.5rem',
           }}
         >
           {/* Suggested prompts - show in demo mode after page loaded in tutorial, after input focused, or after tutorial completed */}
