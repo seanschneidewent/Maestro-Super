@@ -25,6 +25,7 @@ import { useConversation } from '../../hooks/useConversation';
 import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentToastStack } from './AgentToastStack';
 import { ConversationIndicator } from './ConversationIndicator';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 /**
  * Extract final answer text from the query trace.
@@ -157,6 +158,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
   // Agent toasts - for checking if any are showing (used by ConversationIndicator)
   const { toasts } = useAgentToast();
+
+  // Keyboard height for adjusting input position on iOS
+  const keyboardHeight = useKeyboardHeight();
 
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
@@ -738,8 +742,15 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
           onExpandedPageClose={handleExpandedPageClose}
         />
 
-        {/* Query input bar - bottom */}
-        <div className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1.5rem,env(safe-area-inset-left))] right-[max(1.5rem,env(safe-area-inset-right))] z-30">
+        {/* Query input bar - bottom, adjusts for keyboard on iOS */}
+        <div
+          className="absolute left-[max(1.5rem,env(safe-area-inset-left))] right-[max(1.5rem,env(safe-area-inset-right))] z-30 transition-[bottom] duration-100"
+          style={{
+            bottom: keyboardHeight > 0
+              ? `${keyboardHeight + 12}px` // 12px padding above keyboard
+              : 'max(1.5rem, env(safe-area-inset-bottom))',
+          }}
+        >
           {/* Suggested prompts - show in demo mode after page loaded in tutorial, after input focused, or after tutorial completed */}
           {mode === AppMode.DEMO && (
             inputHasBeenFocused ||
