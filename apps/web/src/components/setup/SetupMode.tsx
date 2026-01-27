@@ -874,7 +874,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   };
 
   return (
-    <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
+    <div className="fixed inset-0 bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
       {/* Fixed toggle buttons for panels - only visible when panel is collapsed */}
       {/* Positioned to align with toggle button location when panel is expanded (below ModeToggle) */}
       {activePanel !== 'left' && (
