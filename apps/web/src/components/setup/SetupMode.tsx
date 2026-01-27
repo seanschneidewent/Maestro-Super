@@ -876,10 +876,11 @@ export const SetupMode: React.FC<SetupModeProps> = ({
   return (
     <div className="relative h-full w-full bg-gradient-radial-dark text-slate-200 overflow-hidden font-sans">
       {/* Fixed toggle buttons for panels - only visible when panel is collapsed */}
+      {/* Positioned to align with toggle button location when panel is expanded (below ModeToggle) */}
       {activePanel !== 'left' && (
         <button
           onClick={() => setActivePanel('left')}
-          className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
           title="Expand files panel"
         >
           <FolderOpen size={20} />
@@ -888,7 +889,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       {activePanel !== 'right' && (
         <button
           onClick={() => setActivePanel('right')}
-          className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
           title="Expand details panel"
         >
           <Layers size={20} />

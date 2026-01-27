@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { X } from 'lucide-react';
 
 interface PageThumbnailModalProps {
   isOpen: boolean;
@@ -88,6 +89,15 @@ function PageThumbnailModalComponent({
         className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm"
         onClick={onClose}
       />
+
+      {/* Close button - fixed in top right with safe area insets */}
+      <button
+        onClick={onClose}
+        className="fixed top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-[60] p-3 rounded-full bg-slate-800/90 backdrop-blur-md border border-slate-700/50 text-white hover:bg-slate-700 transition-all duration-200 shadow-lg"
+        aria-label="Close"
+      >
+        <X size={24} />
+      </button>
 
       {/* Image container with pinch-to-zoom */}
       {imageDimensions.width > 0 ? (

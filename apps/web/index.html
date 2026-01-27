@@ -136,7 +136,8 @@
         margin: 0;
         padding: 0;
         background: #080d19; /* Match app background - prevents white flash on iOS */
-        /* No overflow:hidden - let iOS handle keyboard naturally */
+        overflow: hidden; /* Prevent body scrolling entirely */
+        overscroll-behavior: none; /* Prevent pull-to-refresh and overscroll */
       }
 
       #root {
@@ -332,6 +333,19 @@
   <body>
     <div id="root"></div>
     <script>
+      // iOS initial scroll fix - reset scroll position immediately on load
+      // This fixes the dark gap at the bottom that appears on first load
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      // Also reset after a short delay in case iOS defers layout
+      setTimeout(function() {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      }, 50);
+
       // iOS Safari keyboard dismiss fix - debounced to wait for animation
       if (window.visualViewport) {
         var lastHeight = window.visualViewport.height;
@@ -366,6 +380,20 @@
           window.scrollTo(0, 1);
           window.scrollTo(0, 0);
         }, 150);
+      });
+
+      // Reset scroll on page show (handles iOS back-forward cache)
+      window.addEventListener('pageshow', function(event) {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      });
+
+      // Also handle DOMContentLoaded to catch any deferred layout
+      document.addEventListener('DOMContentLoaded', function() {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
       });
     </script>
     <script type="module" src="/src/index.tsx"></script>
