@@ -688,10 +688,15 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
             case 'pages': {
               // Pages render at full container width for maximum visibility
               // Uses sequential loading to avoid memory pressure
+              // Constrain height to viewport to prevent thumbnail overflow
               const isFirst = isFirstPagesCluster;
               isFirstPagesCluster = false;
               return (
-                <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
+                <div
+                  key={item.id}
+                  className="mx-auto max-h-[calc(100vh-200px)] overflow-y-auto"
+                  style={{ maxWidth: containerWidth }}
+                >
                   <PagesCluster
                     pages={item.pages}
                     containerWidth={containerWidth}
