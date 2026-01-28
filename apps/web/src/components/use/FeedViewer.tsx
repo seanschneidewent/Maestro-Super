@@ -394,18 +394,21 @@ const FeedPageItemDisplay: React.FC<{
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
   isFirstPage?: boolean;
 }> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
-  // Calculate display dimensions
+  // Calculate display dimensions - constrain by both width AND viewport height
+  const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 200 : 600;
   const displayDimensions = pageImage
     ? (() => {
         const imgWidth = pageImage.width;
         const imgHeight = pageImage.height;
-        const scale = Math.min(containerWidth / imgWidth, 1);
+        const scaleByWidth = containerWidth / imgWidth;
+        const scaleByHeight = maxHeight / imgHeight;
+        const scale = Math.min(scaleByWidth, scaleByHeight, 1);
         return {
           width: imgWidth * scale,
           height: imgHeight * scale,
         };
       })()
-    : { width: containerWidth, height: 400 };
+    : { width: containerWidth, height: Math.min(400, maxHeight) };
 
   // Loading or waiting state
   if (isLoading || isWaiting || !pageImage) {
