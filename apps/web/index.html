@@ -124,19 +124,24 @@
       }
     </script>
     <style>
-      /* Viewport sizing for iPad */
+      /* Viewport sizing - fill entire screen including safe areas */
       html, body {
-        height: 100%;
-        width: 100%;
         margin: 0;
         padding: 0;
         background: #080d19;
+        /* Fill viewport including safe areas */
+        min-height: 100dvh;
+        min-height: -webkit-fill-available;
       }
 
       #root {
-        height: 100%;
-        width: 100%;
-        overflow: hidden; /* Content locked here only */
+        /* Fixed positioning fills entire viewport edge-to-edge */
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        overflow: hidden;
       }
 
       /* Dynamic viewport unit fallbacks for browsers that support them */
