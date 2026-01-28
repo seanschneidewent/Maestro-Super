@@ -5,13 +5,8 @@ import App from './App';
 // iOS Safari viewport fix: scroll to 1px to force viewport recalculation
 // This fixes the bottom gap that appears on initial load but disappears after rotation
 if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-  window.addEventListener('load', () => {
-    // Make body 1px taller so there's something to scroll to
-    document.body.style.minHeight = 'calc(100dvh + 1px)';
-    requestAnimationFrame(() => {
-      window.scrollTo(0, 1);
-    });
-  });
+  document.body.style.minHeight = 'calc(100dvh + 1px)';
+  window.scrollTo(0, 1);
 }
 
 // Prevent Vite HMR from triggering full page reload on tab switch
