@@ -394,8 +394,8 @@ const FeedPageItemDisplay: React.FC<{
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
   isFirstPage?: boolean;
 }> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
-  // Cap thumbnail width to maintain chat-like feel - users tap to see full detail
-  const maxThumbnailWidth = Math.min(containerWidth, 450);
+  // Cap thumbnail width to fit within container with margin, maintaining chat-like feel
+  const maxThumbnailWidth = Math.min(containerWidth - 16, 450);
   const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 250 : 500;
   const displayDimensions = pageImage
     ? (() => {
