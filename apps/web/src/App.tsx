@@ -261,7 +261,7 @@ const App: React.FC = () => {
   // Show loading while checking auth
   if (checkingAuth) {
     return (
-      <div className="fixed top-0 left-0 w-full h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+      <div className="fixed inset-0 bg-gradient-radial-dark flex items-center justify-center font-sans">
         <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
       </div>
     );
@@ -269,7 +269,7 @@ const App: React.FC = () => {
 
   if (mode === AppMode.LOGIN) {
     return (
-        <div className="fixed top-0 left-0 w-full h-screen bg-gradient-radial-dark flex items-center justify-center p-4 font-sans blueprint-grid-dark">
+        <div className="fixed inset-0 bg-gradient-radial-dark flex items-center justify-center p-4 font-sans blueprint-grid-dark">
             <div className="glass-panel p-8 rounded-2xl w-full max-w-md animate-scale-in">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">
@@ -432,7 +432,7 @@ const App: React.FC = () => {
   // Show loading state while project loads
   if (projectLoading) {
     return (
-      <div className="fixed top-0 left-0 w-full h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+      <div className="fixed inset-0 bg-gradient-radial-dark flex items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
           <p className="text-slate-400 text-sm">Loading project...</p>
@@ -467,7 +467,7 @@ const App: React.FC = () => {
   // Show error state
   if (projectError || !project) {
     return (
-      <div className="fixed top-0 left-0 w-full h-screen bg-gradient-radial-dark flex items-center justify-center font-sans">
+      <div className="fixed inset-0 bg-gradient-radial-dark flex items-center justify-center font-sans">
         <div className="glass-panel p-8 rounded-2xl max-w-md text-center">
           <p className="text-red-400 mb-4">{projectError || 'Failed to load project'}</p>
           <button

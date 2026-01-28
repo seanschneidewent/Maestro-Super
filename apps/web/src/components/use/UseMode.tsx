@@ -675,7 +675,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
   const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
 
   return (
-    <div className="fixed top-0 left-0 w-full h-screen flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans blueprint-grid">
+    <div className="fixed inset-0 flex overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 text-slate-900 font-sans blueprint-grid">
       {/* Fixed toggle button - only visible when sidebar is collapsed */}
       {/* Positioned to align with toggle button location when panel is expanded (below ModeToggle) */}
       {isSidebarCollapsed && (
