@@ -93,7 +93,7 @@ function PageThumbnailModalComponent({
       {/* Close button - fixed in top right with safe area insets */}
       <button
         onClick={onClose}
-        className="fixed top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-[60] p-3 rounded-full bg-slate-800/90 backdrop-blur-md border border-slate-700/50 text-white hover:bg-slate-700 transition-all duration-200 shadow-lg"
+        className="fixed top-12 right-4 z-[60] p-3 rounded-full bg-slate-800/90 backdrop-blur-md border border-slate-700/50 text-white hover:bg-slate-700 transition-all duration-200 shadow-lg"
         aria-label="Close"
       >
         <X size={24} />

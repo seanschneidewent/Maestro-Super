@@ -178,7 +178,7 @@ export function QueryHistoryPanel({
   return (
     <div className="w-96 h-full bg-white/95 backdrop-blur-md border-l border-slate-200/50 flex flex-col z-20 shadow-lg">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] border-b border-slate-200/50">
+      <div className="flex items-center justify-between px-4 py-3 pt-12 border-b border-slate-200/50">
         <h2 className="text-lg font-medium text-slate-800">Conversation History</h2>
         <button
           onClick={onClose}

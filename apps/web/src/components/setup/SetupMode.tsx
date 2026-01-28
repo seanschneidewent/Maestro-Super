@@ -880,7 +880,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       {activePanel !== 'left' && (
         <button
           onClick={() => setActivePanel('left')}
-          className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          className="fixed left-4 top-[6.5rem] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
           title="Expand files panel"
         >
           <FolderOpen size={20} />
@@ -889,7 +889,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
       {activePanel !== 'right' && (
         <button
           onClick={() => setActivePanel('right')}
-          className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
+          className="fixed right-4 top-[6.5rem] z-50 p-2 rounded-xl bg-slate-800/90 backdrop-blur-md border border-slate-700/50 shadow-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all duration-200"
           title="Expand details panel"
         >
           <Layers size={20} />
@@ -911,7 +911,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         hideHandles
       >
         <div className="flex flex-col h-full">
-          <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5 space-y-3">
+          <div className="px-4 pb-4 pt-12 border-b border-white/5 space-y-3">
               <ModeToggle mode={mode} setMode={setMode} />
               <div className="flex items-center justify-between">
                 <button
@@ -1122,7 +1122,7 @@ export const SetupMode: React.FC<SetupModeProps> = ({
         hideHandles
       >
         <div className="flex flex-col h-full">
-           <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-white/5">
+           <div className="px-4 pb-4 pt-12 border-b border-white/5">
               <div className="flex items-center justify-between">
                 <h2 className="font-semibold text-slate-100 flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-glow-cyan-sm"></div>

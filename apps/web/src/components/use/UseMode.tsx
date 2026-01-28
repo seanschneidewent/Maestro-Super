@@ -681,8 +681,8 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       {isSidebarCollapsed && (
         <button
           onClick={() => setIsSidebarCollapsed(false)}
-          className={`fixed left-[max(1rem,env(safe-area-inset-left))] z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
-            hasTopLeftOverlay ? 'top-[calc(max(1rem,env(safe-area-inset-top))+8.5rem)]' : 'top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)]'
+          className={`fixed left-4 z-50 p-2 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all duration-200 ${
+            hasTopLeftOverlay ? 'top-[11.5rem]' : 'top-[6.5rem]'
           }`}
           title="Expand sidebar"
           data-tutorial="sidebar-expand"
@@ -695,7 +695,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
       {!isSidebarCollapsed && (
         <div className="w-72 h-full flex flex-col bg-white/90 backdrop-blur-xl border-r border-slate-200/50 z-20 shadow-lg">
           {/* Header */}
-          <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-slate-200/50 bg-white/50 space-y-3">
+          <div className="px-4 pb-4 pt-12 border-b border-slate-200/50 bg-white/50 space-y-3">
             {mode === AppMode.DEMO && onGetStarted ? (
               <DemoHeader onGetStarted={onGetStarted} />
             ) : mode !== AppMode.DEMO ? (
@@ -744,7 +744,7 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
 
         {/* Query input bar - bottom, adjusts for keyboard on iOS */}
         <div
-          className="absolute left-[max(1.5rem,env(safe-area-inset-left))] right-[max(1.5rem,env(safe-area-inset-right))] z-30 transition-[bottom] duration-100"
+          className="absolute left-6 right-6 z-30 transition-[bottom] duration-100"
           style={{
             bottom: keyboardHeight > 0
               ? `${keyboardHeight + 12}px` // 12px padding above keyboard
