@@ -921,12 +921,9 @@ export const SetupMode: React.FC<SetupModeProps> = ({
                 >
                   <FolderOpen size={20} />
                 </button>
-                <div className="text-right">
-                  <h1 className="font-bold text-lg tracking-tight text-white">
-                    Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Super</span>
-                  </h1>
-                  <p className="text-xs text-slate-400">Setup Mode</p>
-                </div>
+                <h1 className="font-bold text-2xl tracking-tight text-white">
+                  Maestro<span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">Super</span>
+                </h1>
               </div>
           </div>
 

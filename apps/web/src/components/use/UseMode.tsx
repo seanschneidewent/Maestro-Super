@@ -709,12 +709,9 @@ export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGe
               >
                 <PanelLeftClose size={20} />
               </button>
-              <div className="text-right">
-                <h1 className="font-bold text-lg text-slate-800">
-                  Maestro<span className="text-cyan-600">Super</span>
-                </h1>
-                <p className="text-xs text-slate-500">Field Mode</p>
-              </div>
+              <h1 className="font-bold text-2xl text-slate-800">
+                Maestro<span className="text-cyan-600">Super</span>
+              </h1>
             </div>
           </div>
 
