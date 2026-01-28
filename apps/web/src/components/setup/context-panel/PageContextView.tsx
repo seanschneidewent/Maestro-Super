@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, Eye, Maximize2, Loader2, Check, AlertCircle, FileText } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api, PageResponse } from '../../../lib/api';
@@ -334,14 +335,15 @@ function PageContextViewComponent({
         </div>
       </div>
 
-      {/* Thumbnail Modal */}
-      {imageUrl && (
+      {/* Thumbnail Modal - rendered via portal to escape panel bounds on mobile */}
+      {imageUrl && modalOpen && createPortal(
         <PageThumbnailModal
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
           imageUrl={imageUrl}
           pageName={page.pageName}
-        />
+        />,
+        document.body
       )}
     </div>
   );
