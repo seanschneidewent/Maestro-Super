@@ -394,13 +394,14 @@ const FeedPageItemDisplay: React.FC<{
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
   isFirstPage?: boolean;
 }> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
-  // Calculate display dimensions - constrain by both width AND viewport height
-  const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 200 : 600;
+  // Cap thumbnail width to maintain chat-like feel - users tap to see full detail
+  const maxThumbnailWidth = Math.min(containerWidth, 450);
+  const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 250 : 500;
   const displayDimensions = pageImage
     ? (() => {
         const imgWidth = pageImage.width;
         const imgHeight = pageImage.height;
-        const scaleByWidth = containerWidth / imgWidth;
+        const scaleByWidth = maxThumbnailWidth / imgWidth;
         const scaleByHeight = maxHeight / imgHeight;
         const scale = Math.min(scaleByWidth, scaleByHeight, 1);
         return {
@@ -408,7 +409,7 @@ const FeedPageItemDisplay: React.FC<{
           height: imgHeight * scale,
         };
       })()
-    : { width: containerWidth, height: Math.min(400, maxHeight) };
+    : { width: maxThumbnailWidth, height: Math.min(300, maxHeight) };
 
   // Loading or waiting state
   if (isLoading || isWaiting || !pageImage) {
@@ -689,22 +690,12 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
               );
 
             case 'pages': {
-              // Pages render at full container width for maximum visibility
+              // Pages cluster - thumbnails are sized in FeedPageItemDisplay
               // Uses sequential loading to avoid memory pressure
-              // Constrain height to viewport to prevent thumbnail overflow
               const isFirst = isFirstPagesCluster;
               isFirstPagesCluster = false;
               return (
-                <div
-                  key={item.id}
-                  className="mx-auto max-h-[calc(100vh-200px)] overflow-y-auto"
-                  style={{ maxWidth: containerWidth }}
-                  onScroll={() => {
-                    // Disable auto-scroll when user scrolls within pages cluster
-                    // This prevents unexpected jumps while reading earlier pages
-                    isNearBottomRef.current = false;
-                  }}
-                >
+                <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
                   <PagesCluster
                     pages={item.pages}
                     containerWidth={containerWidth}
