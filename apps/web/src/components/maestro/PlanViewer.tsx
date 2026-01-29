@@ -3,7 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
-import { AgentSelectedPage } from '../field';
+import { AgentSelectedPage } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 
 // Set up PDF.js worker

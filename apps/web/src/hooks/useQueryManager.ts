@@ -13,10 +13,10 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep } from '../../types'
-import { transformAgentResponse, extractLatestThinking } from './transformResponse'
-import { useAgentToast } from '../../contexts/AgentToastContext'
+import { supabase } from '../lib/supabase'
+import { FieldResponse, ContextPointer, AgentTraceStep } from '../types'
+import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
+import { useAgentToast } from '../contexts/AgentToastContext'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { SetupMode } from './components/setup/SetupMode';
-import { UseMode } from './components/use/UseMode';
+import { BrainMode } from './components/brain/BrainMode';
+import { MaestroMode } from './components/maestro/MaestroMode';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
 import { AgentToastProvider } from './contexts/AgentToastContext';
@@ -13,8 +13,8 @@ import { api } from './lib/api';
 import { supabase, signInAnonymously, isAnonymousUser } from './lib/supabase';
 import { TutorialProvider, TutorialOverlay } from './components/tutorial';
 
-// Types for setup mode state persistence
-interface SetupState {
+// Types for brain mode state persistence
+interface BrainState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
   isDrawingEnabled: boolean;
@@ -40,9 +40,9 @@ const App: React.FC = () => {
   // Track current user ID to avoid reloading project on token refresh
   const currentUserIdRef = useRef<string | null>(null);
 
-  // Persistent state for Setup mode (survives mode switches)
+  // Persistent state for Brain mode (survives mode switches)
   const localFileMapRef = useRef<Map<string, File>>(new Map());
-  const [setupState, setSetupState] = useState<SetupState>({
+  const [brainState, setBrainState] = useState<BrainState>({
     selectedFileId: null,
     selectedPointerId: null,
     isDrawingEnabled: false,
@@ -450,7 +450,7 @@ const App: React.FC = () => {
             <TutorialProvider>
               <AgentToastProvider>
                 <TutorialOverlay onGetStarted={handleGetStarted} />
-                <UseMode
+                <MaestroMode
                   mode={mode}
                   setMode={setMode}
                   projectId={project.id}
@@ -487,18 +487,18 @@ const App: React.FC = () => {
         <ToastProvider>
           {/* Render both modes but hide inactive one to preserve state */}
           <div className={mode === AppMode.SETUP ? 'contents' : 'hidden'}>
-            <SetupMode
+            <BrainMode
               mode={mode}
               setMode={setMode}
               projectId={project.id}
               localFileMapRef={localFileMapRef}
-              setupState={setupState}
-              setSetupState={setSetupState}
+              brainState={brainState}
+              setBrainState={setBrainState}
             />
           </div>
           <div className={mode === AppMode.USE ? 'contents' : 'hidden'}>
             <AgentToastProvider>
-              <UseMode mode={mode} setMode={setMode} projectId={project.id} />
+              <MaestroMode mode={mode} setMode={setMode} projectId={project.id} />
             </AgentToastProvider>
           </div>
         </ToastProvider>

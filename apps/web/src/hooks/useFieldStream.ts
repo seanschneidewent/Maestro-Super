@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../../types'
-import { transformAgentResponse, extractLatestThinking } from './transformResponse'
+import { supabase } from '../lib/supabase'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../types'
+import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
