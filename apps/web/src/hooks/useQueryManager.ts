@@ -14,7 +14,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep } from '../types'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 import { useAgentToast } from '../contexts/AgentToastContext'
 
@@ -36,13 +36,16 @@ export interface AgentSelectedPointer {
   bboxHeight: number
 }
 
-// Page with its selected pointers
+// Page with its selected pointers and highlights
 export interface AgentSelectedPage {
   pageId: string
   pageName: string
   filePath: string
   disciplineId: string
   pointers: AgentSelectedPointer[]
+  highlights?: OcrWord[]            // Text highlighting from agent
+  imageWidth?: number               // For normalizing OCR coordinates
+  imageHeight?: number
   // Brain Mode: processing status for graceful degradation
   processingStatus?: 'pending' | 'processing' | 'completed' | 'failed'
 }
@@ -430,6 +433,10 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
                 page_name: string
                 file_path: string
                 discipline_id: string
+                semantic_index?: {
+                  image_width?: number
+                  image_height?: number
+                }
               }>
             }
 
@@ -458,6 +465,9 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
                     filePath: p.file_path,
                     disciplineId: p.discipline_id || '',
                     pointers: [],
+                    highlights: [],
+                    imageWidth: p.semantic_index?.image_width,
+                    imageHeight: p.semantic_index?.image_height,
                   })
                 }
               }
@@ -554,6 +564,32 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
                 } else {
                   accumulator.selectedPages.push(newPageData)
                   existingPageMap.set(pageId, newPageData)
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
+                updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
+              }
+            }
+          }
+          // Handle resolve_highlights - merge highlights into existing pages
+          else if (data.tool === 'resolve_highlights') {
+            const result = data.result as {
+              highlights?: Array<{
+                page_id: string
+                words: OcrWord[]
+              }>
+            }
+
+            if (result?.highlights && Array.isArray(result.highlights)) {
+              const pageMap = new Map(accumulator.selectedPages.map(p => [p.pageId, p]))
+              let hasChanges = false
+
+              for (const highlight of result.highlights) {
+                const page = pageMap.get(highlight.page_id)
+                if (page && highlight.words && highlight.words.length > 0) {
+                  page.highlights = highlight.words
                   hasChanges = true
                 }
               }
