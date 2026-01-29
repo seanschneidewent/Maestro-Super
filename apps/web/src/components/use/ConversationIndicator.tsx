@@ -24,7 +24,7 @@ export const ConversationIndicator: React.FC<ConversationIndicatorProps> = ({
     : 'In conversation';
 
   return (
-    <div className="absolute top-4 left-4 z-40 pointer-events-none">
+    <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-4 z-40 pointer-events-none">
       <div className="px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-slate-200/50 shadow-sm">
         <span className="text-xs text-slate-500 italic">{displayText}</span>
       </div>
