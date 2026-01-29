@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { Star } from 'lucide-react';
-import type { DisciplineNodeData } from '../types';
+import type { DisciplineNodeData } from '../../../../types';
 
 function DisciplineNodeComponent({ data }: NodeProps<DisciplineNodeData>) {
   const { displayName, processed, pageCount, pointerCount, onExpand, onClick, isExpanded, animationKey } = data;

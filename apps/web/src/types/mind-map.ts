@@ -2,8 +2,8 @@ import { Node, Edge } from 'reactflow';
 
 export type MindMapNodeType = 'project' | 'discipline' | 'page' | 'pointer' | 'detail';
 
-// Processing status for pages
-export type PageProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
+// Re-export PageProcessingStatus from project types for convenience
+export type { PageProcessingStatus } from './project';
 
 export interface ProjectNodeData {
   type: 'project';
@@ -42,7 +42,7 @@ export interface PageNodeData {
   isActive: boolean;
   animationKey?: string;
   // Brain Mode processing state
-  processingStatus?: PageProcessingStatus;
+  processingStatus?: import('./project').PageProcessingStatus;
   detailCount?: number;
 }
 

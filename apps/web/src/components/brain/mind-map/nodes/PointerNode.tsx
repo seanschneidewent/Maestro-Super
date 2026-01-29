@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect, useState } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { Crosshair, X, Loader2 } from 'lucide-react';
-import type { PointerNodeData } from '../types';
+import type { PointerNodeData } from '../../../../types';
 
 function PointerNodeComponent({ data }: NodeProps<PointerNodeData>) {
   const { title, onClick, onDelete, animationKey } = data;

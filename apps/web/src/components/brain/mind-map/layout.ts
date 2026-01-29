@@ -1,6 +1,6 @@
 import dagre from '@dagrejs/dagre';
-import { MindMapNode, MindMapEdge, NODE_DIMENSIONS } from './types';
-import type { ProjectHierarchy } from '../../../types';
+import type { MindMapNode, MindMapEdge, ProjectHierarchy } from '../../../types';
+import { NODE_DIMENSIONS } from '../../../types';
 
 interface LayoutCallbacks {
   onProjectExpand: () => void;
