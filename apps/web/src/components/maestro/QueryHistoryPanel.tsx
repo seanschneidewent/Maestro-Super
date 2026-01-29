@@ -216,15 +216,18 @@ export function QueryHistoryPanel({
                   {/* Conversation header */}
                   <div
                     className={`
-                      w-full px-4 py-3 transition-colors group
-                      ${isExpanded ? 'bg-cyan-50' : 'hover:bg-slate-50'}
+                      w-full px-4 py-3 transition-colors group cursor-pointer
+                      ${isExpanded ? 'bg-cyan-50' : 'active:bg-slate-50'}
                     `}
+                    onClick={() => handleExpandConversation(conversation.id)}
+                    onTouchEnd={(e) => {
+                      e.preventDefault()
+                      handleExpandConversation(conversation.id)
+                    }}
+                    style={{ touchAction: 'manipulation' }}
                   >
                     <div className="flex items-center gap-3 overflow-hidden">
-                      <button
-                        onClick={() => handleExpandConversation(conversation.id)}
-                        className="flex-1 min-w-0 flex items-center gap-3 text-left"
-                      >
+                      <div className="flex-1 min-w-0 flex items-center gap-3 text-left">
                         <ChevronRight
                           size={16}
                           className={`
@@ -243,7 +246,7 @@ export function QueryHistoryPanel({
                             {formatTimeAgo(conversation.createdAt)}
                           </p>
                         </div>
-                      </button>
+                      </div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
@@ -278,12 +281,15 @@ export function QueryHistoryPanel({
                             expandedConversationData.queries.map((query, idx) => (
                               <div
                                 key={query.id}
-                                className="w-full px-4 py-3 hover:bg-white transition-colors group flex items-start"
+                                className="w-full px-4 py-3 active:bg-white transition-colors group flex items-start cursor-pointer"
+                                onClick={() => handleRestoreQuery(query)}
+                                onTouchEnd={(e) => {
+                                  e.preventDefault()
+                                  handleRestoreQuery(query)
+                                }}
+                                style={{ touchAction: 'manipulation' }}
                               >
-                                <button
-                                  onClick={() => handleRestoreQuery(query)}
-                                  className="flex-1 text-left"
-                                >
+                                <div className="flex-1 text-left">
                                   <div className="flex items-start gap-3 pl-6">
                                     <div className="flex-shrink-0 mt-0.5">
                                       <div className="w-5 h-5 rounded-full bg-cyan-100 flex items-center justify-center">
@@ -317,7 +323,7 @@ export function QueryHistoryPanel({
                                       className="text-slate-300 group-hover:text-cyan-500 transition-colors mt-1"
                                     />
                                   </div>
-                                </button>
+                                </div>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
