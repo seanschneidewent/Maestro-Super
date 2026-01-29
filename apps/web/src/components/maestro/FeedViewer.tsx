@@ -4,7 +4,7 @@ import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { Loader2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
-import { AgentSelectedPage } from '.';
+import { AgentSelectedPage } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
 import { TextHighlightOverlay } from './TextHighlightOverlay';

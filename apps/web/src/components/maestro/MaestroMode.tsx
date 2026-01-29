@@ -13,13 +13,11 @@ import { useTutorial } from '../../hooks/useTutorial';
 import {
   QueryInput,
   SessionControls,
-  useQueryManager,
   QueryHistoryPanel,
-  AgentSelectedPage,
   NewConversationButton,
-  CompletedQuery,
   SuggestedPrompts,
 } from '.';
+import { useQueryManager, AgentSelectedPage, CompletedQuery } from '../../hooks/useQueryManager';
 import { QueryResponse, QueryPageResponse, ConversationResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
 import { useAgentToast } from '../../contexts/AgentToastContext';
