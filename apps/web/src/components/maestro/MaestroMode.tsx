@@ -19,7 +19,7 @@ import {
   NewConversationButton,
   CompletedQuery,
   SuggestedPrompts,
-} from '../field';
+} from '.';
 import { QueryResponse, QueryPageResponse, ConversationResponse } from '../../lib/api';
 import { useConversation } from '../../hooks/useConversation';
 import { useAgentToast } from '../../contexts/AgentToastContext';
@@ -100,14 +100,14 @@ function extractPointerDataFromTrace(
   return pointerMap;
 }
 
-interface UseModeProps {
+interface MaestroModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
   projectId: string;
   onGetStarted?: () => void;
 }
 
-export const UseMode: React.FC<UseModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
+export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
   const queryClient = useQueryClient();
   const { showError } = useToast();
   const { currentStep, completeStep, advanceStep, isActive: tutorialActive, hasCompleted, skipTutorial } = useTutorial();
