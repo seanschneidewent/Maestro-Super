@@ -394,34 +394,14 @@ const FeedPageItemDisplay: React.FC<{
   onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
   isFirstPage?: boolean;
 }> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
-  // Cap thumbnail to 85% of container width for chat-like feel with visible margins
-  const maxThumbnailWidth = Math.min(containerWidth * 0.85, 450);
-  const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 250 : 500;
-  const displayDimensions = pageImage
-    ? (() => {
-        const imgWidth = pageImage.width;
-        const imgHeight = pageImage.height;
-        const scaleByWidth = maxThumbnailWidth / imgWidth;
-        const scaleByHeight = maxHeight / imgHeight;
-        const scale = Math.min(scaleByWidth, scaleByHeight, 1);
-        return {
-          width: imgWidth * scale,
-          height: imgHeight * scale,
-        };
-      })()
-    : { width: maxThumbnailWidth, height: Math.min(300, maxHeight) };
-
   // Loading or waiting state
   if (isLoading || isWaiting || !pageImage) {
     return (
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
         <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
           <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
         </div>
-        <div
-          className="flex items-center justify-center bg-slate-100 rounded-xl"
-          style={{ width: displayDimensions.width, height: displayDimensions.height }}
-        >
+        <div className="flex items-center justify-center bg-slate-100 rounded-xl w-full aspect-[4/3]">
           {isLoading ? (
             <Loader2 size={48} className="text-cyan-500 animate-spin" />
           ) : isWaiting ? (
@@ -436,24 +416,20 @@ const FeedPageItemDisplay: React.FC<{
 
   // Loaded state - clickable thumbnail
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
       <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
         <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
       </div>
 
       <button
         onClick={() => onTap(page, pageImage)}
-        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden"
-        style={{
-          width: displayDimensions.width,
-          height: displayDimensions.height,
-        }}
+        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden w-full"
         {...(isFirstPage && { 'data-tutorial': 'first-page-result' })}
       >
         <img
           src={pageImage.dataUrl}
           alt={page.pageName}
-          className="max-w-none w-full h-full"
+          className="w-full h-auto"
           draggable={false}
         />
 
@@ -461,8 +437,8 @@ const FeedPageItemDisplay: React.FC<{
         {page.highlights && page.highlights.length > 0 && (
           <TextHighlightOverlay
             highlights={page.highlights}
-            imageWidth={displayDimensions.width}
-            imageHeight={displayDimensions.height}
+            imageWidth={pageImage.width}
+            imageHeight={pageImage.height}
             originalWidth={page.imageWidth}
             originalHeight={page.imageHeight}
           />
