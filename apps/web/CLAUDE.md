@@ -63,6 +63,34 @@ Mode state lives in `App.tsx`. Both SetupMode and UseMode render simultaneously 
 - `lucide-react` for icons
 - Optimistic updates where possible
 
+## Mobile/Touch Fixes
+
+**Always check TSX components first before trying HTML/CSS hacks.**
+
+Common mobile issues and where to fix them:
+
+| Issue | Fix Location | Solution |
+|-------|--------------|----------|
+| Double-tap required | Component TSX | Add `onTouchEnd` handler, use `active:` instead of `hover:` |
+| Tap delay (300ms) | Component TSX | Add `style={{ touchAction: 'manipulation' }}` to clickable elements |
+| Hover states blocking taps | Component TSX | Move click handlers to container div, replace `hover:` with `active:` |
+| Touch not registering | Component TSX | Ensure clickable area is the outermost interactive element |
+
+**Pattern for touch-friendly clickable elements:**
+```tsx
+<div
+  onClick={() => handleAction()}
+  onTouchEnd={(e) => {
+    e.preventDefault()
+    handleAction()
+  }}
+  className="cursor-pointer active:bg-slate-50"
+  style={{ touchAction: 'manipulation' }}
+>
+```
+
+Global CSS in `index.html` is a last resort, not first attempt.
+
 ## API Client
 
 All backend calls go through `lib/api.ts`. Uses fetch with Supabase auth token.
