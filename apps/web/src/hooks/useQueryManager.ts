@@ -472,11 +472,27 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
                 }
               }
 
-              // Merge with existing
-              const existingIds = new Set(accumulator.selectedPages.map(p => p.pageId))
-              const uniqueNew = newPages.filter(p => !existingIds.has(p.pageId))
-              if (uniqueNew.length > 0) {
-                accumulator.selectedPages = [...accumulator.selectedPages, ...uniqueNew]
+              // Merge with existing: update prefetched pages with OCR dimensions, add new ones
+              const existingPageMap = new Map(accumulator.selectedPages.map(p => [p.pageId, p]))
+              let hasChanges = false
+
+              for (const newPage of newPages) {
+                const existingPage = existingPageMap.get(newPage.pageId)
+                if (existingPage) {
+                  // Update prefetched page with OCR dimensions (they were missing on prefetch)
+                  if (newPage.imageWidth && !existingPage.imageWidth) {
+                    existingPage.imageWidth = newPage.imageWidth
+                    existingPage.imageHeight = newPage.imageHeight
+                    hasChanges = true
+                  }
+                } else {
+                  // New page - add it
+                  accumulator.selectedPages.push(newPage)
+                  hasChanges = true
+                }
+              }
+
+              if (hasChanges) {
                 updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
               }
             }
