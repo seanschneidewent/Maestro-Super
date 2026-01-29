@@ -315,6 +315,12 @@
         background: rgba(6, 182, 212, 0.15);
         border-left: 2px solid #06b6d4;
       }
+
+      /* Mobile touch optimization - prevent double-tap delay */
+      button, a, [role="button"], .touch-target {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
     </style>
   <script type="importmap">
 {
