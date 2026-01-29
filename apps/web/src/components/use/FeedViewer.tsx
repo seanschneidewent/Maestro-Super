@@ -629,10 +629,14 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
       setTimeout(updateWidth, 100);
     };
 
+    // Initial measurement - immediate + delayed to catch layout completion
     updateWidth();
+    const initialTimer = setTimeout(updateWidth, 100);
+
     window.addEventListener('resize', updateWidth);
     window.addEventListener('orientationchange', handleOrientationChange);
     return () => {
+      clearTimeout(initialTimer);
       window.removeEventListener('resize', updateWidth);
       window.removeEventListener('orientationchange', handleOrientationChange);
     };
