@@ -133,8 +133,8 @@ async def search_pages(
         # These are the actual OCR words with bounding boxes available
         semantic_index = page.semantic_index or {}
         ocr_words = semantic_index.get("words", [])
-        # Dedupe and filter empty, cap at 200 to limit tokens
-        word_texts = list(set(w.get("text", "") for w in ocr_words if w.get("text")))[:200]
+        # Dedupe while preserving OCR order, no cap - every callout matters
+        word_texts = list(dict.fromkeys(w.get("text", "") for w in ocr_words if w.get("text")))
 
         results.append({
             "page_id": str(page.id),
