@@ -32,7 +32,7 @@ from app.schemas.tools import (
     PointerSummary,
     ProjectPages,
 )
-from app.services.search import search_pointers  # Re-export existing search
+from app.services.utils.search import search_pointers  # Re-export existing search
 
 
 async def search_pages(
