@@ -129,11 +129,19 @@ async def search_pages(
         # Fall back to full_context or initial_context
         content = page.context_markdown or page.full_context or page.initial_context or ""
 
+        # Extract highlightable words from semantic_index for Gemini to select from
+        # These are the actual OCR words with bounding boxes available
+        semantic_index = page.semantic_index or {}
+        ocr_words = semantic_index.get("words", [])
+        # Dedupe while preserving OCR order, no cap - every callout matters
+        word_texts = list(dict.fromkeys(w.get("text", "") for w in ocr_words if w.get("text")))
+
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
             "discipline": page.discipline.display_name,
             "content": content,  # Full content for Gemini to read
+            "highlightable_words": word_texts,  # Actual OCR words Gemini can select
         })
 
     return results
