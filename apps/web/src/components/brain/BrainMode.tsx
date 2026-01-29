@@ -17,40 +17,40 @@ import { useProcessingStream } from '../../hooks/useProcessingStream';
 import { DriveImportButton, DriveImportFile } from './DriveImportButton';
 import { DisciplineCode, getDisciplineDisplayName } from '../../lib/disciplineClassifier';
 
-// Types for setup mode state persistence
-interface SetupState {
+// Types for brain mode state persistence
+interface BrainState {
   selectedFileId: string | null;
   selectedPointerId: string | null;
   isDrawingEnabled: boolean;
   expandedNodes: string[];  // Mind map expanded state
 }
 
-interface SetupModeProps {
+interface BrainModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
   projectId: string;
   localFileMapRef: React.MutableRefObject<Map<string, File>>;
-  setupState: SetupState;
-  setSetupState: React.Dispatch<React.SetStateAction<SetupState>>;
+  brainState: BrainState;
+  setBrainState: React.Dispatch<React.SetStateAction<BrainState>>;
 }
 
-export const SetupMode: React.FC<SetupModeProps> = ({
+export const BrainMode: React.FC<BrainModeProps> = ({
   mode,
   setMode,
   projectId,
   localFileMapRef,
-  setupState,
-  setSetupState,
+  brainState,
+  setBrainState,
 }) => {
   const queryClient = useQueryClient();
 
   // Mind map expanded nodes state (lifted to persist across mode switches)
-  const expandedNodes = setupState.expandedNodes;
+  const expandedNodes = brainState.expandedNodes;
   const setExpandedNodes = (updater: string[] | ((prev: string[]) => string[])) => {
     if (typeof updater === 'function') {
-      setSetupState(prev => ({ ...prev, expandedNodes: updater(prev.expandedNodes) }));
+      setBrainState(prev => ({ ...prev, expandedNodes: updater(prev.expandedNodes) }));
     } else {
-      setSetupState(prev => ({ ...prev, expandedNodes: updater }));
+      setBrainState(prev => ({ ...prev, expandedNodes: updater }));
     }
   };
 
