@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { Ruler, Package, FileText } from 'lucide-react';
-import type { DetailNodeData } from '../types';
+import type { DetailNodeData } from '../../../../types';
 
 // Icon selection based on detail content
 function getDetailIcon(detail: { materials: string[]; dimensions: string[] }) {

@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight, Check, Loader2 } from 'lucide-react';
-import type { PageNodeData, PageProcessingStatus } from '../types';
+import type { PageNodeData, PageProcessingStatus } from '../../../../types';
 
 function getStatusIcon(
   pointerCount: number,

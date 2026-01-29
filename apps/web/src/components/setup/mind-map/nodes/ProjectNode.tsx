@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { NodeProps, Handle, Position } from 'reactflow';
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
-import type { ProjectNodeData } from '../types';
+import type { ProjectNodeData } from '../../../../types';
 
 function ProjectNodeComponent({ data }: NodeProps<ProjectNodeData>) {
   const { name, disciplineCount, onExpand, isExpanded } = data;

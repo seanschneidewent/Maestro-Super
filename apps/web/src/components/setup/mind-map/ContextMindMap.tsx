@@ -12,7 +12,7 @@ import 'reactflow/dist/style.css';
 
 import { ProjectNode, DisciplineNode, PageNode, PointerNode, DetailNode } from './nodes';
 import { layoutHierarchy, getInitialExpandedState } from './layout';
-import { NODE_DIMENSIONS } from './types';
+import { NODE_DIMENSIONS } from '../../../types';
 import { useHierarchy, useInvalidateHierarchy } from '../../../hooks/useHierarchy';
 import { MindMapSkeleton } from '../../ui/Skeleton';
 
