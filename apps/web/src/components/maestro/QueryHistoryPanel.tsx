@@ -223,7 +223,12 @@ export function QueryHistoryPanel({
                     <div className="flex items-center gap-3 overflow-hidden">
                       <button
                         onClick={() => handleExpandConversation(conversation.id)}
+                        onTouchEnd={(e) => {
+                          e.preventDefault()
+                          handleExpandConversation(conversation.id)
+                        }}
                         className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                        style={{ touchAction: 'manipulation' }}
                       >
                         <ChevronRight
                           size={16}
@@ -282,7 +287,12 @@ export function QueryHistoryPanel({
                               >
                                 <button
                                   onClick={() => handleRestoreQuery(query)}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault()
+                                    handleRestoreQuery(query)
+                                  }}
                                   className="flex-1 text-left"
+                                  style={{ touchAction: 'manipulation' }}
                                 >
                                   <div className="flex items-start gap-3 pl-6">
                                     <div className="flex-shrink-0 mt-0.5">
