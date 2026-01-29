@@ -144,6 +144,16 @@ Above the line: what Sean touches. Below the line: what superintendents touch.
 See `/apps/web/CLAUDE.md` for frontend details.
 See `/services/api/CLAUDE.md` for backend details.
 
+### Folder Documentation
+
+**Frontend (`apps/web/src/`):**
+- `/components/brain/CLAUDE.md` — Brain Mode (setup interface)
+- `/components/maestro/CLAUDE.md` — Maestro Mode (query interface)
+- `/hooks/CLAUDE.md` — Custom React hooks
+
+**Backend (`services/api/app/`):**
+- `/services/CLAUDE.md` — Services organized into core/providers/utils
+
 ---
 
 ## Memory Commands
