@@ -167,7 +167,7 @@ Return JSON with this exact structure:
 }}'''
 
 
-def _extract_json_response(text: str) -> dict:
+def _extract_json_response(text: str) -> dict | list:
     """Best-effort JSON extraction for Gemini responses."""
     if not text:
         raise ValueError("Empty response from Gemini")
@@ -180,7 +180,33 @@ def _extract_json_response(text: str) -> dict:
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             return json.loads(text[start:end + 1])
+        # Fallback: try to extract JSON array substring
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
         raise
+
+
+def _normalize_vision_result(raw: object) -> dict:
+    """Normalize raw vision output into the expected dict shape."""
+    if isinstance(raw, list):
+        logger.warning("Gemini vision returned list; wrapping into findings[]")
+        return {"findings": raw}
+    if isinstance(raw, dict):
+        return raw
+    logger.warning("Gemini vision returned non-dict JSON; coercing to response string")
+    return {"response": str(raw)}
+
+
+def _normalize_selection_result(raw: object) -> dict:
+    """Normalize selection output into expected dict shape."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        logger.warning("Gemini selection returned list; coercing to empty selection")
+        return {"page_ids": [], "verification_plan": []}
+    return {}
 
 
 async def run_agent_query(
@@ -337,7 +363,7 @@ async def select_pages_for_verification(
             ),
         )
 
-        result = _extract_json_response(response.text)
+        result = _normalize_selection_result(_extract_json_response(response.text))
 
         input_tokens = 0
         output_tokens = 0
@@ -443,7 +469,7 @@ async def explore_concept_with_vision(
             config=types.GenerateContentConfig(**config_kwargs),
         )
 
-        result = _extract_json_response(response.text)
+        result = _normalize_vision_result(_extract_json_response(response.text))
 
         input_tokens = 0
         output_tokens = 0
