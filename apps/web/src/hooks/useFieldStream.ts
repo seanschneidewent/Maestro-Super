@@ -628,12 +628,15 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
           })
           .filter((f) => f.pageId && f.content)
 
+        const resolvePageLabel = (value: string) => pageNameLookup.get(value) || value
         const crossReferences = rawCrossReferences
           .map((ref) => {
             const raw = ref as Record<string, any>
+            const fromRaw = String(raw.fromPageName || raw.from_page_name || raw.fromPage || raw.from_page || '')
+            const toRaw = String(raw.toPageName || raw.to_page_name || raw.toPage || raw.to_page || '')
             return {
-              fromPage: String(raw.fromPage || raw.from_page || ''),
-              toPage: String(raw.toPage || raw.to_page || ''),
+              fromPage: resolvePageLabel(fromRaw),
+              toPage: resolvePageLabel(toRaw),
               relationship: String(raw.relationship || ''),
             }
           })
