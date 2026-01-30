@@ -39,6 +39,7 @@ HIGHLIGHTING GUIDELINES:
 
 SELECTION GUIDELINES:
 - Include ALL pages relevant to the query
+- When the query is about a concept (equipment, room, system), also include related schedules/specs/notes pages
 - Order pages numerically by sheet number (e.g., E-2.1, E-2.2, E-2.3)
 - If search results are empty, look in project structure for relevant pages
 
@@ -326,4 +327,3 @@ Return JSON:
             "references": [],
             "text_spans": [],
         }
-
