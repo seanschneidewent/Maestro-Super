@@ -679,9 +679,6 @@ async def run_agent_query_gemini(
         }
         highlight_specs: dict[str, dict] = {}
         for finding in findings:
-            if not isinstance(finding, dict):
-                logger.warning(f"Skipping non-dict finding: {type(finding)}")
-                continue
             page_id = finding.get("page_id")
             if page_id in page_name_lookup:
                 page_id = page_name_lookup[page_id]
