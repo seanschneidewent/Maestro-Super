@@ -611,8 +611,8 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         const conceptName = typeof data.conceptName === 'string' ? data.conceptName : null
         const summary = typeof data.summary === 'string' ? data.summary : null
         const gaps = Array.isArray((data as { gaps?: unknown }).gaps) ? (data as { gaps?: string[] }).gaps : []
-        const crossReferences = Array.isArray((data as { crossReferences?: unknown }).crossReferences)
-          ? (data as { crossReferences?: Array<{ fromPage: string; toPage: string; relationship: string }> }).crossReferences
+        const rawCrossReferences = Array.isArray((data as { crossReferences?: unknown }).crossReferences)
+          ? (data as { crossReferences?: Array<Record<string, unknown>> }).crossReferences
           : []
         const findingsRaw = Array.isArray((data as { findings?: unknown }).findings)
           ? (data as { findings?: Array<Record<string, unknown>> }).findings
@@ -658,6 +658,17 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             }
           })
           .filter((f) => f.pageId && f.content)
+
+        const crossReferences = rawCrossReferences
+          .map((ref) => {
+            const raw = ref as Record<string, any>
+            return {
+              fromPage: String(raw.fromPage || raw.from_page || ''),
+              toPage: String(raw.toPage || raw.to_page || ''),
+              relationship: String(raw.relationship || ''),
+            }
+          })
+          .filter((ref) => ref.fromPage && ref.toPage && ref.relationship)
 
         const conceptResponse: AgentConceptResponse = {
           conceptName,
