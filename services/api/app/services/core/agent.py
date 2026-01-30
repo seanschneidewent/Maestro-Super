@@ -457,8 +457,22 @@ async def run_agent_query_gemini(
     # 5. Resolve highlights: match text_matches to OCR bboxes
     resolved_highlights = []
     if pages_result and highlight_specs:
+        STOP_WORDS = {
+            "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+            "with", "by", "is", "are", "was", "were", "be", "been", "being", "have",
+            "has", "had", "do", "does", "did", "will", "would", "could", "should",
+            "may", "might", "must", "shall", "can", "need", "dare", "ought", "used",
+            "it", "its", "this", "that", "these", "those", "i", "you", "he", "she",
+            "we", "they", "what", "which", "who", "whom", "where", "when", "why",
+            "how", "all", "each", "every", "both", "few", "more", "most", "other",
+            "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+            "too", "very", "just", "also",
+        }
+        query_tokens = [w for w in query.lower().split() if w not in STOP_WORDS]
+        if not query_tokens:
+            query_tokens = [w for w in query.lower().split() if w]
         pages_data = pages_result.get("pages", [])
-        resolved_highlights = resolve_highlights(pages_data, highlight_specs)
+        resolved_highlights = resolve_highlights(pages_data, highlight_specs, query_tokens=query_tokens)
         if resolved_highlights:
             yield {"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs}}
             yield {"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}}

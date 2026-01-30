@@ -58,7 +58,7 @@ async def search_pages(
     Returns:
         List of matching pages with id, name, discipline, and full content
     """
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_, func, and_
 
     # Build base query
     base_query = (
@@ -74,30 +74,34 @@ async def search_pages(
             func.lower(Discipline.display_name).contains(discipline.lower())
         )
 
-    # Search in page_name, initial_context, and full_context
-    # Use word-level matching: all words must appear (but not as exact phrase)
-    # This handles plural/singular mismatches like "plans" matching "PLAN"
-    from sqlalchemy import and_
+    # Search in page_name, initial_context, full_context, and context_markdown
+    # Use word-level matching with plural handling.
+    STOP_WORDS = {
+        "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+        "with", "by", "is", "are", "was", "were", "be", "been", "being", "have",
+        "has", "had", "do", "does", "did", "will", "would", "could", "should",
+        "may", "might", "must", "shall", "can", "need", "dare", "ought", "used",
+        "it", "its", "this", "that", "these", "those", "i", "you", "he", "she",
+        "we", "they", "what", "which", "who", "whom", "where", "when", "why",
+        "how", "all", "each", "every", "both", "few", "more", "most", "other",
+        "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+        "too", "very", "just", "also",
+    }
 
-    # Strip common stop words that don't add search value
-    STOP_WORDS = {"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "shall", "can", "need", "dare", "ought", "used", "it", "its", "this", "that", "these", "those", "i", "you", "he", "she", "we", "they", "what", "which", "who", "whom", "where", "when", "why", "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just", "also"}
+    SPEC_ANCHORS = {
+        "schedule", "schedules", "spec", "specs", "specification", "specifications",
+        "notes", "legend", "panel", "equipment", "wiring", "details",
+    }
 
-    words = [w for w in query.lower().split() if w not in STOP_WORDS]
+    def _tokenize(text: str) -> list[str]:
+        tokens = [w for w in text.lower().split() if w and w not in STOP_WORDS]
+        return tokens or [w for w in text.lower().split() if w]
 
-    # If all words were stop words, fall back to original query
-    if not words:
-        words = query.lower().split()
-    word_conditions = []
-
-    for word in words:
-        # Create pattern for this word
+    def _word_condition(word: str):
         word_pattern = f"%{word}%"
-
-        # Also try without trailing 's' for plural handling
-        # "plans" should match "PLAN", "floors" should match "FLOOR"
-        if word.endswith('s') and len(word) > 2:
+        if word.endswith("s") and len(word) > 2:
             singular_pattern = f"%{word[:-1]}%"
-            word_condition = or_(
+            return or_(
                 Page.page_name.ilike(word_pattern),
                 Page.page_name.ilike(singular_pattern),
                 Page.initial_context.ilike(word_pattern),
@@ -107,24 +111,46 @@ async def search_pages(
                 Page.context_markdown.ilike(word_pattern),
                 Page.context_markdown.ilike(singular_pattern),
             )
-        else:
-            word_condition = or_(
-                Page.page_name.ilike(word_pattern),
-                Page.initial_context.ilike(word_pattern),
-                Page.full_context.ilike(word_pattern),
-                Page.context_markdown.ilike(word_pattern),
-            )
+        return or_(
+            Page.page_name.ilike(word_pattern),
+            Page.initial_context.ilike(word_pattern),
+            Page.full_context.ilike(word_pattern),
+            Page.context_markdown.ilike(word_pattern),
+        )
 
-        word_conditions.append(word_condition)
+    words = _tokenize(query)
+    word_conditions = [_word_condition(word) for word in words]
 
-    # All words must match (AND) for more precise results
+    primary_limit = max(1, min(limit, max(3, int(limit * 0.6))))
+    spec_limit_reserved = max(0, limit - primary_limit)
+
+    primary_query = base_query
     if word_conditions:
-        base_query = base_query.filter(and_(*word_conditions))
+        primary_query = primary_query.filter(and_(*word_conditions))
 
-    pages = base_query.limit(limit).all()
+    primary_pages = primary_query.limit(primary_limit).all()
+
+    # Secondary search: pull spec/schedule pages tied to the same query tokens.
+    spec_pages = []
+    if word_conditions:
+        anchor_conditions = [_word_condition(anchor) for anchor in SPEC_ANCHORS]
+        spec_tokens = [w for w in words if w not in SPEC_ANCHORS]
+        token_conditions = [_word_condition(w) for w in (spec_tokens or words)]
+        if anchor_conditions and token_conditions:
+            primary_ids = {p.id for p in primary_pages}
+            spec_limit = max(spec_limit_reserved, limit - len(primary_pages))
+            spec_query = base_query.filter(or_(*anchor_conditions)).filter(or_(*token_conditions))
+            if primary_ids:
+                spec_query = spec_query.filter(~Page.id.in_(primary_ids))
+            spec_pages = spec_query.limit(spec_limit).all()
 
     results = []
-    for page in pages:
+    # Preserve front-to-back feel: concept pages first, spec/schedule pages second.
+    ordered_pages = (
+        sorted(primary_pages, key=lambda p: p.page_name or "")
+        + sorted(spec_pages, key=lambda p: p.page_name or "")
+    )
+    for page in ordered_pages:
         # Return full content for RAG - prefer context_markdown (from sheet analyzer)
         # Fall back to full_context or initial_context
         content = page.context_markdown or page.full_context or page.initial_context or ""
@@ -543,6 +569,7 @@ async def select_pointers(db: Session, pointer_ids: list[str]) -> dict:
 def resolve_highlights(
     pages_data: list[dict],
     highlights: list[dict],
+    query_tokens: list[str] | None = None,
 ) -> list[dict]:
     """
     Match text_matches from Gemini response to OCR words with bboxes.
@@ -550,6 +577,7 @@ def resolve_highlights(
     Args:
         pages_data: List of page dicts from select_pages (with semantic_index)
         highlights: List of highlight specs from Gemini [{page_id, text_matches}]
+        query_tokens: Optional list of query tokens for relevance scoring
 
     Returns:
         List of resolved highlights with matched words and bboxes:
@@ -585,6 +613,31 @@ def resolve_highlights(
             tokens.append("".join(current))
         return [t for t in tokens if t]
 
+    def _is_spec_page(ocr_words: list[dict]) -> bool:
+        for word in ocr_words:
+            role = (word.get("role") or "").lower()
+            region = (word.get("region_type") or "").lower()
+            if region == "schedule":
+                return True
+            if role in {"schedule_title", "schedule_header", "cell_value", "cell_header"}:
+                return True
+        return False
+
+    query_tokens = query_tokens or []
+    query_tokens_compact = [
+        _normalize_compact(t) for t in query_tokens if t and _normalize_compact(t)
+    ]
+
+    role_weights = {
+        "detail_title": 3,
+        "label": 3,
+        "dimension": 3,
+        "reference": 2,
+        "schedule_title": 2,
+        "cell_header": 1,
+        "cell_value": 1,
+    }
+
     resolved = []
     for highlight in highlights:
         page_id = highlight.get("page_id")
@@ -598,34 +651,56 @@ def resolve_highlights(
             logger.warning(f"No OCR words found for page {page_id}")
             continue
 
-        matched_words = []
-        matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
-        matched_word_keys: set[str] = set()  # Fallback for words without IDs (text+bbox)
+        is_spec_page = _is_spec_page(ocr_words)
 
         # Precompute normalized OCR word representations
         ocr_word_texts = [w.get("text", "") for w in ocr_words]
         ocr_word_compact = [_normalize_compact(t) for t in ocr_word_texts]
 
-        def _track_word(word: dict) -> bool:
+        candidates: dict[str, dict] = {}
+
+        def _word_key(word: dict) -> str:
             word_id = word.get("id")
             if word_id is not None:
-                if word_id in matched_word_ids:
-                    return False
-                matched_word_ids.add(word_id)
-            else:
-                bbox = word.get("bbox", {})
-                word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
-                if word_key in matched_word_keys:
-                    return False
-                matched_word_keys.add(word_key)
-            matched_words.append({
-                "id": word_id,
-                "text": word.get("text"),
-                "bbox": word.get("bbox"),
-                "role": word.get("role"),
-                "region_type": word.get("region_type"),
-            })
-            return True
+                return f"id:{word_id}"
+            bbox = word.get("bbox", {})
+            return f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+
+        def _update_candidate(index: int, base_score: int, phrase_match: bool = False) -> None:
+            word = ocr_words[index]
+            word_text = ocr_word_texts[index]
+            word_compact = ocr_word_compact[index]
+            if not word_text or not word_compact:
+                return
+
+            token_match = False
+            if query_tokens_compact:
+                token_match = any(token in word_compact for token in query_tokens_compact)
+
+            role = (word.get("role") or "").lower()
+            region = (word.get("region_type") or "").lower()
+
+            score = base_score + role_weights.get(role, 0)
+            if region == "schedule":
+                score += 1
+            if phrase_match:
+                score += 1
+            if token_match:
+                score += 3
+            if role == "note_text" and not token_match:
+                score -= 2
+            if len(word_compact) <= 2 and not token_match:
+                score -= 2
+
+            key = _word_key(word)
+            existing = candidates.get(key)
+            if not existing or score > existing["score"]:
+                candidates[key] = {
+                    "word": word,
+                    "score": score,
+                    "token_match": token_match,
+                    "order_index": index,
+                }
 
         for text_match in text_matches:
             if not text_match:
@@ -641,6 +716,8 @@ def resolve_highlights(
 
             # Skip empty strings after stripping (would match everything)
             if not match_lower or not match_compact:
+                continue
+            if len(match_compact) < 2 and not match_compact.isdigit():
                 continue
 
             # 1) Single-word matching with normalized compact strings
@@ -658,24 +735,25 @@ def resolve_highlights(
                     or match_compact in word_compact
                     or word_compact in match_compact
                 ):
-                    _track_word(word)
+                    _update_candidate(idx, base_score=3)
 
             # 2) Phrase matching across adjacent words (handles "WALK IN COOLER", "3' - 6\"")
-            max_window = 20  # prevent runaway scans on long pages
-            n = len(ocr_words)
-            for start in range(n):
-                concat = ""
-                end_limit = min(start + max_window, n)
-                for end in range(start, end_limit):
-                    concat += ocr_word_compact[end]
-                    if not concat:
-                        continue
-                    if match_compact in concat:
-                        for i in range(start, end + 1):
-                            _track_word(ocr_words[i])
-                        break
-                    if len(concat) > len(match_compact) * 2:
-                        break
+            if len(match_compact) >= 4:
+                max_window = 20  # prevent runaway scans on long pages
+                n = len(ocr_words)
+                for start in range(n):
+                    concat = ""
+                    end_limit = min(start + max_window, n)
+                    for end in range(start, end_limit):
+                        concat += ocr_word_compact[end]
+                        if not concat:
+                            continue
+                        if match_compact in concat:
+                            for i in range(start, end + 1):
+                                _update_candidate(i, base_score=4, phrase_match=True)
+                            break
+                        if len(concat) > len(match_compact) * 2:
+                            break
 
             # 3) Token fallback: match significant tokens to OCR words
             if len(match_tokens) > 1:
@@ -685,8 +763,32 @@ def resolve_highlights(
                         continue
                     for token in match_tokens:
                         if len(token) >= 3 and token in word_compact:
-                            _track_word(word)
+                            _update_candidate(idx, base_score=1)
                             break
+
+        matched_words: list[dict] = []
+        if candidates:
+            threshold = 3 if is_spec_page else 4
+            max_highlights = 16 if is_spec_page else 12
+
+            filtered = [
+                c for c in candidates.values()
+                if c["score"] >= threshold or (is_spec_page and c["token_match"])
+            ]
+            filtered.sort(key=lambda c: (-c["score"], c["order_index"]))
+            trimmed = filtered[:max_highlights]
+            trimmed.sort(key=lambda c: c["order_index"])
+
+            matched_words = []
+            for c in trimmed:
+                word = c["word"]
+                matched_words.append({
+                    "id": word.get("id"),
+                    "text": word.get("text"),
+                    "bbox": word.get("bbox"),
+                    "role": word.get("role"),
+                    "region_type": word.get("region_type"),
+                })
 
         if matched_words:
             resolved.append({
