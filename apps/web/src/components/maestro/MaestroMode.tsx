@@ -744,7 +744,6 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         <FeedViewer
           feedItems={feedItems}
           isStreaming={isStreaming}
-          streamingText={finalAnswer}
           streamingTrace={trace}
           currentTool={currentTool}
           tutorialStep={currentStep}
