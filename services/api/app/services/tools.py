@@ -586,14 +586,20 @@ def resolve_highlights(
             words: [{id, text, bbox: {x0, y0, x1, y1, width, height}, role}]
         }]
     """
-    # Build lookup: page_id -> semantic_index words
+    # Build lookup: page_id -> semantic_index words + metadata
     page_words_lookup: dict[str, list[dict]] = {}
+    page_meta_lookup: dict[str, dict] = {}
     for page in pages_data:
         page_id = page.get("page_id")
         semantic_index = page.get("semantic_index")
         if page_id and semantic_index:
             words = semantic_index.get("words", [])
             page_words_lookup[page_id] = words
+            page_meta_lookup[page_id] = {
+                "image_width": semantic_index.get("image_width"),
+                "image_height": semantic_index.get("image_height"),
+                "word_by_id": {w.get("id"): w for w in words if w.get("id") is not None},
+            }
 
     def _normalize_compact(text: str) -> str:
         # Lowercase, drop all non-alphanumeric to normalize spacing/punctuation.
@@ -613,37 +619,98 @@ def resolve_highlights(
             tokens.append("".join(current))
         return [t for t in tokens if t]
 
-    def _is_spec_page(ocr_words: list[dict]) -> bool:
-        for word in ocr_words:
-            role = (word.get("role") or "").lower()
-            region = (word.get("region_type") or "").lower()
-            if region == "schedule":
-                return True
-            if role in {"schedule_title", "schedule_header", "cell_value", "cell_header"}:
-                return True
-        return False
+    def _denormalize_bbox(bbox: list[float] | tuple, page_id: str) -> dict | None:
+        if not bbox or len(bbox) != 4:
+            return None
+        meta = page_meta_lookup.get(page_id) or {}
+        image_width = meta.get("image_width")
+        image_height = meta.get("image_height")
+        if not image_width or not image_height:
+            return None
 
-    query_tokens = query_tokens or []
-    query_tokens_compact = [
-        _normalize_compact(t) for t in query_tokens if t and _normalize_compact(t)
-    ]
+        x0, y0, x1, y1 = bbox
+        # If coords are normalized (0-1), convert to pixels
+        if 0 <= x0 <= 1 and 0 <= y0 <= 1 and 0 <= x1 <= 1 and 0 <= y1 <= 1:
+            if x1 < x0 or y1 < y0:
+                # Treat as x,y,w,h in normalized space
+                x1 = x0 + x1
+                y1 = y0 + y1
+            x0_px = x0 * image_width
+            y0_px = y0 * image_height
+            x1_px = x1 * image_width
+            y1_px = y1 * image_height
+        else:
+            # Assume already in pixel space
+            x0_px, y0_px, x1_px, y1_px = x0, y0, x1, y1
 
-    role_weights = {
-        "detail_title": 3,
-        "label": 3,
-        "dimension": 3,
-        "reference": 2,
-        "schedule_title": 2,
-        "cell_header": 1,
-        "cell_value": 1,
-    }
+        width = max(0, x1_px - x0_px)
+        height = max(0, y1_px - y0_px)
+        return {
+            "x0": x0_px,
+            "y0": y0_px,
+            "x1": x1_px,
+            "y1": y1_px,
+            "width": width,
+            "height": height,
+        }
+
+    def _merge_adjacent_words(words: list[dict]) -> list[dict]:
+        if len(words) <= 1:
+            return words
+
+        def _overlap_y(a: dict, b: dict) -> bool:
+            ay0, ay1 = a["bbox"]["y0"], a["bbox"]["y1"]
+            by0, by1 = b["bbox"]["y0"], b["bbox"]["y1"]
+            overlap = min(ay1, by1) - max(ay0, by0)
+            return overlap >= min(a["bbox"]["height"], b["bbox"]["height"]) * 0.5
+
+        def _gap_x(a: dict, b: dict) -> float:
+            return b["bbox"]["x0"] - a["bbox"]["x1"]
+
+        words_sorted = sorted(words, key=lambda w: (w["bbox"]["y0"], w["bbox"]["x0"]))
+        merged: list[dict] = []
+
+        for word in words_sorted:
+            if not merged:
+                merged.append(word)
+                continue
+
+            last = merged[-1]
+            same_source = (word.get("source") == last.get("source"))
+            same_line = _overlap_y(last, word)
+            avg_height = (last["bbox"]["height"] + word["bbox"]["height"]) / 2
+            gap_thresh = max(4, avg_height * 0.4)
+            close_enough = _gap_x(last, word) <= gap_thresh
+
+            if same_source and same_line and close_enough:
+                # Merge into last
+                last_bbox = last["bbox"]
+                word_bbox = word["bbox"]
+                last_bbox["x0"] = min(last_bbox["x0"], word_bbox["x0"])
+                last_bbox["y0"] = min(last_bbox["y0"], word_bbox["y0"])
+                last_bbox["x1"] = max(last_bbox["x1"], word_bbox["x1"])
+                last_bbox["y1"] = max(last_bbox["y1"], word_bbox["y1"])
+                last_bbox["width"] = last_bbox["x1"] - last_bbox["x0"]
+                last_bbox["height"] = last_bbox["y1"] - last_bbox["y0"]
+                last["text"] = f"{last.get('text', '').strip()} {word.get('text', '').strip()}".strip()
+                # Keep the most confident label if present
+                if not last.get("confidence") and word.get("confidence"):
+                    last["confidence"] = word.get("confidence")
+            else:
+                merged.append(word)
+
+        return merged
 
     resolved = []
     for highlight in highlights:
         page_id = highlight.get("page_id")
         text_matches = highlight.get("text_matches", [])
+        semantic_refs = highlight.get("semantic_refs") or []
+        bboxes = list(highlight.get("bboxes") or [])
+        bbox_single = highlight.get("bbox")
+        source = highlight.get("source")
 
-        if not page_id or not text_matches:
+        if not page_id:
             continue
 
         ocr_words = page_words_lookup.get(page_id, [])
@@ -651,56 +718,87 @@ def resolve_highlights(
             logger.warning(f"No OCR words found for page {page_id}")
             continue
 
-        is_spec_page = _is_spec_page(ocr_words)
+        matched_words: list[dict] = []
+
+        # If semantic_refs or bbox provided, resolve those directly (agentic vision path)
+        if semantic_refs or bboxes or bbox_single:
+            meta = page_meta_lookup.get(page_id) or {}
+            word_by_id = meta.get("word_by_id") or {}
+            if semantic_refs:
+                for ref in semantic_refs:
+                    ref_id = ref
+                    try:
+                        ref_id = int(ref)
+                    except Exception:
+                        pass
+                    word = word_by_id.get(ref_id)
+                    if not word:
+                        continue
+                    matched_words.append({
+                        "id": word.get("id"),
+                        "text": word.get("text"),
+                        "bbox": word.get("bbox"),
+                        "role": word.get("role"),
+                        "region_type": word.get("region_type"),
+                        "source": source or "agent",
+                    })
+
+            if bbox_single:
+                bboxes.append({"bbox": bbox_single})
+
+            for bbox_item in bboxes:
+                bbox = bbox_item.get("bbox") if isinstance(bbox_item, dict) else bbox_item
+                resolved_bbox = _denormalize_bbox(bbox, page_id)
+                if not resolved_bbox:
+                    continue
+                matched_words.append({
+                    "id": None,
+                    "text": bbox_item.get("source_text") if isinstance(bbox_item, dict) else "",
+                    "bbox": resolved_bbox,
+                    "role": bbox_item.get("category") if isinstance(bbox_item, dict) else None,
+                    "region_type": None,
+                    "source": source or "agent",
+                    "confidence": bbox_item.get("confidence") if isinstance(bbox_item, dict) else None,
+                })
+
+            if matched_words:
+                merged_words = _merge_adjacent_words(matched_words)
+                resolved.append({
+                    "page_id": page_id,
+                    "words": merged_words,
+                })
+            continue
+
+        if not text_matches:
+            continue
+
+        matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
+        matched_word_keys: set[str] = set()  # Fallback for words without IDs (text+bbox)
 
         # Precompute normalized OCR word representations
         ocr_word_texts = [w.get("text", "") for w in ocr_words]
         ocr_word_compact = [_normalize_compact(t) for t in ocr_word_texts]
 
-        candidates: dict[str, dict] = {}
-
-        def _word_key(word: dict) -> str:
+        def _track_word(word: dict) -> bool:
             word_id = word.get("id")
             if word_id is not None:
-                return f"id:{word_id}"
-            bbox = word.get("bbox", {})
-            return f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
-
-        def _update_candidate(index: int, base_score: int, phrase_match: bool = False) -> None:
-            word = ocr_words[index]
-            word_text = ocr_word_texts[index]
-            word_compact = ocr_word_compact[index]
-            if not word_text or not word_compact:
-                return
-
-            token_match = False
-            if query_tokens_compact:
-                token_match = any(token in word_compact for token in query_tokens_compact)
-
-            role = (word.get("role") or "").lower()
-            region = (word.get("region_type") or "").lower()
-
-            score = base_score + role_weights.get(role, 0)
-            if region == "schedule":
-                score += 1
-            if phrase_match:
-                score += 1
-            if token_match:
-                score += 3
-            if role == "note_text" and not token_match:
-                score -= 2
-            if len(word_compact) <= 2 and not token_match:
-                score -= 2
-
-            key = _word_key(word)
-            existing = candidates.get(key)
-            if not existing or score > existing["score"]:
-                candidates[key] = {
-                    "word": word,
-                    "score": score,
-                    "token_match": token_match,
-                    "order_index": index,
-                }
+                if word_id in matched_word_ids:
+                    return False
+                matched_word_ids.add(word_id)
+            else:
+                bbox = word.get("bbox", {})
+                word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                if word_key in matched_word_keys:
+                    return False
+                matched_word_keys.add(word_key)
+            matched_words.append({
+                "id": word_id,
+                "text": word.get("text"),
+                "bbox": word.get("bbox"),
+                "role": word.get("role"),
+                "region_type": word.get("region_type"),
+            })
+            return True
 
         for text_match in text_matches:
             if not text_match:
@@ -716,8 +814,6 @@ def resolve_highlights(
 
             # Skip empty strings after stripping (would match everything)
             if not match_lower or not match_compact:
-                continue
-            if len(match_compact) < 2 and not match_compact.isdigit():
                 continue
 
             # 1) Single-word matching with normalized compact strings
@@ -735,25 +831,24 @@ def resolve_highlights(
                     or match_compact in word_compact
                     or word_compact in match_compact
                 ):
-                    _update_candidate(idx, base_score=3)
+                    _track_word(word)
 
-            # 2) Phrase matching across adjacent words (handles "WALK IN COOLER", "3' - 6\"")
-            if len(match_compact) >= 4:
-                max_window = 20  # prevent runaway scans on long pages
-                n = len(ocr_words)
-                for start in range(n):
-                    concat = ""
-                    end_limit = min(start + max_window, n)
-                    for end in range(start, end_limit):
-                        concat += ocr_word_compact[end]
-                        if not concat:
-                            continue
-                        if match_compact in concat:
-                            for i in range(start, end + 1):
-                                _update_candidate(i, base_score=4, phrase_match=True)
-                            break
-                        if len(concat) > len(match_compact) * 2:
-                            break
+            # 2) Phrase matching across adjacent words (handles "WALK IN COOLER", "3' - 6"")
+            max_window = 20  # prevent runaway scans on long pages
+            n = len(ocr_words)
+            for start in range(n):
+                concat = ""
+                end_limit = min(start + max_window, n)
+                for end in range(start, end_limit):
+                    concat += ocr_word_compact[end]
+                    if not concat:
+                        continue
+                    if match_compact in concat:
+                        for i in range(start, end + 1):
+                            _track_word(ocr_words[i])
+                        break
+                    if len(concat) > len(match_compact) * 2:
+                        break
 
             # 3) Token fallback: match significant tokens to OCR words
             if len(match_tokens) > 1:
@@ -763,37 +858,17 @@ def resolve_highlights(
                         continue
                     for token in match_tokens:
                         if len(token) >= 3 and token in word_compact:
-                            _update_candidate(idx, base_score=1)
+                            _track_word(word)
                             break
 
-        matched_words: list[dict] = []
-        if candidates:
-            threshold = 3 if is_spec_page else 4
-            max_highlights = 16 if is_spec_page else 12
-
-            filtered = [
-                c for c in candidates.values()
-                if c["score"] >= threshold or (is_spec_page and c["token_match"])
-            ]
-            filtered.sort(key=lambda c: (-c["score"], c["order_index"]))
-            trimmed = filtered[:max_highlights]
-            trimmed.sort(key=lambda c: c["order_index"])
-
-            matched_words = []
-            for c in trimmed:
-                word = c["word"]
-                matched_words.append({
-                    "id": word.get("id"),
-                    "text": word.get("text"),
-                    "bbox": word.get("bbox"),
-                    "role": word.get("role"),
-                    "region_type": word.get("region_type"),
-                })
-
         if matched_words:
+            # Tag fuzzy matches as search-based highlights
+            for word in matched_words:
+                word.setdefault("source", "search")
+            merged_words = _merge_adjacent_words(matched_words)
             resolved.append({
                 "page_id": page_id,
-                "words": matched_words,
+                "words": merged_words,
             })
 
     return resolved

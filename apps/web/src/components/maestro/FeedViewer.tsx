@@ -8,7 +8,7 @@ import { AgentSelectedPage } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
 import { TextHighlightOverlay } from './TextHighlightOverlay';
-import type { AgentTraceStep } from '../../types';
+import type { AgentTraceStep, AgentFinding, AgentCrossReference } from '../../types';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -21,6 +21,7 @@ export type FeedItem =
   | { type: 'user-query'; id: string; text: string; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
   | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; elapsedTime?: number; timestamp: number }
+  | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; timestamp: number }
   | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
 
 interface PageImage {
@@ -28,6 +29,98 @@ interface PageImage {
   width: number;
   height: number;
 }
+
+const FINDING_CATEGORY_LABELS: Record<string, string> = {
+  location: 'Location',
+  dimensions: 'Dimensions',
+  electrical: 'Electrical',
+  schedule: 'Schedule',
+  spec: 'Spec',
+  detail: 'Detail',
+  note: 'Note',
+};
+
+const FindingsCard: React.FC<{
+  conceptName?: string | null;
+  summary?: string | null;
+  findings: AgentFinding[];
+  gaps?: string[];
+  crossReferences?: AgentCrossReference[];
+}> = ({ conceptName, summary, findings, gaps = [], crossReferences = [] }) => {
+  const grouped = findings.reduce<Record<string, AgentFinding[]>>((acc, finding) => {
+    const key = finding.category || 'other';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(finding);
+    return acc;
+  }, {});
+
+  const orderedCategories = Object.keys(grouped).sort((a, b) => {
+    const aLabel = FINDING_CATEGORY_LABELS[a] ? 0 : 1;
+    const bLabel = FINDING_CATEGORY_LABELS[b] ? 0 : 1;
+    return aLabel - bLabel || a.localeCompare(b);
+  });
+
+  if (!findings.length && !gaps.length && !crossReferences.length) return null;
+
+  return (
+    <div className="mx-auto w-full max-w-3xl">
+      <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl shadow-sm p-4 md:p-6 space-y-4">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Concept Findings</div>
+          <div className="text-lg font-semibold text-slate-800">
+            {conceptName || 'Concept Summary'}
+          </div>
+          {summary && <p className="text-sm text-slate-600 mt-1">{summary}</p>}
+        </div>
+
+        {orderedCategories.map((category) => (
+          <div key={category} className="space-y-2">
+            <div className="text-sm font-semibold text-slate-700">
+              {FINDING_CATEGORY_LABELS[category] || category}
+            </div>
+            <ul className="space-y-2 text-sm text-slate-700">
+              {grouped[category].map((finding, idx) => (
+                <li key={`${finding.pageId}-${idx}`} className="flex flex-col gap-1">
+                  <span>{finding.content}</span>
+                  {finding.pageId && (
+                    <span className="text-xs text-slate-500">
+                      {finding.pageName || finding.pageId}
+                      {finding.confidence ? ` • ${finding.confidence.replace(/_/g, ' ')}` : ''}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        {crossReferences.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-slate-700">Cross References</div>
+            <ul className="space-y-1 text-sm text-slate-700">
+              {crossReferences.map((ref, idx) => (
+                <li key={`${ref.fromPage}-${ref.toPage}-${idx}`}>
+                  {ref.fromPage} → {ref.toPage}: {ref.relationship}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {gaps.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-slate-700">Gaps</div>
+            <ul className="space-y-1 text-sm text-slate-600 list-disc ml-4">
+              {gaps.map((gap, idx) => (
+                <li key={`${gap}-${idx}`}>{gap}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface FeedViewerProps {
   feedItems: FeedItem[];
@@ -718,6 +811,19 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                       {item.content}
                     </ReactMarkdown>
                   </div>
+                </div>
+              );
+
+            case 'findings':
+              return (
+                <div key={item.id} className="py-2 mx-auto" style={{ maxWidth: containerWidth }}>
+                  <FindingsCard
+                    conceptName={item.conceptName}
+                    summary={item.summary}
+                    findings={item.findings}
+                    gaps={item.gaps}
+                    crossReferences={item.crossReferences}
+                  />
                 </div>
               );
 
