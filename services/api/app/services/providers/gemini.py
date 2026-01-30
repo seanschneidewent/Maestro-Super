@@ -20,12 +20,8 @@ AGENT_QUERY_PROMPT = '''You are a construction plan assistant. Read the page con
 PROJECT STRUCTURE:
 {project_structure}
 
-PAGE SEARCH RESULTS (with full content and highlightable words):
+PAGE SEARCH RESULTS (with full content):
 {page_results}
-
-Each page result contains:
-- content: Summary of the page
-- highlightable_words: List of actual OCR words that can be highlighted (with bounding boxes)
 
 {history_section}
 {viewing_section}
@@ -34,14 +30,12 @@ USER QUERY: {query}
 Your task:
 1. READ the page content carefully to find the answer
 2. Select which pages to display to the user
-3. Select text to HIGHLIGHT from each page's highlightable_words list
+3. Select text to HIGHLIGHT from each page's content (dimensions, specs, labels)
 4. Write a brief, helpful response
 
 HIGHLIGHTING GUIDELINES:
-- ONLY select words from the "highlightable_words" list for each page
-- These are the exact OCR words with bounding boxes available for highlighting
 - Pick 3-8 most relevant words per page (dimensions, specs, labels that answer the query)
-- Match words exactly as they appear in highlightable_words (case-insensitive)
+- Use short phrases or exact text snippets from the content when possible
 
 SELECTION GUIDELINES:
 - Include ALL pages relevant to the query
@@ -332,5 +326,4 @@ Return JSON:
             "references": [],
             "text_spans": [],
         }
-
 

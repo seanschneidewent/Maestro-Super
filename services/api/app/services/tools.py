@@ -129,19 +129,11 @@ async def search_pages(
         # Fall back to full_context or initial_context
         content = page.context_markdown or page.full_context or page.initial_context or ""
 
-        # Extract highlightable words from semantic_index for Gemini to select from
-        # These are the actual OCR words with bounding boxes available
-        semantic_index = page.semantic_index or {}
-        ocr_words = semantic_index.get("words", [])
-        # Dedupe while preserving OCR order, no cap - every callout matters
-        word_texts = list(dict.fromkeys(w.get("text", "") for w in ocr_words if w.get("text")))
-
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
             "discipline": page.discipline.display_name,
             "content": content,  # Full content for Gemini to read
-            "highlightable_words": word_texts,  # Actual OCR words Gemini can select
         })
 
     return results
@@ -575,6 +567,24 @@ def resolve_highlights(
             words = semantic_index.get("words", [])
             page_words_lookup[page_id] = words
 
+    def _normalize_compact(text: str) -> str:
+        # Lowercase, drop all non-alphanumeric to normalize spacing/punctuation.
+        return "".join(ch for ch in text.lower() if ch.isalnum())
+
+    def _tokenize(text: str) -> list[str]:
+        # Split on non-alphanumeric, keep meaningful tokens.
+        tokens = []
+        current = []
+        for ch in text.lower():
+            if ch.isalnum():
+                current.append(ch)
+            elif current:
+                tokens.append("".join(current))
+                current = []
+        if current:
+            tokens.append("".join(current))
+        return [t for t in tokens if t]
+
     resolved = []
     for highlight in highlights:
         page_id = highlight.get("page_id")
@@ -592,6 +602,31 @@ def resolve_highlights(
         matched_word_ids: set[int] = set()  # Track by ID to avoid duplicates
         matched_word_keys: set[str] = set()  # Fallback for words without IDs (text+bbox)
 
+        # Precompute normalized OCR word representations
+        ocr_word_texts = [w.get("text", "") for w in ocr_words]
+        ocr_word_compact = [_normalize_compact(t) for t in ocr_word_texts]
+
+        def _track_word(word: dict) -> bool:
+            word_id = word.get("id")
+            if word_id is not None:
+                if word_id in matched_word_ids:
+                    return False
+                matched_word_ids.add(word_id)
+            else:
+                bbox = word.get("bbox", {})
+                word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
+                if word_key in matched_word_keys:
+                    return False
+                matched_word_keys.add(word_key)
+            matched_words.append({
+                "id": word_id,
+                "text": word.get("text"),
+                "bbox": word.get("bbox"),
+                "role": word.get("role"),
+                "region_type": word.get("region_type"),
+            })
+            return True
+
         for text_match in text_matches:
             if not text_match:
                 continue
@@ -600,49 +635,58 @@ def resolve_highlights(
             if not isinstance(text_match, str):
                 text_match = str(text_match)
 
-            # Case-insensitive matching
             match_lower = text_match.lower().strip()
+            match_compact = _normalize_compact(text_match)
+            match_tokens = _tokenize(text_match)
 
             # Skip empty strings after stripping (would match everything)
-            if not match_lower:
+            if not match_lower or not match_compact:
                 continue
 
-            for word in ocr_words:
-                word_id = word.get("id")
-                word_text = word.get("text", "").lower().strip()
-
-                # Skip if empty word text
+            # 1) Single-word matching with normalized compact strings
+            for idx, word in enumerate(ocr_words):
+                word_text = ocr_word_texts[idx].lower().strip()
                 if not word_text:
                     continue
+                word_compact = ocr_word_compact[idx]
+                if not word_compact:
+                    continue
 
-                # Check for duplicates using ID or text+bbox fallback
-                if word_id is not None:
-                    if word_id in matched_word_ids:
+                if (
+                    match_lower in word_text
+                    or word_text in match_lower
+                    or match_compact in word_compact
+                    or word_compact in match_compact
+                ):
+                    _track_word(word)
+
+            # 2) Phrase matching across adjacent words (handles "WALK IN COOLER", "3' - 6\"")
+            max_window = 20  # prevent runaway scans on long pages
+            n = len(ocr_words)
+            for start in range(n):
+                concat = ""
+                end_limit = min(start + max_window, n)
+                for end in range(start, end_limit):
+                    concat += ocr_word_compact[end]
+                    if not concat:
                         continue
-                else:
-                    # For words without IDs, use text+bbox as unique key
-                    bbox = word.get("bbox", {})
-                    word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
-                    if word_key in matched_word_keys:
+                    if match_compact in concat:
+                        for i in range(start, end + 1):
+                            _track_word(ocr_words[i])
+                        break
+                    if len(concat) > len(match_compact) * 2:
+                        break
+
+            # 3) Token fallback: match significant tokens to OCR words
+            if len(match_tokens) > 1:
+                for idx, word in enumerate(ocr_words):
+                    word_compact = ocr_word_compact[idx]
+                    if not word_compact:
                         continue
-
-                # Match if the OCR word contains the search text or vice versa
-                if match_lower in word_text or word_text in match_lower:
-                    # Track to avoid duplicates
-                    if word_id is not None:
-                        matched_word_ids.add(word_id)
-                    else:
-                        bbox = word.get("bbox", {})
-                        word_key = f"{word.get('text')}:{bbox.get('x0')}:{bbox.get('y0')}"
-                        matched_word_keys.add(word_key)
-
-                    matched_words.append({
-                        "id": word_id,
-                        "text": word.get("text"),
-                        "bbox": word.get("bbox"),
-                        "role": word.get("role"),
-                        "region_type": word.get("region_type"),
-                    })
+                    for token in match_tokens:
+                        if len(token) >= 3 and token in word_compact:
+                            _track_word(word)
+                            break
 
         if matched_words:
             resolved.append({
