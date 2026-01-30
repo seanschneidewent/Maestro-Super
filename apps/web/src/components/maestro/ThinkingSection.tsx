@@ -1,86 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
 import { ConstellationAnimation } from './ConstellationAnimation';
 
 interface ThinkingSectionProps {
-  reasoning: string[];
   isStreaming: boolean;
+  thinkingText?: string;
   autoCollapse?: boolean;
   trace?: AgentTraceStep[];
   initialElapsedTime?: number; // For completed responses - time in ms
   onNavigateToPage?: (pageId: string) => void;
   onOpenPointer?: (pointerId: string) => void;
-}
-
-// Generate a productivity phrase from a tool result
-function generateProductivityPhrase(step: AgentTraceStep): string | null {
-  if (step.type !== 'tool_result' || !step.result) return null;
-
-  const result = step.result;
-  const tool = step.tool;
-
-  switch (tool) {
-    case 'search_pointers': {
-      const pointers = result.pointers as unknown[];
-      if (Array.isArray(pointers)) {
-        return `Found ${pointers.length} relevant area${pointers.length !== 1 ? 's' : ''}`;
-      }
-      return 'Searching areas...';
-    }
-    case 'search_pages': {
-      const pages = result.pages as unknown[];
-      if (Array.isArray(pages)) {
-        return `Found ${pages.length} page${pages.length !== 1 ? 's' : ''}`;
-      }
-      return 'Searching pages...';
-    }
-    case 'get_pointer': {
-      const title = result.title as string;
-      if (title) {
-        const truncated = title.length > 30 ? title.slice(0, 30) + '...' : title;
-        return `Reading "${truncated}"`;
-      }
-      return 'Reading details...';
-    }
-    case 'get_page_context': {
-      const sheetNumber = result.sheet_number as string;
-      if (sheetNumber) {
-        return `Understanding ${sheetNumber}`;
-      }
-      return 'Understanding page...';
-    }
-    case 'get_discipline_overview': {
-      const name = result.name as string;
-      if (name) {
-        return `Reviewing ${name}`;
-      }
-      return 'Reviewing discipline...';
-    }
-    case 'get_references_to_page': {
-      const references = result.references as unknown[];
-      if (Array.isArray(references)) {
-        return `Found ${references.length} connected page${references.length !== 1 ? 's' : ''}`;
-      }
-      return 'Finding connections...';
-    }
-    case 'select_pages': {
-      const pages = result.pages as unknown[];
-      if (Array.isArray(pages)) {
-        return `Selected ${pages.length} page${pages.length !== 1 ? 's' : ''}`;
-      }
-      return 'Selecting pages...';
-    }
-    case 'select_pointers': {
-      const pointers = result.pointers as unknown[];
-      if (Array.isArray(pointers)) {
-        return `Highlighting ${pointers.length} area${pointers.length !== 1 ? 's' : ''}`;
-      }
-      return 'Highlighting areas...';
-    }
-    default:
-      return null;
-  }
 }
 
 // Generate human-readable text for a completed tool action
@@ -178,7 +108,19 @@ function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): 
   while (i < trace.length) {
     const step = trace[i];
 
-    if (step.type === 'reasoning') {
+    if (step.type === 'thinking') {
+      const content = step.content?.trim() || '';
+      if (content.length > 0) {
+        const truncated = content.length > 80 ? content.slice(0, 80) + '...' : content;
+        actions.push({
+          type: 'thinking',
+          text: truncated,
+          isComplete: !isStreaming,
+          expandedContent: content.length > 80 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'reasoning') {
       // Only show reasoning if it's AFTER the last tool_result (i.e., it's the final answer)
       // Skip intermediate reasoning that came before/between tool calls
       const content = step.content?.trim() || '';
@@ -252,7 +194,12 @@ const ActionItem: React.FC<{
       >
         {/* Status icon */}
         <div className="flex-shrink-0 w-4">
-          {action.isComplete ? (
+          {action.type === 'thinking' ? (
+            <Sparkles
+              size={14}
+              className={`text-cyan-500 ${action.isComplete ? '' : 'animate-pulse'}`}
+            />
+          ) : action.isComplete ? (
             <CheckCircle2 size={14} className="text-green-500" />
           ) : (
             <Loader2 size={14} className="text-cyan-500 animate-spin" />
@@ -261,7 +208,7 @@ const ActionItem: React.FC<{
 
         {/* Action text */}
         <span className={`text-xs flex-1 text-left ${
-          action.type === 'thinking' ? 'text-slate-500 italic' : 'text-slate-600'
+          action.type === 'thinking' ? 'text-cyan-700 italic' : 'text-slate-600'
         }`}>
           {action.text}
         </span>
@@ -291,8 +238,8 @@ const ActionItem: React.FC<{
 };
 
 export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
-  reasoning,
   isStreaming,
+  thinkingText = '',
   autoCollapse = true,
   trace = [],
   initialElapsedTime,
@@ -300,77 +247,14 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   onOpenPointer,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [displayedText, setDisplayedText] = useState('');
-  const [currentPhrase, setCurrentPhrase] = useState('Thinking...');
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(initialElapsedTime || 0);
   const wasStreamingRef = useRef(isStreaming);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const intervalRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<number | null>(null);
-  const lastPhraseRef = useRef<string>('');
 
   // Format elapsed time as seconds with 1 decimal
   const formatTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
-
-  // Clear typing interval
-  const clearTypingInterval = () => {
-    if (intervalRef.current !== null) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  };
-
-  // Typewrite a phrase
-  const typewritePhrase = (phrase: string) => {
-    clearTypingInterval();
-    setDisplayedText('');
-    let charIndex = 0;
-
-    intervalRef.current = window.setInterval(() => {
-      if (charIndex < phrase.length) {
-        setDisplayedText(phrase.slice(0, charIndex + 1));
-        charIndex++;
-      } else {
-        clearTypingInterval();
-      }
-    }, 25);
-  };
-
-  // Watch trace for tool_results and generate productivity phrases
-  useEffect(() => {
-    if (!isStreaming) return;
-
-    // Find the latest tool_result
-    for (let i = trace.length - 1; i >= 0; i--) {
-      const step = trace[i];
-      if (step.type === 'tool_result') {
-        const phrase = generateProductivityPhrase(step);
-        if (phrase && phrase !== lastPhraseRef.current) {
-          lastPhraseRef.current = phrase;
-          setCurrentPhrase(phrase);
-          typewritePhrase(phrase);
-        }
-        break;
-      }
-    }
-  }, [trace, isStreaming]);
-
-  // Initialize with "Thinking..." when streaming starts
-  useEffect(() => {
-    if (isStreaming && !wasStreamingRef.current) {
-      setCurrentPhrase('Thinking...');
-      lastPhraseRef.current = '';
-      typewritePhrase('Thinking...');
-    }
-
-    if (!isStreaming) {
-      clearTypingInterval();
-      setDisplayedText('');
-    }
-
-    return () => clearTypingInterval();
-  }, [isStreaming]);
 
   // Timer: track elapsed time during streaming
   useEffect(() => {
@@ -450,11 +334,11 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         </div>
 
         {isStreaming ? (
-          /* Streaming: blinking dot + productivity phrase + timer */
+          /* Streaming: live thinking + timer */
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span className="text-cyan-500 animate-pulse">●</span>
-            <span className="text-xs font-medium text-slate-600 truncate">
-              {displayedText}
+            <Sparkles size={12} className="text-cyan-500 animate-pulse" />
+            <span className="text-xs font-medium text-cyan-700 truncate">
+              {thinkingText || 'Thinking...'}
             </span>
             <span className="text-xs font-mono text-slate-400 flex-shrink-0">
               {formatTime(elapsedTime)}

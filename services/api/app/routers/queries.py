@@ -211,6 +211,7 @@ async def stream_query(
 
     Yields SSE events:
     - data: {"type": "text", "content": "..."} - Claude's reasoning
+    - data: {"type": "thinking", "content": "..."} - Gemini thinking chunks (vision stream)
     - data: {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
     - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "...", "conversationTitle": "..."} - Final event

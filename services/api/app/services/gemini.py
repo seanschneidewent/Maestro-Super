@@ -4,6 +4,7 @@ from app.services.providers.gemini import (
     analyze_page_pass_1,
     analyze_pointer,
     explore_concept_with_vision,
+    explore_concept_with_vision_streaming,
     run_agent_query,
     select_pages_for_verification,
 )

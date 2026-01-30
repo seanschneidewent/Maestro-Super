@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Search, FileText, GitBranch, CheckCircle2, Brain, File, Folder, List } from 'lucide-react';
+import { ChevronDown, ChevronRight, Search, FileText, GitBranch, CheckCircle2, Brain, File, Folder, List, Sparkles } from 'lucide-react';
 import type { AgentTraceStep } from '../../types';
 
 // Map tool names to icons
@@ -34,6 +34,9 @@ export const ReasoningTrace: React.FC<ReasoningTraceProps> = ({
     if (step.type === 'reasoning') {
       return <Brain size={12} />;
     }
+    if (step.type === 'thinking') {
+      return <Sparkles size={12} />;
+    }
     if (step.type === 'tool_call' && step.tool) {
       return TOOL_ICONS[step.tool] || <FileText size={12} />;
     }
@@ -47,6 +50,10 @@ export const ReasoningTrace: React.FC<ReasoningTraceProps> = ({
   const getStepText = (step: AgentTraceStep) => {
     if (step.type === 'reasoning') {
       // Truncate long reasoning
+      const text = step.content || '';
+      return text.length > 100 ? text.slice(0, 100) + '...' : text;
+    }
+    if (step.type === 'thinking') {
       const text = step.content || '';
       return text.length > 100 ? text.slice(0, 100) + '...' : text;
     }
@@ -120,6 +127,8 @@ export const ReasoningTrace: React.FC<ReasoningTraceProps> = ({
                 <div className={`flex-shrink-0 mt-0.5 ${
                   step.type === 'reasoning'
                     ? 'text-purple-400'
+                    : step.type === 'thinking'
+                    ? 'text-cyan-500'
                     : step.type === 'tool_call'
                     ? 'text-cyan-500'
                     : 'text-green-500'

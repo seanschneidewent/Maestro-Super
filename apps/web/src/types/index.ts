@@ -32,6 +32,7 @@ export {
   type QueryWithPages,
   type ConversationWithQueries,
   type AgentTextEvent,
+  type AgentThinkingEvent,
   type AgentToolCallEvent,
   type AgentToolResultEvent,
   type AgentTraceStep,

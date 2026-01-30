@@ -19,6 +19,7 @@ from app.services.providers.gemini import (
     run_agent_query as gemini_agent_query,
     select_pages_for_verification,
     explore_concept_with_vision,
+    explore_concept_with_vision_streaming,
 )
 
 logger = logging.getLogger(__name__)
@@ -645,16 +646,21 @@ async def run_agent_query_gemini(
         yield {"type": "tool_call", "tool": "explore_concept_with_vision", "input": {"page_ids": vision_page_ids}}
         trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": {"page_ids": vision_page_ids}})
         try:
-            vision_result = await asyncio.wait_for(
-                explore_concept_with_vision(
+            async with asyncio.timeout(120.0):
+                async for event in explore_concept_with_vision_streaming(
                     query=query,
                     pages=vision_payload,
                     verification_plan=phase1.get("verification_plan"),
                     history_context=history_context,
                     viewing_context=viewing_context_str,
-                ),
-                timeout=120.0,
-            )
+                ):
+                    if event.get("type") == "thinking":
+                        content = event.get("content")
+                        if content:
+                            yield {"type": "thinking", "content": content}
+                            trace.append({"type": "thinking", "content": content})
+                    elif event.get("type") == "result":
+                        vision_result = event.get("data") or {}
         except asyncio.TimeoutError:
             logger.error("Gemini vision exploration timeout after 120 seconds")
             yield {"type": "error", "message": "Vision analysis timed out. Please try again."}
@@ -662,6 +668,11 @@ async def run_agent_query_gemini(
         except Exception as e:
             logger.exception(f"Gemini vision exploration failed: {e}")
             yield {"type": "error", "message": f"Vision analysis failed: {str(e)}"}
+            return
+
+        if not vision_result:
+            logger.error("Gemini vision exploration streaming returned no result")
+            yield {"type": "error", "message": "Vision analysis failed: empty response"}
             return
 
         yield {"type": "tool_result", "tool": "explore_concept_with_vision", "result": vision_result}

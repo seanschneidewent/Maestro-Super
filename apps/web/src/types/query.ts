@@ -51,6 +51,11 @@ export interface AgentTextEvent {
   content: string;
 }
 
+export interface AgentThinkingEvent {
+  type: 'thinking';
+  content: string;
+}
+
 export interface AgentToolCallEvent {
   type: 'tool_call';
   tool: string;
@@ -64,7 +69,7 @@ export interface AgentToolResultEvent {
 }
 
 export interface AgentTraceStep {
-  type: 'reasoning' | 'tool_call' | 'tool_result';
+  type: 'reasoning' | 'tool_call' | 'tool_result' | 'thinking';
   content?: string;
   tool?: string;
   input?: Record<string, unknown>;
@@ -91,6 +96,7 @@ export interface AgentErrorEvent {
 
 export type AgentEvent =
   | AgentTextEvent
+  | AgentThinkingEvent
   | AgentToolCallEvent
   | AgentToolResultEvent
   | AgentDoneEvent
