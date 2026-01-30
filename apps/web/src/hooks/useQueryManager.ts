@@ -14,7 +14,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../types'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding } from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 import { useAgentToast } from '../contexts/AgentToastContext'
 
@@ -59,6 +59,7 @@ export interface CompletedQuery {
   finalAnswer: string
   trace: AgentTraceStep[]
   elapsedTime: number
+  conceptResponse?: AgentConceptResponse
 }
 
 export type QueryStatus = 'streaming' | 'complete' | 'error'
@@ -80,6 +81,7 @@ export interface QueryState {
   error: string | null
   startTime: number
   response: FieldResponse | null
+  conceptResponse?: AgentConceptResponse
 }
 
 interface UseQueryManagerOptions {
@@ -606,6 +608,15 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       case 'done': {
         const displayTitle = typeof data.displayTitle === 'string' ? data.displayTitle : null
         const conversationTitle = typeof data.conversationTitle === 'string' ? data.conversationTitle : null
+        const conceptName = typeof data.conceptName === 'string' ? data.conceptName : null
+        const summary = typeof data.summary === 'string' ? data.summary : null
+        const gaps = Array.isArray((data as { gaps?: unknown }).gaps) ? (data as { gaps?: string[] }).gaps : []
+        const rawCrossReferences = Array.isArray((data as { crossReferences?: unknown }).crossReferences)
+          ? (data as { crossReferences?: Array<Record<string, unknown>> }).crossReferences
+          : []
+        const findingsRaw = Array.isArray((data as { findings?: unknown }).findings)
+          ? (data as { findings?: Array<Record<string, unknown>> }).findings
+          : []
 
         // Extract final answer
         let extractedAnswer = ''
@@ -627,6 +638,44 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
         if (lastToolResultIndex === -1) {
           extractedAnswer = accumulator.reasoning.join('')
+        }
+
+        // Normalize findings and attach page names for UI
+        const pageNameLookup = new Map(accumulator.selectedPages.map(p => [p.pageId, p.pageName]))
+        const findings: AgentFinding[] = findingsRaw
+          .map((f) => {
+            const raw = f as Record<string, any>
+            const pageId = String(raw.page_id || raw.pageId || '')
+            return {
+              category: String(raw.category || ''),
+              content: String(raw.content || ''),
+              pageId,
+              semanticRefs: Array.isArray(raw.semantic_refs) ? raw.semantic_refs as number[] : undefined,
+              bbox: Array.isArray(raw.bbox) ? raw.bbox as [number, number, number, number] : undefined,
+              confidence: typeof raw.confidence === 'string' ? raw.confidence : undefined,
+              sourceText: typeof raw.source_text === 'string' ? raw.source_text : undefined,
+              pageName: pageNameLookup.get(pageId) || undefined,
+            }
+          })
+          .filter((f) => f.pageId && f.content)
+
+        const crossReferences = rawCrossReferences
+          .map((ref) => {
+            const raw = ref as Record<string, any>
+            return {
+              fromPage: String(raw.fromPage || raw.from_page || ''),
+              toPage: String(raw.toPage || raw.to_page || ''),
+              relationship: String(raw.relationship || ''),
+            }
+          })
+          .filter((ref) => ref.fromPage && ref.toPage && ref.relationship)
+
+        const conceptResponse: AgentConceptResponse = {
+          conceptName,
+          summary,
+          findings,
+          crossReferences,
+          gaps,
         }
 
         // Get the query state to access other data
@@ -664,6 +713,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
               finalAnswer: extractedAnswer,
               trace: [...accumulator.trace],
               elapsedTime: Date.now() - query.startTime,
+              conceptResponse,
             })
           }
 
@@ -683,6 +733,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             selectedPages: [...accumulator.selectedPages],
             currentTool: null,
             response: fieldResponse,
+            conceptResponse,
           })
           return newMap
         })
@@ -733,24 +784,25 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     const toastId = addToast(queryText, conversationId ?? null)
 
     // Create initial state
-    const queryState: QueryState = {
-      id: queryId,
-      queryText,
-      conversationId: conversationId ?? null,
-      viewingPageId: viewingPageId ?? null,
-      toastId,
-      status: 'streaming',
-      trace: [],
-      selectedPages: [],
-      thinkingText: '',
-      finalAnswer: '',
-      displayTitle: null,
-      conversationTitle: null,
-      currentTool: null,
-      error: null,
-      startTime: Date.now(),
-      response: null,
-    }
+      const queryState: QueryState = {
+        id: queryId,
+        queryText,
+        conversationId: conversationId ?? null,
+        viewingPageId: viewingPageId ?? null,
+        toastId,
+        status: 'streaming',
+        trace: [],
+        selectedPages: [],
+        thinkingText: '',
+        finalAnswer: '',
+        displayTitle: null,
+        conversationTitle: null,
+        currentTool: null,
+        error: null,
+        startTime: Date.now(),
+        response: null,
+        conceptResponse: undefined,
+      }
 
     // Add to state
     setQueries((prev) => new Map(prev).set(queryId, queryState))

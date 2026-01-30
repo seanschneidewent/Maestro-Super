@@ -3,7 +3,7 @@ export type FieldViewMode = 'standard' | 'response'
 
 // OCR word with bounding box for text highlighting
 export interface OcrWord {
-  id: number
+  id: number | null
   text: string
   bbox: {
     x0: number      // Pixel coordinates
@@ -15,6 +15,8 @@ export interface OcrWord {
   }
   role?: string        // e.g., "dimension", "detail_title", "material_spec"
   region_type?: string // e.g., "detail", "notes", "schedule"
+  source?: 'agent' | 'search' // Highlight source for color coding
+  confidence?: string
 }
 
 // Legacy pointer type (being phased out)

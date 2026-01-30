@@ -40,8 +40,8 @@ export function TextHighlightOverlay({
 
         const { x0, y0, width, height } = word.bbox
 
-        // Determine color based on role
-        const fillColor = getRoleColor(word.role)
+        // Determine color based on source/role
+        const fillColor = getHighlightColor(word)
 
         return (
           <g key={word.id ?? idx}>
@@ -68,6 +68,16 @@ export function TextHighlightOverlay({
 /**
  * Get highlight color based on semantic role.
  */
+function getHighlightColor(word: OcrWord): string {
+  if (word.source === 'agent' || word.confidence === 'verified_via_zoom') {
+    return '#22c55e' // green-500 (agent-verified)
+  }
+  if (word.source === 'search') {
+    return '#facc15' // yellow-400 (search-matched)
+  }
+  return getRoleColor(word.role)
+}
+
 function getRoleColor(role?: string): string {
   switch (role) {
     case 'dimension':

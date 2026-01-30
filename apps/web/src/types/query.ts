@@ -76,6 +76,12 @@ export interface AgentDoneEvent {
   trace: AgentTraceStep[];
   usage: { inputTokens: number; outputTokens: number };
   displayTitle: string | null;
+  conversationTitle?: string | null;
+  conceptName?: string | null;
+  summary?: string | null;
+  findings?: AgentFinding[];
+  crossReferences?: AgentCrossReference[];
+  gaps?: string[];
 }
 
 export interface AgentErrorEvent {
@@ -89,6 +95,31 @@ export type AgentEvent =
   | AgentToolResultEvent
   | AgentDoneEvent
   | AgentErrorEvent;
+
+export interface AgentFinding {
+  category: string;
+  content: string;
+  pageId: string;
+  semanticRefs?: number[];
+  bbox?: [number, number, number, number];
+  confidence?: string;
+  sourceText?: string;
+  pageName?: string;
+}
+
+export interface AgentCrossReference {
+  fromPage: string;
+  toPage: string;
+  relationship: string;
+}
+
+export interface AgentConceptResponse {
+  conceptName?: string | null;
+  summary?: string | null;
+  findings?: AgentFinding[];
+  crossReferences?: AgentCrossReference[];
+  gaps?: string[];
+}
 
 // Agent message state (built from events)
 export interface ToolCallState {

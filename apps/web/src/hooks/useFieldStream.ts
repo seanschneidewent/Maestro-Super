@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord } from '../types'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding } from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -38,6 +38,7 @@ export interface CompletedQuery {
   finalAnswer: string
   trace: AgentTraceStep[]
   elapsedTime: number
+  conceptResponse?: AgentConceptResponse
 }
 
 interface UseFieldStreamOptions {
@@ -568,6 +569,15 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
         // Extract displayTitle and conversationTitle from done event
         const eventDisplayTitle = typeof data.displayTitle === 'string' ? data.displayTitle : null
         const eventConversationTitle = typeof data.conversationTitle === 'string' ? data.conversationTitle : null
+        const conceptName = typeof data.conceptName === 'string' ? data.conceptName : null
+        const summary = typeof data.summary === 'string' ? data.summary : null
+        const gaps = Array.isArray((data as { gaps?: unknown }).gaps) ? (data as { gaps?: string[] }).gaps : []
+        const rawCrossReferences = Array.isArray((data as { crossReferences?: unknown }).crossReferences)
+          ? (data as { crossReferences?: Array<Record<string, unknown>> }).crossReferences
+          : []
+        const findingsRaw = Array.isArray((data as { findings?: unknown }).findings)
+          ? (data as { findings?: Array<Record<string, unknown>> }).findings
+          : []
         setDisplayTitle(eventDisplayTitle)
 
         // Extract final answer from trace (reasoning after last tool result)
@@ -599,6 +609,43 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
 
         agentMessage.finalAnswer = extractedAnswer
         setFinalAnswer(extractedAnswer)
+
+        const pageNameLookup = new Map(selectedPagesRef.current.map(p => [p.pageId, p.pageName]))
+        const findings: AgentFinding[] = findingsRaw
+          .map((f) => {
+            const raw = f as Record<string, any>
+            const pageId = String(raw.page_id || raw.pageId || '')
+            return {
+              category: String(raw.category || ''),
+              content: String(raw.content || ''),
+              pageId,
+              semanticRefs: Array.isArray(raw.semantic_refs) ? raw.semantic_refs as number[] : undefined,
+              bbox: Array.isArray(raw.bbox) ? raw.bbox as [number, number, number, number] : undefined,
+              confidence: typeof raw.confidence === 'string' ? raw.confidence : undefined,
+              sourceText: typeof raw.source_text === 'string' ? raw.source_text : undefined,
+              pageName: pageNameLookup.get(pageId) || undefined,
+            }
+          })
+          .filter((f) => f.pageId && f.content)
+
+        const crossReferences = rawCrossReferences
+          .map((ref) => {
+            const raw = ref as Record<string, any>
+            return {
+              fromPage: String(raw.fromPage || raw.from_page || ''),
+              toPage: String(raw.toPage || raw.to_page || ''),
+              relationship: String(raw.relationship || ''),
+            }
+          })
+          .filter((ref) => ref.fromPage && ref.toPage && ref.relationship)
+
+        const conceptResponse: AgentConceptResponse = {
+          conceptName,
+          summary,
+          findings,
+          crossReferences,
+          gaps,
+        }
 
         // Generate a query ID for tracking
         const queryId = `query-${agentMessage.timestamp.getTime()}`
@@ -640,6 +687,7 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
             finalAnswer: extractedAnswer,
             trace: [...agentMessage.trace],
             elapsedTime: Date.now() - agentMessage.timestamp.getTime(),
+            conceptResponse,
           })
         }
         break
