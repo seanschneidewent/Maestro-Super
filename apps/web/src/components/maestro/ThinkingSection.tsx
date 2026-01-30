@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import type { AgentTraceStep } from '../../types';
 import { ConstellationAnimation } from './ConstellationAnimation';
 
@@ -208,9 +209,23 @@ const ActionItem: React.FC<{
 
         {/* Action text */}
         <span className={`text-xs flex-1 text-left ${
-          action.type === 'thinking' ? 'text-cyan-700 italic' : 'text-slate-600'
+          action.type === 'thinking' ? 'text-cyan-700' : 'text-slate-600'
         }`}>
-          {action.text}
+          {action.type === 'thinking' ? (
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <>{children}</>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                em: ({ children }) => <em>{children}</em>,
+              }}
+              allowedElements={['p', 'strong', 'em']}
+              unwrapDisallowed
+            >
+              {action.text}
+            </ReactMarkdown>
+          ) : (
+            action.text
+          )}
         </span>
 
         {/* Expand indicator for thinking with more content */}
@@ -228,9 +243,20 @@ const ActionItem: React.FC<{
       {/* Expanded content */}
       {isExpanded && action.expandedContent && (
         <div className="ml-6 mr-2 mt-1 mb-2 p-2 rounded-lg bg-slate-100 border border-slate-200">
-          <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
-            {action.expandedContent}
-          </p>
+          <div className="text-xs text-slate-600 leading-relaxed">
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
+                strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                em: ({ children }) => <em>{children}</em>,
+                ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
+                ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
+                li: ({ children }) => <li className="my-0.5">{children}</li>,
+              }}
+            >
+              {action.expandedContent}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
     </div>
@@ -338,7 +364,21 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <Sparkles size={12} className="text-cyan-500 animate-pulse" />
             <span className="text-xs font-medium text-cyan-700 truncate">
-              {thinkingText || 'Thinking...'}
+              {thinkingText ? (
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <>{children}</>,
+                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                    em: ({ children }) => <em>{children}</em>,
+                  }}
+                  allowedElements={['p', 'strong', 'em']}
+                  unwrapDisallowed
+                >
+                  {thinkingText}
+                </ReactMarkdown>
+              ) : (
+                'Thinking...'
+              )}
             </span>
             <span className="text-xs font-mono text-slate-400 flex-shrink-0">
               {formatTime(elapsedTime)}
