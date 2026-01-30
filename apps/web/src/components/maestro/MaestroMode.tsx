@@ -211,6 +211,20 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         });
       }
 
+      // Add structured findings if available
+      if (query.conceptResponse && (query.conceptResponse.findings?.length || query.conceptResponse.gaps?.length)) {
+        newItems.push({
+          type: 'findings',
+          id: crypto.randomUUID(),
+          conceptName: query.conceptResponse.conceptName,
+          summary: query.conceptResponse.summary,
+          findings: query.conceptResponse.findings || [],
+          gaps: query.conceptResponse.gaps,
+          crossReferences: query.conceptResponse.crossReferences,
+          timestamp: Date.now(),
+        });
+      }
+
       // Add text response if we have one
       if (query.finalAnswer) {
         newItems.push({
