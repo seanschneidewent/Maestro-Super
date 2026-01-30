@@ -339,6 +339,17 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     }
   ) => {
     switch (data.type) {
+      case 'thinking': {
+        if (typeof data.content === 'string') {
+          accumulator.trace.push({ type: 'thinking', content: data.content })
+          updateQuery(queryId, {
+            trace: [...accumulator.trace],
+            thinkingText: data.content,
+          })
+        }
+        break
+      }
+
       case 'text': {
         if (typeof data.content === 'string') {
           accumulator.reasoning.push(data.content)

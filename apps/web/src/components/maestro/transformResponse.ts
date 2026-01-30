@@ -68,32 +68,42 @@ export function transformAgentResponse(
 }
 
 export function extractLatestThinking(trace: AgentTraceStep[]): string {
-  // Find the last reasoning entry in trace
+  const formatContent = (raw: string) => {
+    let content = raw
+      .replace(/^#+\s*.*/gm, '') // Remove markdown headers
+      .replace(/^\*\*[^*]+\*\*\s*/gm, '') // Remove bold headers like **Summary**
+      .replace(/^\s*[-*]\s*/gm, '') // Remove list markers
+      .trim()
+
+    if (!content) return ''
+
+    const sentenceMatch = content.match(/^[^.!?]*[.!?]/)
+    if (sentenceMatch) {
+      return sentenceMatch[0].trim()
+    }
+
+    if (content.length > 100) {
+      return content.slice(0, 97) + '...'
+    }
+
+    return content
+  }
+
+  // Prefer latest thinking chunks if present
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const step = trace[i]
+    if (step.type === 'thinking' && step.content) {
+      const formatted = formatContent(step.content)
+      if (formatted) return formatted
+    }
+  }
+
+  // Fallback to reasoning
   for (let i = trace.length - 1; i >= 0; i--) {
     const step = trace[i]
     if (step.type === 'reasoning' && step.content) {
-      // Clean up markdown and get first real sentence
-      let content = step.content
-        .replace(/^#+\s*.*/gm, '') // Remove markdown headers
-        .replace(/^\*\*[^*]+\*\*\s*/gm, '') // Remove bold headers like **Summary**
-        .replace(/^\s*[-*]\s*/gm, '') // Remove list markers
-        .trim()
-
-      // Skip if only headers/formatting was present
-      if (!content) continue
-
-      // Get first sentence
-      const sentenceMatch = content.match(/^[^.!?]*[.!?]/)
-      if (sentenceMatch) {
-        return sentenceMatch[0].trim()
-      }
-
-      // No sentence ending, truncate
-      if (content.length > 100) {
-        return content.slice(0, 97) + '...'
-      }
-
-      return content
+      const formatted = formatContent(step.content)
+      if (formatted) return formatted
     }
   }
 

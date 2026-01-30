@@ -4,7 +4,7 @@ Gemini AI service for context extraction and agent queries.
 
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncIterator
 
 from google import genai
 from google.genai import types
@@ -465,6 +465,145 @@ async def explore_concept_with_vision(
         }
     except Exception as e:
         logger.error(f"Gemini vision exploration failed: {e}")
+        raise
+
+
+async def explore_concept_with_vision_streaming(
+    query: str,
+    pages: list[dict[str, Any]],
+    verification_plan: list[dict[str, Any]] | None = None,
+    history_context: str = "",
+    viewing_context: str = "",
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Phase 2: Agentic vision exploration with streaming thoughts.
+
+    Yields:
+        {"type": "thinking", "content": "..."} for thought chunks
+        {"type": "result", "data": {...}} once final JSON is parsed
+    """
+    try:
+        client = _get_gemini_client()
+
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        history_section = ""
+        if history_context:
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(history_context)}\n"
+
+        viewing_section = ""
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
+
+        page_manifest = [
+            {
+                "page_id": p.get("page_id"),
+                "page_name": p.get("page_name"),
+                "discipline": p.get("discipline"),
+                "context_markdown": p.get("context_markdown"),
+                "details": p.get("details"),
+                "semantic_index": p.get("semantic_index"),
+            }
+            for p in pages
+        ]
+
+        prompt = VISION_EXPLORATION_PROMPT.format(
+            page_manifest=json.dumps(page_manifest, indent=2),
+            verification_plan=json.dumps(verification_plan or [], indent=2),
+            query=escape_braces(query),
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        parts: list[types.Part] = []
+        for page in pages:
+            image_bytes = page.get("image_bytes")
+            if not image_bytes:
+                continue
+            page_label = f"PAGE IMAGE: {page.get('page_name')} ({page.get('page_id')})"
+            parts.append(types.Part.from_text(text=page_label))
+            parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+
+        parts.append(types.Part.from_text(text=prompt))
+
+        try:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution)
+        except Exception:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution())
+
+        config_kwargs = {
+            "response_mime_type": "application/json",
+            "tools": [code_exec_tool],
+            "media_resolution": "media_resolution_high",
+            "temperature": 0,
+        }
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_level="HIGH",
+                include_thoughts=True,
+            )
+        except Exception:
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="HIGH")
+            except Exception:
+                pass
+
+        stream = client.models.generate_content_stream(
+            model="gemini-3-flash-preview",
+            contents=[types.Content(parts=parts)],
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+        accumulated_text = ""
+        usage_metadata = None
+
+        for chunk in stream:
+            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                usage_metadata = chunk.usage_metadata
+
+            candidates = getattr(chunk, "candidates", None) or []
+            if not candidates:
+                continue
+
+            content = getattr(candidates[0], "content", None)
+            if not content:
+                continue
+
+            for part in getattr(content, "parts", []) or []:
+                text = getattr(part, "text", None)
+                if not text:
+                    continue
+                if getattr(part, "thought", False):
+                    yield {"type": "thinking", "content": text}
+                else:
+                    accumulated_text += text
+
+        result = _extract_json_response(accumulated_text)
+
+        input_tokens = 0
+        output_tokens = 0
+        if usage_metadata:
+            input_tokens = getattr(usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage_metadata, "candidates_token_count", 0) or 0
+
+        yield {
+            "type": "result",
+            "data": {
+                "concept_name": result.get("concept_name") or None,
+                "summary": result.get("summary") or None,
+                "findings": result.get("findings") or [],
+                "cross_references": result.get("cross_references") or [],
+                "gaps": result.get("gaps") or [],
+                "response": result.get("response") or "",
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"Gemini vision exploration streaming failed: {e}")
         raise
 
 

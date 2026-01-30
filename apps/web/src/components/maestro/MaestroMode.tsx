@@ -745,6 +745,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           feedItems={feedItems}
           isStreaming={isStreaming}
           streamingTrace={trace}
+          thinkingText={thinkingText}
           currentTool={currentTool}
           tutorialStep={currentStep}
           onExpandedPageClose={handleExpandedPageClose}

@@ -239,6 +239,15 @@ export function useFieldStream(options: UseFieldStreamOptions): UseFieldStreamRe
     query: string
   ) => {
     switch (data.type) {
+      case 'thinking':
+        if (typeof data.content === 'string') {
+          const newStep: AgentTraceStep = { type: 'thinking', content: data.content }
+          agentMessage.trace.push(newStep)
+          setTrace([...agentMessage.trace])
+          setThinkingText(data.content)
+        }
+        break
+
       case 'text':
         // Accumulate text into the current reasoning step (or create one)
         if (typeof data.content === 'string') {

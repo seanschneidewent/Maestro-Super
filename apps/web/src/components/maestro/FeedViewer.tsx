@@ -126,6 +126,7 @@ interface FeedViewerProps {
   feedItems: FeedItem[];
   isStreaming: boolean;
   streamingTrace?: AgentTraceStep[];
+  thinkingText?: string;
   currentTool?: string | null;
   tutorialText?: string;
   tutorialStep?: string | null;
@@ -628,6 +629,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   feedItems,
   isStreaming,
   streamingTrace = [],
+  thinkingText = '',
   currentTool,
   tutorialText,
   tutorialStep,
@@ -783,7 +785,6 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                   {/* ThinkingSection for completed responses */}
                   {item.trace.length > 0 && (
                     <ThinkingSection
-                      reasoning={[]}
                       isStreaming={false}
                       autoCollapse={false}
                       trace={item.trace}
@@ -815,10 +816,10 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
         {isStreaming && (
           <div className="py-2 mx-auto" style={{ maxWidth: containerWidth }}>
             <ThinkingSection
-              reasoning={[]}
               isStreaming={true}
               autoCollapse={false}
               trace={streamingTrace}
+              thinkingText={thinkingText}
             />
           </div>
         )}
