@@ -779,11 +779,18 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
               );
             }
 
-            case 'text':
+            case 'text': {
+              const hasTrace = (item.trace?.length ?? 0) > 0;
+              const hasContent = (item.content?.trim() ?? '').length > 0;
+
               return (
-                <div key={item.id} className="py-2 mx-auto" style={{ maxWidth: containerWidth }}>
+                <div
+                  key={item.id}
+                  className="py-2 mx-auto space-y-4"
+                  style={{ maxWidth: containerWidth }}
+                >
                   {/* ThinkingSection for completed responses */}
-                  {item.trace.length > 0 && (
+                  {hasTrace && (
                     <ThinkingSection
                       isStreaming={false}
                       autoCollapse={false}
@@ -791,8 +798,75 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                       initialElapsedTime={item.elapsedTime}
                     />
                   )}
+
+                  {hasContent ? (
+                    <div className="mx-auto w-full max-w-3xl">
+                      <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl shadow-sm p-4 md:p-6">
+                        <div className="text-sm text-slate-700 leading-relaxed">
+                          <ReactMarkdown
+                            components={{
+                              h1: ({ children }) => (
+                                <h1 className="text-xl font-semibold text-slate-800 mt-4 mb-2">{children}</h1>
+                              ),
+                              h2: ({ children }) => (
+                                <h2 className="text-lg font-semibold text-slate-800 mt-4 mb-2">{children}</h2>
+                              ),
+                              h3: ({ children }) => (
+                                <h3 className="text-base font-semibold text-slate-800 mt-3 mb-2">{children}</h3>
+                              ),
+                              p: ({ children }) => (
+                                <p className="my-2 first:mt-0 last:mb-0">{children}</p>
+                              ),
+                              ul: ({ children }) => <ul className="my-2 ml-4 list-disc">{children}</ul>,
+                              ol: ({ children }) => <ol className="my-2 ml-4 list-decimal">{children}</ol>,
+                              li: ({ children }) => <li className="my-1">{children}</li>,
+                              strong: ({ children }) => (
+                                <strong className="font-semibold text-slate-800">{children}</strong>
+                              ),
+                              em: ({ children }) => <em className="text-slate-700">{children}</em>,
+                              a: ({ children, href }) => (
+                                <a
+                                  href={href}
+                                  className="text-cyan-600 hover:text-cyan-700 underline"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {children}
+                                </a>
+                              ),
+                              code: ({ inline, children }) =>
+                                inline ? (
+                                  <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">
+                                    {children}
+                                  </code>
+                                ) : (
+                                  <code className="text-xs font-mono">{children}</code>
+                                ),
+                              pre: ({ children }) => (
+                                <pre className="bg-slate-100 text-slate-800 rounded-lg p-3 overflow-x-auto text-xs font-mono">
+                                  {children}
+                                </pre>
+                              ),
+                              blockquote: ({ children }) => (
+                                <blockquote className="border-l-2 border-slate-200 pl-3 text-slate-600 italic">
+                                  {children}
+                                </blockquote>
+                              ),
+                            }}
+                          >
+                            {item.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-400 italic text-center">
+                      No response text available.
+                    </div>
+                  )}
                 </div>
               );
+            }
 
             case 'findings':
               return (
