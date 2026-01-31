@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep } from '../../types';
+import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep, AgentConceptResponse, AgentFinding, AgentCrossReference } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
 import { FeedViewer, FeedItem } from './FeedViewer';
@@ -96,6 +96,95 @@ function extractPointerDataFromTrace(
   }
 
   return pointerMap;
+}
+
+/**
+ * Extract concept findings from the explore_concept_with_vision tool_result in a trace.
+ */
+function extractConceptDataFromTrace(
+  trace: QueryTraceStep[] | undefined,
+  pageNameLookup?: Map<string, string>
+): AgentConceptResponse | null {
+  if (!trace || trace.length === 0) return null;
+
+  let result: Record<string, unknown> | null = null;
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const step = trace[i];
+    if (step.type === 'tool_result' && step.tool === 'explore_concept_with_vision' && step.result) {
+      result = step.result as Record<string, unknown>;
+      break;
+    }
+  }
+
+  if (!result) return null;
+
+  const conceptName = typeof result.concept_name === 'string'
+    ? result.concept_name
+    : (typeof result.conceptName === 'string' ? result.conceptName : null);
+  const summary = typeof result.summary === 'string' ? result.summary : null;
+
+  const rawFindings = Array.isArray((result as { findings?: unknown }).findings)
+    ? (result as { findings?: Array<Record<string, unknown>> }).findings
+    : [];
+  const rawCrossReferences = Array.isArray((result as { cross_references?: unknown }).cross_references)
+    ? (result as { cross_references?: Array<Record<string, unknown>> }).cross_references
+    : Array.isArray((result as { crossReferences?: unknown }).crossReferences)
+      ? (result as { crossReferences?: Array<Record<string, unknown>> }).crossReferences
+      : [];
+  const rawGaps = Array.isArray((result as { gaps?: unknown }).gaps)
+    ? (result as { gaps?: Array<unknown> }).gaps
+    : [];
+
+  const pageLookup = pageNameLookup ?? new Map<string, string>();
+
+  const findings: AgentFinding[] = rawFindings
+    .map((f) => {
+      const raw = f as Record<string, any>;
+      const pageId = String(raw.page_id || raw.pageId || '');
+      return {
+        category: String(raw.category || ''),
+        content: String(raw.content || ''),
+        pageId,
+        semanticRefs: Array.isArray(raw.semantic_refs)
+          ? raw.semantic_refs as number[]
+          : Array.isArray(raw.semanticRefs)
+            ? raw.semanticRefs as number[]
+            : undefined,
+        bbox: Array.isArray(raw.bbox) ? raw.bbox as [number, number, number, number] : undefined,
+        confidence: typeof raw.confidence === 'string' ? raw.confidence : undefined,
+        sourceText: typeof raw.source_text === 'string'
+          ? raw.source_text
+          : (typeof raw.sourceText === 'string' ? raw.sourceText : undefined),
+        pageName: pageLookup.get(pageId) || undefined,
+      };
+    })
+    .filter((finding) => finding.pageId && finding.content);
+
+  const resolvePageLabel = (value: string) => pageLookup.get(value) || value;
+  const crossReferences: AgentCrossReference[] = rawCrossReferences
+    .map((ref) => {
+      const raw = ref as Record<string, any>;
+      const fromRaw = String(raw.fromPageName || raw.from_page_name || raw.fromPage || raw.from_page || '');
+      const toRaw = String(raw.toPageName || raw.to_page_name || raw.toPage || raw.to_page || '');
+      return {
+        fromPage: resolvePageLabel(fromRaw),
+        toPage: resolvePageLabel(toRaw),
+        relationship: String(raw.relationship || ''),
+      };
+    })
+    .filter((ref) => ref.fromPage && ref.toPage && ref.relationship);
+
+  const gaps = rawGaps
+    .map((gap) => String(gap || '').trim())
+    .filter((gap) => gap.length > 0);
+
+  return {
+    conceptName,
+    summary,
+    findings,
+    crossReferences,
+    gaps,
+  };
 }
 
 interface MaestroModeProps {
@@ -407,6 +496,24 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         });
       }
 
+      // Add structured findings if available in trace
+      const pageNameLookup = cachedPages
+        ? new Map(cachedPages.map((page) => [page.pageId, page.pageName]))
+        : undefined;
+      const conceptData = extractConceptDataFromTrace(q.trace, pageNameLookup);
+      if (conceptData && (conceptData.findings?.length || conceptData.gaps?.length || conceptData.crossReferences?.length)) {
+        newFeedItems.push({
+          type: 'findings',
+          id: `feed-findings-${q.id}`,
+          conceptName: conceptData.conceptName,
+          summary: conceptData.summary,
+          findings: conceptData.findings || [],
+          gaps: conceptData.gaps,
+          crossReferences: conceptData.crossReferences,
+          timestamp: new Date(q.createdAt).getTime() + 2,
+        });
+      }
+
       // Add text response if available
       const responseText = q.responseText || extractFinalAnswerFromTrace(q.trace);
       const cachedTrace = queryTraceCache.get(q.id);
@@ -416,7 +523,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           id: `feed-text-${q.id}`,
           content: responseText,
           trace: (cachedTrace || []) as AgentTraceStep[],
-          timestamp: new Date(q.createdAt).getTime() + 2,
+          timestamp: new Date(q.createdAt).getTime() + 3,
         });
       }
     }
