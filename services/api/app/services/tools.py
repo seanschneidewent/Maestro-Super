@@ -74,7 +74,7 @@ async def search_pages(
             func.lower(Discipline.display_name).contains(discipline.lower())
         )
 
-    # Search in page_name, initial_context, full_context, and context_markdown
+    # Search in page_name, initial_context, full_context, sheet_reflection, and context_markdown
     # Use word-level matching with plural handling.
     STOP_WORDS = {
         "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
@@ -108,6 +108,8 @@ async def search_pages(
                 Page.initial_context.ilike(singular_pattern),
                 Page.full_context.ilike(word_pattern),
                 Page.full_context.ilike(singular_pattern),
+                Page.sheet_reflection.ilike(word_pattern),
+                Page.sheet_reflection.ilike(singular_pattern),
                 Page.context_markdown.ilike(word_pattern),
                 Page.context_markdown.ilike(singular_pattern),
             )
@@ -115,6 +117,7 @@ async def search_pages(
             Page.page_name.ilike(word_pattern),
             Page.initial_context.ilike(word_pattern),
             Page.full_context.ilike(word_pattern),
+            Page.sheet_reflection.ilike(word_pattern),
             Page.context_markdown.ilike(word_pattern),
         )
 
@@ -151,9 +154,15 @@ async def search_pages(
         + sorted(spec_pages, key=lambda p: p.page_name or "")
     )
     for page in ordered_pages:
-        # Return full content for RAG - prefer context_markdown (from sheet analyzer)
+        # Return full content for RAG - prefer sheet_reflection (Brain Mode)
         # Fall back to full_context or initial_context
-        content = page.context_markdown or page.full_context or page.initial_context or ""
+        content = (
+            page.sheet_reflection
+            or page.context_markdown
+            or page.full_context
+            or page.initial_context
+            or ""
+        )
 
         results.append({
             "page_id": str(page.id),

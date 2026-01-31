@@ -8,6 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, created_at_column, updated_at_column
 
+# pgvector support - only works with PostgreSQL
+try:
+    from pgvector.sqlalchemy import Vector
+
+    PAGE_EMBEDDING_COLUMN_TYPE = Vector(1024)
+except ImportError:
+    PAGE_EMBEDDING_COLUMN_TYPE = None  # type: ignore
+
 if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.pointer import Pointer
@@ -53,6 +61,13 @@ class Page(Base):
     sheet_reflection: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Brain Mode reflection
     page_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # detail_sheet, plan, etc.
     cross_references: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Referenced sheets
+
+    # Vector embedding for page-level semantic search (Voyage 1024 dimensions)
+    if PAGE_EMBEDDING_COLUMN_TYPE is not None:
+        page_embedding: Mapped[Optional[list[float]]] = mapped_column(
+            PAGE_EMBEDDING_COLUMN_TYPE,
+            nullable=True,
+        )
 
     # Deprecated (legacy OCR pipeline)
     semantic_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Words with bboxes, region_type, role

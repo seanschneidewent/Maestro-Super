@@ -27,6 +27,7 @@ from app.models.page import Page
 from app.models.processing_job import ProcessingJob
 from app.models.project import Project
 from app.services.core.brain_mode_processor import process_page_brain_mode
+from app.services.utils.search import embed_page_reflection, embed_regions
 from app.services.utils.storage import download_file
 
 logger = logging.getLogger(__name__)
@@ -249,18 +250,34 @@ async def process_project_pages(job_id: str):
             if page_progress_callback:
                 await page_progress_callback("brain_mode_complete", 1, 1)
 
+            # Embeddings for page + regions (optional, non-fatal)
+            sheet_reflection = result.get("sheet_reflection") or ""
+            regions_with_embeddings = await embed_regions(result.get("regions") or [])
+            result["regions"] = regions_with_embeddings
+
+            page_embedding = None
+            if sheet_reflection:
+                try:
+                    page_embedding = await embed_page_reflection(sheet_reflection)
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Page embedding failed for {page_name}: {e}")
+
             details: list[dict] = []
 
             # Save results to database
             with SessionLocal() as db:
-                db.query(Page).filter(Page.id == page_id).update({
+                update_payload = {
                     "regions": result.get("regions"),
                     "sheet_reflection": result.get("sheet_reflection"),
                     "page_type": result.get("page_type"),
                     "cross_references": result.get("cross_references"),
                     "processing_status": "completed",
                     "processed_at": datetime.utcnow(),
-                })
+                }
+                if hasattr(Page, "page_embedding"):
+                    update_payload["page_embedding"] = page_embedding
+
+                db.query(Page).filter(Page.id == page_id).update(update_payload)
                 db.commit()
 
             processed_count += 1
