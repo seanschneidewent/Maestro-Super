@@ -166,6 +166,60 @@ Return JSON with this exact structure:
   "response": "Full narrative response..."
 }}'''
 
+BRAIN_MODE_PROMPT = '''You are analyzing a construction drawing to MAP its structure.
+
+Your job: COMPREHEND this sheet. Identify its regions, understand its purpose, and create a foundation for future detailed queries.
+
+## OUTPUT
+
+1. **Regions**: Identify major structural areas with bounding boxes
+   - Details (with detail numbers)
+   - Schedules (with schedule names)
+   - Notes sections
+   - Title block
+   - Legend
+   - Plan areas, sections, elevations
+
+2. **Sheet Reflection**: Write what a superintendent would tell a colleague about this sheet
+   - What type of sheet is this?
+   - What's on it? (brief, not exhaustive)
+   - Key materials and specs mentioned
+   - Cross-references to other sheets
+   - Construction sequencing notes if relevant
+
+## REGION TYPES
+detail, schedule, notes, title_block, legend, section, elevation, plan_area, revision_block
+
+## DO NOT
+- Extract every piece of text
+- Provide pixel-perfect word bounding boxes
+- List every dimension exhaustively
+
+## DO
+- Map the structure
+- Identify what's where
+- Write searchable, intelligent summary
+- Note cross-references
+
+Return JSON:
+{
+  "page_type": "detail_sheet|floor_plan|schedule|section|elevation|notes|cover",
+  "discipline": "structural|mechanical|electrical|plumbing|architectural|civil",
+  "regions": [
+    {
+      "id": "region_001",
+      "type": "detail",
+      "bbox": {"x0": int, "y0": int, "x1": int, "y1": int},
+      "label": "EMBEDDED POST DETAIL",
+      "detail_number": "8",
+      "confidence": 0.95
+    }
+  ],
+  "sheet_reflection": "## S-401: Structural Details\\n\\n...",
+  "cross_references": ["S-101", "S-201", "A-401"]
+}
+'''
+
 
 def _extract_json_response(text: str) -> dict:
     """Best-effort JSON extraction for Gemini responses."""
@@ -180,6 +234,47 @@ def _extract_json_response(text: str) -> dict:
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             return json.loads(text[start:end + 1])
+        raise
+
+
+async def analyze_sheet_brain_mode(
+    image_bytes: bytes,
+    page_name: str,
+    discipline: str,
+) -> dict:
+    """Single Gemini call for Brain Mode comprehension."""
+    try:
+        client = _get_gemini_client()
+
+        prompt = (
+            f"{BRAIN_MODE_PROMPT}\n\n"
+            f"PAGE NAME: {page_name}\n"
+            f"DISCIPLINE: {discipline}"
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Content(
+                    parts=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                        types.Part.from_text(text=prompt),
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+                media_resolution="media_resolution_high",
+            ),
+        )
+
+        result = _extract_json_response(response.text)
+        logger.info("Brain Mode analysis complete for %s", page_name)
+        return result
+
+    except Exception as e:
+        logger.error(f"Brain Mode analysis failed: {e}")
         raise
 
 
