@@ -215,7 +215,7 @@ async def search_pages_and_regions(
                 haystack = f"{region.get('type', '')} {region.get('label', '')} {region.get('detail_number', '')}".lower()
                 tokens = [t for t in query.lower().split() if t]
                 if tokens and any(t in haystack for t in tokens):
-                    similarity = 0.5
+                    similarity = max(similarity_threshold, 0.5)
 
             if similarity >= similarity_threshold:
                 region_copy = dict(region)
