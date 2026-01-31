@@ -49,6 +49,12 @@ class Page(Base):
     processed_ocr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Sheet-analyzer pipeline fields (Brain Mode)
+    regions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Structural regions
+    sheet_reflection: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Brain Mode reflection
+    page_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # detail_sheet, plan, etc.
+    cross_references: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Referenced sheets
+
+    # Deprecated (legacy OCR pipeline)
     semantic_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Words with bboxes, region_type, role
     context_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Gemini-generated sheet summary
     details: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Extracted detail nodes from markdown
