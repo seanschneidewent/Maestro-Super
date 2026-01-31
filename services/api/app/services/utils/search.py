@@ -155,7 +155,7 @@ async def vector_search_pages(
             JOIN disciplines ON pages.discipline_id = disciplines.id
             WHERE disciplines.project_id = CAST(:project_id AS uuid)
               AND pages.page_embedding IS NOT NULL
-            ORDER BY pages.page_embedding <-> CAST(:query_embedding AS vector)
+            ORDER BY pages.page_embedding <=> CAST(:query_embedding AS vector)
             LIMIT :limit
         """),
         {
