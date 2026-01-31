@@ -15,9 +15,11 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from io import BytesIO
 from typing import AsyncGenerator, Callable, Optional
 from uuid import UUID
 
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -169,6 +171,7 @@ async def process_project_pages(job_id: str):
                 "page_name": p.page_name,
                 "page_image_path": p.page_image_path,
                 "discipline_name": p.discipline.display_name if p.discipline else None,
+                "has_semantic_index": bool(p.semantic_index),
             }
             for p in pages
         ]
@@ -225,6 +228,8 @@ async def process_project_pages(job_id: str):
         try:
             # Download page image
             png_bytes = await download_file(page_image_path)
+            image = Image.open(BytesIO(png_bytes))
+            image_width, image_height = image.size
 
             # Create progress callback to emit SSE events during page processing
             async def page_progress_callback(stage: str, current: int, total: int):
@@ -274,6 +279,13 @@ async def process_project_pages(job_id: str):
                     "processing_status": "completed",
                     "processed_at": datetime.utcnow(),
                 }
+                if not page_data.get("has_semantic_index"):
+                    update_payload["semantic_index"] = {
+                        "image_width": image_width,
+                        "image_height": image_height,
+                        "word_count": 0,
+                        "words": [],
+                    }
                 if hasattr(Page, "page_embedding"):
                     update_payload["page_embedding"] = page_embedding
 
