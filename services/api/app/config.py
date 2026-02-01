@@ -2,6 +2,14 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# ---------------------------------------------------------------------------
+# Model Constants
+# Centralized model names to avoid hardcoding throughout the codebase.
+# ---------------------------------------------------------------------------
+BRAIN_MODE_MODEL = "gemini-2.0-flash"
+QUERY_VISION_MODEL = "gemini-2.0-flash"
+AGENT_QUERY_MODEL = "gemini-3-flash-preview"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""

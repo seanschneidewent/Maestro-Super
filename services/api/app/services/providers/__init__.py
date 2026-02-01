@@ -4,6 +4,7 @@ from app.services.providers.claude import generate_response, stream_response
 from app.services.providers.gemini import (
     analyze_page_pass_1,
     analyze_pointer,
+    analyze_sheet_brain_mode,
     run_agent_query as gemini_run_agent_query,
 )
 from app.services.providers.ocr import (
@@ -25,6 +26,7 @@ __all__ = [
     # gemini
     "analyze_page_pass_1",
     "analyze_pointer",
+    "analyze_sheet_brain_mode",
     "gemini_run_agent_query",
     # ocr
     "crop_pdf_region",
