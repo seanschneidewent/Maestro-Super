@@ -6,37 +6,15 @@ from __future__ import annotations
 
 import logging
 from io import BytesIO
-from typing import Any
 
 from PIL import Image
 from google import genai
 from google.genai import types
 
-from app.config import get_settings
+from app.config import get_settings, QUERY_VISION_MODEL
+from app.services.utils.parsing import coerce_int, extract_json_response
 
 logger = logging.getLogger(__name__)
-
-
-def _coerce_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(round(float(value)))
-    except Exception:
-        return default
-
-
-def _extract_json_response(text: str) -> dict:
-    if not text:
-        raise ValueError("Empty response from Gemini")
-    try:
-        import json
-        return json.loads(text)
-    except Exception:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            import json
-            return json.loads(text[start:end + 1])
-        raise
 
 
 def _get_gemini_client() -> genai.Client:
@@ -95,10 +73,10 @@ def _build_query_prompt(
 def crop_region(image_bytes: bytes, bbox: dict, padding: int = 50) -> tuple[bytes, dict]:
     """Crop image to region bbox with padding. Returns (bytes, crop_bbox)."""
     image = Image.open(BytesIO(image_bytes))
-    x0 = _coerce_int(bbox.get("x0"), 0)
-    y0 = _coerce_int(bbox.get("y0"), 0)
-    x1 = _coerce_int(bbox.get("x1"), 0)
-    y1 = _coerce_int(bbox.get("y1"), 0)
+    x0 = coerce_int(bbox.get("x0"), 0)
+    y0 = coerce_int(bbox.get("y0"), 0)
+    x1 = coerce_int(bbox.get("x1"), 0)
+    y1 = coerce_int(bbox.get("y1"), 0)
 
     x0 = max(0, x0 - padding)
     y0 = max(0, y0 - padding)
@@ -150,7 +128,7 @@ async def query_with_vision(
 
     client = _get_gemini_client()
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model=QUERY_VISION_MODEL,
         contents=[
             types.Content(
                 parts=[
@@ -166,7 +144,7 @@ async def query_with_vision(
         ),
     )
 
-    result = _extract_json_response(response.text)
+    result = extract_json_response(response.text)
 
     if not isinstance(result, dict):
         result = {}

@@ -9,7 +9,8 @@ from typing import Any, AsyncIterator
 from google import genai
 from google.genai import types
 
-from app.config import get_settings
+from app.config import get_settings, BRAIN_MODE_MODEL, AGENT_QUERY_MODEL
+from app.services.utils.parsing import extract_json_response
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -221,22 +222,6 @@ Return JSON:
 '''
 
 
-def _extract_json_response(text: str) -> dict:
-    """Best-effort JSON extraction for Gemini responses."""
-    if not text:
-        raise ValueError("Empty response from Gemini")
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # Try to extract first JSON object substring
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start:end + 1])
-        raise
-
-
 async def analyze_sheet_brain_mode(
     image_bytes: bytes,
     page_name: str,
@@ -253,7 +238,7 @@ async def analyze_sheet_brain_mode(
         )
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=BRAIN_MODE_MODEL,
             contents=[
                 types.Content(
                     parts=[
@@ -269,7 +254,7 @@ async def analyze_sheet_brain_mode(
             ),
         )
 
-        result = _extract_json_response(response.text)
+        result = extract_json_response(response.text)
         logger.info("Brain Mode analysis complete for %s", page_name)
         return result
 
@@ -336,7 +321,7 @@ async def run_agent_query(
         )
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -424,7 +409,7 @@ async def select_pages_for_verification(
         )
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -432,7 +417,7 @@ async def select_pages_for_verification(
             ),
         )
 
-        result = _extract_json_response(response.text)
+        result = extract_json_response(response.text)
 
         input_tokens = 0
         output_tokens = 0
@@ -533,12 +518,12 @@ async def explore_concept_with_vision(
             pass
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=parts)],
             config=types.GenerateContentConfig(**config_kwargs),
         )
 
-        result = _extract_json_response(response.text)
+        result = extract_json_response(response.text)
 
         input_tokens = 0
         output_tokens = 0
@@ -645,7 +630,7 @@ async def explore_concept_with_vision_streaming(
                 pass
 
         stream = client.models.generate_content_stream(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=parts)],
             config=types.GenerateContentConfig(**config_kwargs),
         )
@@ -674,7 +659,7 @@ async def explore_concept_with_vision_streaming(
                 else:
                     accumulated_text += text
 
-        result = _extract_json_response(accumulated_text)
+        result = extract_json_response(accumulated_text)
 
         input_tokens = 0
         output_tokens = 0
@@ -725,7 +710,7 @@ async def _analyze_page_pass_1_impl(
     )
 
     response = client.models.generate_content(
-        model="gemini-3-flash-preview",
+        model=AGENT_QUERY_MODEL,
         contents=[
             types.Content(
                 parts=[
@@ -827,7 +812,7 @@ Return JSON:
 }}"""
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[
                 types.Content(
                     parts=[

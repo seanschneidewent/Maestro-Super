@@ -8,28 +8,23 @@ to power query-time precision.
 from __future__ import annotations
 
 import logging
+import time
 from io import BytesIO
-from typing import Any
 
 from PIL import Image
 
 from app.services.providers.gemini import analyze_sheet_brain_mode
+from app.services.utils.parsing import coerce_int
+from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
 
-def _coerce_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(round(float(value)))
-    except Exception:
-        return default
-
-
 def _normalize_bbox(bbox: dict, width: int, height: int) -> dict:
-    x0 = _coerce_int(bbox.get("x0"), 0)
-    y0 = _coerce_int(bbox.get("y0"), 0)
-    x1 = _coerce_int(bbox.get("x1"), 0)
-    y1 = _coerce_int(bbox.get("y1"), 0)
+    x0 = coerce_int(bbox.get("x0"), 0)
+    y0 = coerce_int(bbox.get("y0"), 0)
+    x1 = coerce_int(bbox.get("x1"), 0)
+    y1 = coerce_int(bbox.get("y1"), 0)
 
     x0 = max(0, min(width, x0))
     y0 = max(0, min(height, y0))
@@ -66,11 +61,19 @@ async def process_page_brain_mode(
     image = Image.open(BytesIO(image_bytes))
     width, height = image.size
 
-    result = await analyze_sheet_brain_mode(
+    # Brain Mode analysis with retry logic and timing
+    start_time = time.perf_counter()
+    result = await with_retry(
+        analyze_sheet_brain_mode,
         image_bytes=image_bytes,
         page_name=page_name,
         discipline=discipline_name,
+        max_attempts=3,
+        base_delay=1.0,
+        exceptions=(Exception,),
     )
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.info("[Brain Mode] %s: analysis completed in %.0fms", page_name, elapsed_ms)
 
     regions = result.get("regions") if isinstance(result, dict) else None
     if not isinstance(regions, list):
