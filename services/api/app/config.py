@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Model Constants
 # Centralized model names to avoid hardcoding throughout the codebase.
 # ---------------------------------------------------------------------------
-BRAIN_MODE_MODEL = "gemini-2.5-flash-preview-04-17"
+BRAIN_MODE_MODEL = "gemini-3-flash-preview"
 BRAIN_MODE_THINKING_LEVEL = "high"
 USE_AGENTIC_VISION = True
 QUERY_VISION_MODEL = "gemini-2.0-flash"
