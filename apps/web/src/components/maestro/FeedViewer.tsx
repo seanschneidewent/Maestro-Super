@@ -8,6 +8,7 @@ import { AgentSelectedPage } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
 import { TextHighlightOverlay } from './TextHighlightOverlay';
+import { FindingBboxOverlay } from './FindingBboxOverlay';
 import type { AgentTraceStep, AgentFinding, AgentCrossReference } from '../../types';
 
 // Set up PDF.js worker
@@ -19,7 +20,7 @@ const RENDER_SCALE = 3;
 // Feed item types
 export type FeedItem =
   | { type: 'user-query'; id: string; text: string; mode?: 'fast' | 'deep'; timestamp: number }
-  | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
+  | { type: 'pages'; id: string; pages: AgentSelectedPage[]; findings?: AgentFinding[]; timestamp: number }
   | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; mode?: 'fast' | 'deep'; elapsedTime?: number; timestamp: number }
   | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; mode?: 'fast' | 'deep'; timestamp: number }
   | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
@@ -274,9 +275,10 @@ async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null>
 const ExpandedPageModal: React.FC<{
   page: AgentSelectedPage;
   pageImage: PageImage;
+  findings: AgentFinding[];
   onClose: () => void;
   tutorialStep?: string | null;
-}> = ({ page, pageImage, onClose, tutorialStep }) => {
+}> = ({ page, pageImage, findings, onClose, tutorialStep }) => {
   // Container size for fit calculation
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -410,6 +412,12 @@ const ExpandedPageModal: React.FC<{
                 />
               )}
 
+              <FindingBboxOverlay
+                findings={findings}
+                pageId={page.pageId}
+                interactive={true}
+              />
+
               {/* Legacy pointer overlays */}
               {page.pointers.map((pointer) => (
                 <div
@@ -438,10 +446,11 @@ const ExpandedPageModal: React.FC<{
 // Pages cluster with sequential loading to avoid memory pressure
 const PagesCluster: React.FC<{
   pages: AgentSelectedPage[];
+  findings: AgentFinding[];
   containerWidth: number;
-  onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
+  onTap: (page: AgentSelectedPage, pageImage: PageImage, findings: AgentFinding[]) => void;
   isFirstCluster?: boolean;
-}> = ({ pages, containerWidth, onTap, isFirstCluster = false }) => {
+}> = ({ pages, findings, containerWidth, onTap, isFirstCluster = false }) => {
   // Track loaded images and current loading index
   const [loadedImages, setLoadedImages] = useState<Map<string, PageImage>>(new Map());
   const [loadingIndex, setLoadingIndex] = useState(0);
@@ -483,6 +492,7 @@ const PagesCluster: React.FC<{
           <FeedPageItemDisplay
             key={page.pageId}
             page={page}
+            findings={findings}
             pageImage={pageImage}
             isLoading={isLoading}
             isWaiting={isWaiting}
@@ -499,13 +509,14 @@ const PagesCluster: React.FC<{
 // Display component for a single page (doesn't handle loading itself)
 const FeedPageItemDisplay: React.FC<{
   page: AgentSelectedPage;
+  findings: AgentFinding[];
   pageImage: PageImage | null | undefined;
   isLoading: boolean;
   isWaiting: boolean;
   containerWidth: number;
-  onTap: (page: AgentSelectedPage, pageImage: PageImage) => void;
+  onTap: (page: AgentSelectedPage, pageImage: PageImage, findings: AgentFinding[]) => void;
   isFirstPage?: boolean;
-}> = ({ page, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
+}> = ({ page, findings, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
   // Loading or waiting state
   if (isLoading || isWaiting || !pageImage) {
     return (
@@ -534,7 +545,7 @@ const FeedPageItemDisplay: React.FC<{
       </div>
 
       <button
-        onClick={() => onTap(page, pageImage)}
+        onClick={() => onTap(page, pageImage, findings)}
         className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden w-full"
         {...(isFirstPage && { 'data-tutorial': 'first-page-result' })}
       >
@@ -555,6 +566,11 @@ const FeedPageItemDisplay: React.FC<{
             originalHeight={page.imageHeight}
           />
         )}
+
+        <FindingBboxOverlay
+          findings={findings}
+          pageId={page.pageId}
+        />
 
         {/* Legacy pointer overlays */}
         {page.pointers.map((pointer) => (
@@ -670,11 +686,12 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   const [expandedPage, setExpandedPage] = useState<{
     page: AgentSelectedPage;
     pageImage: PageImage;
+    findings: AgentFinding[];
   } | null>(null);
 
   // Handler for opening expanded view
-  const handlePageTap = useCallback((page: AgentSelectedPage, pageImage: PageImage) => {
-    setExpandedPage({ page, pageImage });
+  const handlePageTap = useCallback((page: AgentSelectedPage, pageImage: PageImage, findings: AgentFinding[]) => {
+    setExpandedPage({ page, pageImage, findings });
   }, []);
 
   // Handler for closing expanded view
@@ -791,6 +808,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                 <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
                   <PagesCluster
                     pages={item.pages}
+                    findings={item.findings || []}
                     containerWidth={containerWidth}
                     onTap={handlePageTap}
                     isFirstCluster={isFirst}
@@ -928,6 +946,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
         <ExpandedPageModal
           page={expandedPage.page}
           pageImage={expandedPage.pageImage}
+          findings={expandedPage.findings}
           onClose={handleCloseExpanded}
           tutorialStep={tutorialStep}
         />
