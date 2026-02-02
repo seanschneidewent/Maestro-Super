@@ -15,6 +15,7 @@ import openai
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
+from app.models.discipline import Discipline
 from app.models.page import Page
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,22 @@ def _load_pages_for_vision(db: Session, page_ids: list[str]) -> list[Page]:
         .all()
     )
     return pages
+
+
+def _extract_cross_reference_sheet_names(cross_references: Any) -> set[str]:
+    if not isinstance(cross_references, list):
+        return set()
+    names: set[str] = set()
+    for ref in cross_references:
+        if isinstance(ref, str):
+            sheet_name = ref.strip()
+        elif isinstance(ref, dict):
+            sheet_name = str(ref.get("sheet") or "").strip()
+        else:
+            sheet_name = ""
+        if sheet_name:
+            names.add(sheet_name)
+    return names
 
 
 # Tool definitions in OpenAI format
@@ -538,6 +555,28 @@ async def run_agent_query_gemini(
         yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
         trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
         page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+
+    # Expand with cross-referenced sheets from top matches (lower priority).
+    if page_ids:
+        pages_for_cross_refs = _load_pages_for_vision(db, page_ids[:3])
+        cross_ref_sheet_names: set[str] = set()
+        for page in pages_for_cross_refs:
+            cross_ref_sheet_names.update(_extract_cross_reference_sheet_names(page.cross_references))
+
+        if cross_ref_sheet_names:
+            cross_ref_pages = (
+                db.query(Page)
+                .join(Discipline)
+                .filter(
+                    Discipline.project_id == project_id,
+                    Page.page_name.in_(list(cross_ref_sheet_names)),
+                )
+                .order_by(Page.page_name)
+                .limit(3)
+                .all()
+            )
+            cross_ref_ids = [str(p.id) for p in cross_ref_pages]
+            page_ids = page_ids + [pid for pid in cross_ref_ids if pid not in page_ids]
 
     # De-dupe page IDs while preserving order
     page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))

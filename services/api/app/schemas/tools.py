@@ -46,8 +46,14 @@ class PageContext(BaseModel):
 
     page_id: str = Field(alias="pageId")
     page_name: str = Field(alias="pageName")
-    discipline: str
+    discipline: str | None
     summary: str | None
+    context_markdown: str | None = Field(alias="contextMarkdown", default=None)
+    sheet_reflection: str | None = Field(alias="sheetReflection", default=None)
+    sheet_info: dict | None = Field(alias="sheetInfo", default=None)
+    questions_answered: list[str] | None = Field(alias="questionsAnswered", default=None)
+    cross_references: list[str] | None = Field(alias="crossReferences", default=None)
+    region_count: int = Field(alias="regionCount", default=0)
     pointers: list[PointerSummary]
 
     model_config = ConfigDict(populate_by_name=True)

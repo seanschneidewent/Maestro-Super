@@ -261,9 +261,13 @@ async def process_project_pages(job_id: str):
             result["regions"] = regions_with_embeddings
 
             page_embedding = None
-            if sheet_reflection:
+            if sheet_reflection or result.get("index") or result.get("questions_this_sheet_answers"):
                 try:
-                    page_embedding = await embed_page_reflection(sheet_reflection)
+                    page_embedding = await embed_page_reflection(
+                        sheet_reflection,
+                        master_index=result.get("index"),
+                        questions_answered=result.get("questions_this_sheet_answers"),
+                    )
                 except Exception as e:
                     logger.warning(f"[{job_id}] Page embedding failed for {page_name}: {e}")
 

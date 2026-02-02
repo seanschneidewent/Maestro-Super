@@ -2,6 +2,7 @@
 
 import logging
 import math
+from typing import Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -101,10 +102,77 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
 
 
-async def embed_page_reflection(sheet_reflection: str) -> list[float] | None:
-    if not sheet_reflection:
+def _to_text_list(values: Any, *, lowercase: bool = False) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    for value in values:
+        text = str(value).strip() if value is not None else ""
+        if lowercase:
+            text = text.lower()
+        if text:
+            result.append(text)
+    return result
+
+
+def _get_page_query_boost(page: Page, query_lower: str, query_tokens: list[str]) -> float:
+    boost = 1.0
+
+    # Boost when query terms align with Agentic Vision master index keywords/items.
+    master_index = page.master_index if isinstance(page.master_index, dict) else {}
+    keywords = _to_text_list(master_index.get("keywords"), lowercase=True)
+    item_terms: list[str] = []
+    items = master_index.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                item_name = item.get("name")
+                if item_name:
+                    item_terms.append(str(item_name).strip().lower())
+            elif item is not None:
+                item_terms.append(str(item).strip().lower())
+
+    all_terms = [term for term in [*keywords, *item_terms] if term]
+    if query_tokens and all_terms and any(token in term for token in query_tokens for term in all_terms):
+        boost = max(boost, 1.2)
+
+    # Boost when question intent directly matches known sheet-level Q&A prompts.
+    questions = _to_text_list(page.questions_answered, lowercase=True)
+    if questions and (
+        (query_lower and any(query_lower in q for q in questions))
+        or any(token in q for token in query_tokens for q in questions)
+    ):
+        boost = max(boost, 1.3)
+
+    return boost
+
+
+async def embed_page_reflection(
+    sheet_reflection: str,
+    master_index: dict | None = None,
+    questions_answered: list[str] | None = None,
+) -> list[float] | None:
+    if not sheet_reflection and not master_index and not questions_answered:
         return None
-    return await embed_text(sheet_reflection)
+
+    parts: list[str] = []
+    if sheet_reflection:
+        parts.append(sheet_reflection)
+
+    if isinstance(master_index, dict):
+        keywords = _to_text_list(master_index.get("keywords"))
+        if keywords:
+            parts.append(" ".join(keywords[:20]))
+
+    if isinstance(questions_answered, list):
+        question_texts = [q for q in _to_text_list(questions_answered) if q]
+        if question_texts:
+            parts.extend(question_texts[:5])
+
+    text = " ".join(parts).strip()
+    if not text:
+        return None
+    return await embed_text(text)
 
 
 async def embed_regions(regions: list[dict] | None) -> list[dict]:
@@ -193,6 +261,8 @@ async def search_pages_and_regions(
     Returns: {page_id: [region1, region2, ...]}
     """
     query_embedding = await embed_text(query)
+    query_lower = query.lower()
+    query_tokens = [t for t in query_lower.split() if t]
 
     pages = await vector_search_pages(
         db,
@@ -203,6 +273,7 @@ async def search_pages_and_regions(
 
     results: dict[str, list[dict]] = {}
     for page in pages:
+        page_boost = _get_page_query_boost(page, query_lower=query_lower, query_tokens=query_tokens)
         matching_regions: list[dict] = []
         for region in page.regions or []:
             if not isinstance(region, dict):
@@ -213,14 +284,14 @@ async def search_pages_and_regions(
             if similarity <= 0.0:
                 # Fallback: keyword match on label/type
                 haystack = f"{region.get('type', '')} {region.get('label', '')} {region.get('detail_number', '')}".lower()
-                tokens = [t for t in query.lower().split() if t]
-                if tokens and any(t in haystack for t in tokens):
+                if query_tokens and any(t in haystack for t in query_tokens):
                     similarity = max(similarity_threshold, 0.5)
 
-            if similarity >= similarity_threshold:
+            adjusted_similarity = similarity * page_boost
+            if adjusted_similarity >= similarity_threshold:
                 region_copy = dict(region)
                 region_copy.pop("embedding", None)
-                region_copy["_similarity"] = similarity
+                region_copy["_similarity"] = adjusted_similarity
                 matching_regions.append(region_copy)
 
         if matching_regions:

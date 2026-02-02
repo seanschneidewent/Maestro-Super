@@ -241,14 +241,38 @@ async def get_page_context(db: Session, page_id: str) -> PageContext | None:
     if not page:
         return None
 
-    # Use full_context if available, fall back to initial_context
-    summary = page.full_context or page.initial_context
+    # Prefer Agentic Vision summary while preserving legacy fallback behavior.
+    summary = page.sheet_reflection or page.full_context or page.initial_context or page.context_markdown
+
+    questions_answered = None
+    if isinstance(page.questions_answered, list):
+        questions_answered = [str(q) for q in page.questions_answered if q is not None]
+
+    cross_references: list[str] | None = None
+    if isinstance(page.cross_references, list):
+        parsed_refs: list[str] = []
+        for ref in page.cross_references:
+            if isinstance(ref, str):
+                sheet_name = ref.strip()
+            elif isinstance(ref, dict):
+                sheet_name = str(ref.get("sheet") or "").strip()
+            else:
+                sheet_name = ""
+            if sheet_name:
+                parsed_refs.append(sheet_name)
+        cross_references = parsed_refs or None
 
     return PageContext(
         page_id=str(page.id),
         page_name=page.page_name,
-        discipline=page.discipline.display_name,
+        discipline=page.discipline.display_name if page.discipline else None,
         summary=summary,
+        context_markdown=page.context_markdown,
+        sheet_reflection=page.sheet_reflection,
+        sheet_info=page.sheet_info if isinstance(page.sheet_info, dict) else None,
+        questions_answered=questions_answered,
+        cross_references=cross_references,
+        region_count=len(page.regions) if isinstance(page.regions, list) else 0,
         pointers=[
             PointerSummary(
                 pointer_id=str(p.id),
