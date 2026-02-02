@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any, AsyncIterator
 
 import openai
@@ -23,6 +24,15 @@ from app.services.providers.gemini import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _log_timing(phase: str, start_time: float, extra: str = "") -> float:
+    """Log phase timing in milliseconds. Returns current time for chaining."""
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    suffix = f" ({extra})" if extra else ""
+    logger.info(f"[TIMING] {phase}: {elapsed_ms:.1f}ms{suffix}")
+    return time.perf_counter()
+
 
 VISION_PAGE_LIMIT = 3
 
@@ -510,6 +520,10 @@ async def run_agent_query_gemini(
         resolve_highlights,
     )
 
+    # Start timing the entire query
+    query_start = time.perf_counter()
+    phase_start = query_start
+
     # 1. Pre-fetch: Emit tool calls for frontend status
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
     yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
@@ -523,6 +537,8 @@ async def run_agent_query_gemini(
     # Yield pre-fetch results
     yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
     yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+
+    phase_start = _log_timing("pre-fetch (project_structure + search_pages)", phase_start, f"{len(page_results)} pages")
 
     # Initialize trace
     trace: list[dict] = [
@@ -573,6 +589,8 @@ async def run_agent_query_gemini(
     yield {"type": "tool_result", "tool": "select_pages_for_verification", "result": phase1}
     trace.append({"type": "tool_result", "tool": "select_pages_for_verification", "result": phase1})
 
+    phase_start = _log_timing("Phase 1 (text selection)", phase_start)
+
     page_ids = phase1.get("page_ids") or []
     if not page_ids:
         page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
@@ -597,6 +615,8 @@ async def run_agent_query_gemini(
             yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
+    phase_start = _log_timing("select_pages", phase_start, f"{len(page_ids)} pages")
+
     # 5. Phase 2: Agentic vision exploration (top 2-3 pages)
     vision_page_ids = page_ids[:VISION_PAGE_LIMIT]
     vision_pages_raw = _load_pages_for_vision(db, vision_page_ids)
@@ -606,6 +626,7 @@ async def run_agent_query_gemini(
     query_tokens = _extract_query_tokens(query)
 
     vision_payload = []
+    image_load_start = time.perf_counter()
     if vision_pages_raw:
         from app.services.utils.storage import download_file
         from app.services.providers.pdf_renderer import pdf_page_to_image
@@ -640,6 +661,8 @@ async def run_agent_query_gemini(
                 "semantic_index": filtered_semantic,
                 "image_bytes": image_bytes,
             })
+
+    phase_start = _log_timing("image loading", image_load_start, f"{len(vision_payload)} pages")
 
     vision_result = {}
     if vision_payload:
@@ -677,6 +700,8 @@ async def run_agent_query_gemini(
 
         yield {"type": "tool_result", "tool": "explore_concept_with_vision", "result": vision_result}
         trace.append({"type": "tool_result", "tool": "explore_concept_with_vision", "result": vision_result})
+
+        phase_start = _log_timing("Phase 2 (vision exploration)", phase_start, f"{len(vision_payload)} pages")
 
     # 6. Resolve highlights from vision findings
     resolved_highlights = []
@@ -729,6 +754,8 @@ async def run_agent_query_gemini(
                 trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs_list}})
                 trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}})
 
+    phase_start = _log_timing("resolve highlights", phase_start)
+
     # 7. Emit response text
     response_text = vision_result.get("response") or ""
     if not response_text and page_ids:
@@ -742,6 +769,8 @@ async def run_agent_query_gemini(
     usage_phase2 = vision_result.get("usage") or {}
     display_title = phase1.get("chat_title") or vision_result.get("concept_name")
     conversation_title = phase1.get("conversation_title") or display_title
+
+    _log_timing("TOTAL query", query_start, f"{len(page_ids)} pages, {len(vision_payload)} vision")
 
     yield {
         "type": "done",
