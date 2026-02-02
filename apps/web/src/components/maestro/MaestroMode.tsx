@@ -320,6 +320,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           type: 'pages',
           id: crypto.randomUUID(),
           pages: query.pages,
+          findings: query.conceptResponse?.findings || [],
           timestamp: Date.now(),
         });
       }
@@ -517,20 +518,22 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
       // Add pages if available
       const cachedPages = queryPagesCache.get(q.id);
+      const pageNameLookup = cachedPages
+        ? new Map<string, string>(cachedPages.map((page) => [page.pageId, page.pageName]))
+        : undefined;
+      const conceptData = extractConceptDataFromTrace(q.trace, pageNameLookup);
+
       if (cachedPages && cachedPages.length > 0) {
         newFeedItems.push({
           type: 'pages',
           id: `feed-pages-${q.id}`,
           pages: cachedPages,
+          findings: conceptData?.findings || [],
           timestamp: new Date(q.createdAt).getTime() + 1,
         });
       }
 
       // Add structured findings if available in trace
-      const pageNameLookup = cachedPages
-        ? new Map(cachedPages.map((page) => [page.pageId, page.pageName]))
-        : undefined;
-      const conceptData = extractConceptDataFromTrace(q.trace, pageNameLookup);
       if (conceptData && (conceptData.findings?.length || conceptData.gaps?.length || conceptData.crossReferences?.length)) {
         newFeedItems.push({
           type: 'findings',
