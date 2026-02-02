@@ -321,7 +321,19 @@ export interface PageResponse {
   fullPageText?: string;
   ocrData?: OcrSpan[];
   processedOcr: boolean;
-  // Brain Mode fields (sheet-analyzer pipeline)
+
+  // Agentic Vision fields
+  regions?: Region[];
+  sheetReflection?: string;
+  pageType?: string;
+  crossReferences?: string[];
+  sheetInfo?: SheetInfo;
+  masterIndex?: MasterIndex;
+  questionsAnswered?: string[];
+  processingTimeMs?: number;
+  processingError?: string;
+
+  // Legacy (kept for backwards compat)
   semanticIndex?: SemanticIndex;
   contextMarkdown?: string;
   details?: PageDetail[];
@@ -329,6 +341,50 @@ export interface PageResponse {
   processedAt?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SheetInfo {
+  number: string;
+  title: string;
+  fullTitle: string;
+  scale?: string;
+  date?: string;
+  discipline?: string;
+}
+
+export interface MasterIndex {
+  keywords?: string[];
+  areasShown?: Array<{ name: string; notes?: string }>;
+  items?: Array<{
+    name: string;
+    action?: string;
+    location?: string;
+    keynote?: string;
+    details?: string;
+  }>;
+  keynotes?: Array<{ number: string; text: string }>;
+  dimensions?: string[];
+  specifications?: string[];
+  crossReferences?: Array<{ sheet: string; context?: string }>;
+}
+
+export interface Region {
+  id: string;
+  type: 'detail' | 'legend' | 'notes' | 'title_block' | 'schedule' | 'plan' | 'general';
+  detailNumber?: string;
+  label: string;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+  confidence?: number;
+  scale?: string;
+  shows?: string;
+  regionIndex?: {
+    areas?: string[];
+    items?: Array<{ name: string; action?: string }>;
+    materials?: string[];
+    keynotesShown?: string[];
+    dimensions?: string[];
+    crossRefs?: string[];
+  };
 }
 
 // Pointer types (matching backend schema)
