@@ -8,6 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, created_at_column, updated_at_column
 
+# pgvector support - only works with PostgreSQL
+try:
+    from pgvector.sqlalchemy import Vector
+
+    PAGE_EMBEDDING_COLUMN_TYPE = Vector(1024)
+except ImportError:
+    PAGE_EMBEDDING_COLUMN_TYPE = None  # type: ignore
+
 if TYPE_CHECKING:
     from app.models.discipline import Discipline
     from app.models.pointer import Pointer
@@ -44,14 +52,38 @@ class Page(Base):
     # PNG pre-rendering pipeline fields
     page_image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Storage path to PNG
     page_image_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    full_page_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Full OCR text
-    ocr_data: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Word positions [{text, x, y, w, h}]
-    processed_ocr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Sheet-analyzer pipeline fields (Brain Mode)
-    semantic_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Words with bboxes, region_type, role
-    context_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Gemini-generated sheet summary
-    details: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Extracted detail nodes from markdown
+    # =============================================================================
+    # LEGACY COLUMNS - No longer populated by Agentic Vision pipeline
+    # Kept for historical data compatibility. Do not use for new features.
+    # =============================================================================
+    # Legacy OCR data (from EasyOCR pipeline)
+    full_page_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # LEGACY
+    ocr_data: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # LEGACY
+    processed_ocr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # LEGACY
+
+    # Agentic Vision output fields
+    regions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Structural regions
+    sheet_reflection: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Brain Mode reflection
+    page_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # detail_sheet, plan, etc.
+    cross_references: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Referenced sheets
+    sheet_info: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Sheet metadata
+    master_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Aggregated RAG index
+    questions_answered: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Suggested QA prompts
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Brain Mode latency
+    processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Last processing failure
+
+    # Vector embedding for page-level semantic search (Voyage 1024 dimensions)
+    if PAGE_EMBEDDING_COLUMN_TYPE is not None:
+        page_embedding: Mapped[Optional[list[float]]] = mapped_column(
+            PAGE_EMBEDDING_COLUMN_TYPE,
+            nullable=True,
+        )
+
+    # Legacy semantic analysis columns (still written for backwards compatibility)
+    semantic_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # LEGACY
+    context_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # LEGACY
+    details: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # LEGACY
     processing_status: Mapped[Optional[str]] = mapped_column(String(50), default="pending", nullable=True)  # pending|processing|completed|failed
     processed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)  # When processing completed
 

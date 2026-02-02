@@ -8,23 +8,21 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Any, AsyncIterator
 
 import openai
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
+from app.models.discipline import Discipline
 from app.models.page import Page
-from app.services.providers.gemini import (
-    run_agent_query as gemini_agent_query,
-    select_pages_for_verification,
-    explore_concept_with_vision,
-    explore_concept_with_vision_streaming,
-)
 
 logger = logging.getLogger(__name__)
 
 VISION_PAGE_LIMIT = 3
+REGIONS_PER_PAGE_LIMIT = 3
+REGION_QUERY_LIMIT = 6
 
 
 def _build_history_context(history_messages: list[dict[str, Any]] | None) -> str:
@@ -47,6 +45,19 @@ def _build_viewing_context_str(viewing_context: dict[str, Any] | None) -> str:
     if discipline:
         return f"User is viewing page {page_name} from {discipline}"
     return f"User is viewing page {page_name}"
+
+
+def _page_sort_key(page_name: str) -> list:
+    if not page_name:
+        return []
+    parts = re.split(r"(\d+)", page_name)
+    key: list = []
+    for part in parts:
+        if part.isdigit():
+            key.append(int(part))
+        else:
+            key.append(part.lower())
+    return key
 
 
 def _extract_query_tokens(query: str) -> list[str]:
@@ -158,6 +169,22 @@ def _load_pages_for_vision(db: Session, page_ids: list[str]) -> list[Page]:
         .all()
     )
     return pages
+
+
+def _extract_cross_reference_sheet_names(cross_references: Any) -> set[str]:
+    if not isinstance(cross_references, list):
+        return set()
+    names: set[str] = set()
+    for ref in cross_references:
+        if isinstance(ref, str):
+            sheet_name = ref.strip()
+        elif isinstance(ref, dict):
+            sheet_name = str(ref.get("sheet") or "").strip()
+        else:
+            sheet_name = ""
+        if sheet_name:
+            names.add(sheet_name)
+    return names
 
 
 # Tool definitions in OpenAI format
@@ -492,100 +519,83 @@ async def run_agent_query_gemini(
     viewing_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
-    Two-phase agent query using Gemini:
-
-    Phase 1 (text-only):
-    - Prefetch search_pages + project structure
-    - Select candidate pages and build a verification plan
-
-    Phase 2 (agentic vision):
-    - Load top 2-3 page images + filtered semantic_index
-    - Explore concept with vision + code execution
-    - Return structured findings with semantic_refs or bbox highlights
+    Query-time vision flow:
+    - Vector search pages + regions
+    - Crop to relevant regions
+    - Answer with precise highlights
     """
-    from app.services.tools import (
-        search_pages,
-        get_project_structure_summary,
-        select_pages,
-        resolve_highlights,
-    )
+    from app.services.core.query_vision import crop_region, query_with_vision
+    from app.services.tools import search_pages, select_pages
+    from app.services.utils.search import search_pages_and_regions
 
-    # 1. Pre-fetch: Emit tool calls for frontend status
-    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
-    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+    trace: list[dict] = []
 
-    # Run both in parallel (no more pointer search)
-    project_structure_dict, page_results = await asyncio.gather(
-        get_project_structure_summary(db, project_id=project_id),
-        search_pages(db, query=query, project_id=project_id, limit=10),
-    )
-
-    # Yield pre-fetch results
-    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict}
-    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
-
-    # Initialize trace
-    trace: list[dict] = [
-        {"type": "tool_call", "tool": "list_project_pages", "input": {}},
-        {"type": "tool_result", "tool": "list_project_pages", "result": project_structure_dict},
-        {"type": "tool_call", "tool": "search_pages", "input": {"query": query}},
-        {"type": "tool_result", "tool": "search_pages", "result": page_results},
-    ]
-
-    # 2. Build context strings for Gemini
-    history_context = _build_history_context(history_messages)
-    if history_context:
-        logger.info(f"Built history context from {len(history_messages or [])} messages")
-    viewing_context_str = _build_viewing_context_str(viewing_context)
-
-    # Enrich page results with details for Phase 1 (text-only)
-    page_ids_from_results = [p.get("page_id") for p in page_results if p.get("page_id")]
-    details_map = _load_page_details_map(db, page_ids_from_results)
-    page_results_for_llm = [
-        {**p, "details": details_map.get(p.get("page_id") or "", [])}
-        for p in page_results
-    ]
-
-    # 3. Phase 1: Page selection + verification plan
-    yield {"type": "tool_call", "tool": "select_pages_for_verification", "input": {"query": query}}
-    trace.append({"type": "tool_call", "tool": "select_pages_for_verification", "input": {"query": query}})
+    # 1) Vector search for relevant regions
+    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
 
     try:
-        phase1 = await asyncio.wait_for(
-            select_pages_for_verification(
-                project_structure=project_structure_dict,
-                page_results=page_results_for_llm,
-                query=query,
-                history_context=history_context,
-                viewing_context=viewing_context_str,
-            ),
-            timeout=45.0,
-        )
-    except asyncio.TimeoutError:
-        logger.error("Gemini page selection timeout after 45 seconds")
-        yield {"type": "error", "message": "Request timed out. Please try again."}
-        return
+        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
     except Exception as e:
-        logger.exception(f"Gemini page selection failed: {e}")
-        yield {"type": "error", "message": f"Query failed: {str(e)}"}
+        logger.exception(f"Region search failed: {e}")
+        yield {"type": "error", "message": f"Search failed: {str(e)}"}
         return
 
-    yield {"type": "tool_result", "tool": "select_pages_for_verification", "result": phase1}
-    trace.append({"type": "tool_result", "tool": "select_pages_for_verification", "result": phase1})
+    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
 
-    page_ids = phase1.get("page_ids") or []
+    page_ids = list(region_matches.keys())
+
+    # 2) Fallback to keyword search if no region matches
+    page_results = []
     if not page_ids:
+        yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+        trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
+        page_results = await search_pages(db, query=query, project_id=project_id, limit=5)
+        yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+        trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
         page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
-    # De-dupe while preserving order
+
+    # Expand with cross-referenced sheets from top matches (lower priority).
+    if page_ids:
+        pages_for_cross_refs = _load_pages_for_vision(db, page_ids[:3])
+        cross_ref_sheet_names: set[str] = set()
+        for page in pages_for_cross_refs:
+            cross_ref_sheet_names.update(_extract_cross_reference_sheet_names(page.cross_references))
+
+        if cross_ref_sheet_names:
+            cross_ref_pages = (
+                db.query(Page)
+                .join(Discipline)
+                .filter(
+                    Discipline.project_id == project_id,
+                    Page.page_name.in_(list(cross_ref_sheet_names)),
+                )
+                .order_by(Page.page_name)
+                .limit(3)
+                .all()
+            )
+            cross_ref_ids = [str(p.id) for p in cross_ref_pages]
+            page_ids = page_ids + [pid for pid in cross_ref_ids if pid not in page_ids]
+
+    # De-dupe page IDs while preserving order
     page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))
 
-    # 4. Execute selections with returned IDs (for frontend display)
+    # Order pages by sheet number where possible
+    pages_for_order = _load_pages_for_vision(db, page_ids)
+    page_map = {str(p.id): p for p in pages_for_order}
+    ordered_page_ids = sorted(
+        page_ids,
+        key=lambda pid: _page_sort_key(page_map.get(pid).page_name if page_map.get(pid) else ""),
+    )
+
+    # 3) Select pages for frontend display
     pages_result = None
-    if page_ids:
-        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}}
-        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": page_ids}})
+    if ordered_page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
         try:
-            result = await select_pages(db, page_ids=page_ids)
+            result = await select_pages(db, page_ids=ordered_page_ids)
             if hasattr(result, "model_dump"):
                 result = result.model_dump(by_alias=True, mode="json")
             pages_result = result
@@ -597,20 +607,23 @@ async def run_agent_query_gemini(
             yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
-    # 5. Phase 2: Agentic vision exploration (top 2-3 pages)
-    vision_page_ids = page_ids[:VISION_PAGE_LIMIT]
-    vision_pages_raw = _load_pages_for_vision(db, vision_page_ids)
-    if vision_pages_raw and vision_page_ids:
-        page_map = {str(p.id): p for p in vision_pages_raw}
-        vision_pages_raw = [page_map[pid] for pid in vision_page_ids if pid in page_map]
-    query_tokens = _extract_query_tokens(query)
+    # 4) Query-time vision on matching regions
+    answer_candidates: list[dict] = []
+    highlight_map: dict[str, list[dict]] = {}
 
-    vision_payload = []
-    if vision_pages_raw:
+    vision_page_ids = ordered_page_ids[:VISION_PAGE_LIMIT]
+    vision_pages = [page_map[pid] for pid in vision_page_ids if pid in page_map]
+
+    if vision_pages:
         from app.services.utils.storage import download_file
         from app.services.providers.pdf_renderer import pdf_page_to_image
 
-        for page in vision_pages_raw:
+        query_count = 0
+
+        for page in vision_pages:
+            if query_count >= REGION_QUERY_LIMIT:
+                break
+
             image_bytes = None
             try:
                 if page.page_image_path and str(page.page_image_path).lower().endswith(".png"):
@@ -627,137 +640,140 @@ async def run_agent_query_gemini(
             if not image_bytes:
                 continue
 
-            filtered_semantic = _filter_semantic_index(page.semantic_index, query_tokens)
-            filtered_details = _filter_details(page.details or [], query_tokens)
-            context_md = (page.context_markdown or "")[:2000] if page.context_markdown else ""
+            regions = region_matches.get(str(page.id)) or []
+            if regions:
+                regions = sorted(regions, key=lambda r: r.get("_similarity", 0.0), reverse=True)
+            regions = regions[:REGIONS_PER_PAGE_LIMIT]
 
-            vision_payload.append({
-                "page_id": str(page.id),
-                "page_name": page.page_name,
-                "discipline": page.discipline.display_name if page.discipline else None,
-                "context_markdown": context_md,
-                "details": filtered_details,
-                "semantic_index": filtered_semantic,
-                "image_bytes": image_bytes,
-            })
+            for region in regions:
+                if query_count >= REGION_QUERY_LIMIT:
+                    break
 
-    vision_result = {}
-    if vision_payload:
-        yield {"type": "tool_call", "tool": "explore_concept_with_vision", "input": {"page_ids": vision_page_ids}}
-        trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": {"page_ids": vision_page_ids}})
-        try:
-            async with asyncio.timeout(120.0):
-                async for event in explore_concept_with_vision_streaming(
-                    query=query,
-                    pages=vision_payload,
-                    verification_plan=phase1.get("verification_plan"),
-                    history_context=history_context,
-                    viewing_context=viewing_context_str,
-                ):
-                    if event.get("type") == "thinking":
-                        content = event.get("content")
-                        if content:
-                            yield {"type": "thinking", "content": content}
-                            trace.append({"type": "thinking", "content": content})
-                    elif event.get("type") == "result":
-                        vision_result = event.get("data") or {}
-        except asyncio.TimeoutError:
-            logger.error("Gemini vision exploration timeout after 120 seconds")
-            yield {"type": "error", "message": "Vision analysis timed out. Please try again."}
-            return
-        except Exception as e:
-            logger.exception(f"Gemini vision exploration failed: {e}")
-            yield {"type": "error", "message": f"Vision analysis failed: {str(e)}"}
-            return
+                try:
+                    bbox = region.get("bbox")
+                    if not isinstance(bbox, dict):
+                        continue
+                    cropped_bytes, crop_box = crop_region(image_bytes, bbox)
+                    vision_result = await query_with_vision(
+                        question=query,
+                        page_image_bytes=cropped_bytes,
+                        relevant_regions=[region],
+                        page_context=page.sheet_reflection or "",
+                        page_name=page.page_name,
+                    )
+                except Exception as e:
+                    logger.warning(f"Query vision failed for {page.page_name}: {e}")
+                    continue
 
-        if not vision_result:
-            logger.error("Gemini vision exploration streaming returned no result")
-            yield {"type": "error", "message": "Vision analysis failed: empty response"}
-            return
+                query_count += 1
 
-        yield {"type": "tool_result", "tool": "explore_concept_with_vision", "result": vision_result}
-        trace.append({"type": "tool_result", "tool": "explore_concept_with_vision", "result": vision_result})
+                answer = vision_result.get("answer") or ""
+                confidence = vision_result.get("confidence") or "low"
+                if answer:
+                    answer_candidates.append({
+                        "page_name": page.page_name,
+                        "region_label": region.get("label") or region.get("type") or "",
+                        "answer": answer,
+                        "confidence": confidence,
+                    })
 
-    # 6. Resolve highlights from vision findings
-    resolved_highlights = []
-    findings = vision_result.get("findings") or []
-    if pages_result and findings:
-        pages_data = pages_result.get("pages", [])
-        page_name_lookup = {
-            p.get("page_name"): p.get("page_id")
-            for p in pages_data
-            if p.get("page_name") and p.get("page_id")
-        }
-        highlight_specs: dict[str, dict] = {}
-        for finding in findings:
-            page_id = finding.get("page_id")
-            if page_id in page_name_lookup:
-                page_id = page_name_lookup[page_id]
-            if not page_id:
-                continue
-            entry = highlight_specs.setdefault(page_id, {
-                "page_id": page_id,
-                "semantic_refs": [],
-                "bboxes": [],
-                "source": "agent",
-            })
-            semantic_refs = finding.get("semantic_refs") or []
-            if isinstance(semantic_refs, list):
-                entry["semantic_refs"].extend(semantic_refs)
-            bbox = finding.get("bbox")
-            if bbox:
-                entry["bboxes"].append({
-                    "bbox": bbox,
-                    "confidence": finding.get("confidence"),
-                    "category": finding.get("category"),
-                    "source_text": finding.get("source_text"),
-                })
+                elements = vision_result.get("elements") or []
+                if elements:
+                    words = highlight_map.setdefault(str(page.id), [])
+                    for element in elements:
+                        if not isinstance(element, dict):
+                            continue
+                        bbox = element.get("bbox") or {}
+                        x0 = bbox.get("x0")
+                        y0 = bbox.get("y0")
+                        x1 = bbox.get("x1")
+                        y1 = bbox.get("y1")
+                        try:
+                            x0 = int(round(float(x0)))
+                            y0 = int(round(float(y0)))
+                            x1 = int(round(float(x1)))
+                            y1 = int(round(float(y1)))
+                        except Exception:
+                            continue
 
-        for entry in highlight_specs.values():
-            if entry.get("semantic_refs"):
-                entry["semantic_refs"] = list(dict.fromkeys(entry["semantic_refs"]))
-        highlight_specs_list = list(highlight_specs.values())
-        if highlight_specs_list:
-            resolved_highlights = resolve_highlights(
-                pages_data,
-                highlight_specs_list,
-                query_tokens=query_tokens,
-            )
-            if resolved_highlights:
-                yield {"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs_list}}
-                yield {"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}}
-                trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": {"highlight_specs": highlight_specs_list}})
-                trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}})
+                        x0 = crop_box["x0"] + x0
+                        y0 = crop_box["y0"] + y0
+                        x1 = crop_box["x0"] + x1
+                        y1 = crop_box["y0"] + y1
 
-    # 7. Emit response text
-    response_text = vision_result.get("response") or ""
-    if not response_text and page_ids:
-        response_text = f"Pulled {len(page_ids)} relevant sheets for review."
+                        if x1 < x0:
+                            x0, x1 = x1, x0
+                        if y1 < y0:
+                            y0, y1 = y1, y0
+
+                        words.append({
+                            "id": None,
+                            "text": element.get("text") or "",
+                            "bbox": {
+                                "x0": x0,
+                                "y0": y0,
+                                "x1": x1,
+                                "y1": y1,
+                                "width": max(0, x1 - x0),
+                                "height": max(0, y1 - y0),
+                            },
+                            "role": element.get("role"),
+                            "source": "agent",
+                        })
+
+    # 5) Emit resolve_highlights tool result for frontend
+    resolved_highlights = [
+        {"page_id": page_id, "words": words}
+        for page_id, words in highlight_map.items()
+        if words
+    ]
+
+    if resolved_highlights:
+        yield {"type": "tool_call", "tool": "resolve_highlights", "input": {"page_ids": list(highlight_map.keys())}}
+        yield {"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}}
+        trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": {"page_ids": list(highlight_map.keys())}})
+        trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}})
+
+    # 6) Compose response text
+    response_text = ""
+    if answer_candidates:
+        confidence_rank = {"high": 3, "medium": 2, "low": 1}
+        answer_candidates.sort(
+            key=lambda a: confidence_rank.get(a.get("confidence"), 0),
+            reverse=True,
+        )
+        primary = answer_candidates[0]
+        prefix = f"{primary['page_name']} {primary['region_label']}".strip()
+        response_text = f"{prefix}: {primary['answer']}".strip()
+        if len(answer_candidates) > 1:
+            secondary = answer_candidates[1]
+            secondary_prefix = f"{secondary['page_name']} {secondary['region_label']}".strip()
+            response_text = f"{response_text}. Also {secondary_prefix}: {secondary['answer']}"
+    elif ordered_page_ids:
+        response_text = f"Pulled {len(ordered_page_ids)} relevant sheets for review."
+    else:
+        response_text = "I couldn't find a precise match for that detail."
+
     if response_text:
         yield {"type": "text", "content": response_text}
         trace.append({"type": "reasoning", "content": response_text})
 
-    # 8. Done - aggregate usage from both phases
-    usage_phase1 = phase1.get("usage") or {}
-    usage_phase2 = vision_result.get("usage") or {}
-    display_title = phase1.get("chat_title") or vision_result.get("concept_name")
-    conversation_title = phase1.get("conversation_title") or display_title
+    # 7) Done
+    tokens = _extract_query_tokens(query)
+    display_title = " ".join(tokens[:3]).title() if tokens else "Query"
 
     yield {
         "type": "done",
         "trace": trace,
-        "usage": {
-            "inputTokens": (usage_phase1.get("input_tokens", 0) + usage_phase2.get("input_tokens", 0)),
-            "outputTokens": (usage_phase1.get("output_tokens", 0) + usage_phase2.get("output_tokens", 0)),
-        },
+        "usage": {"inputTokens": 0, "outputTokens": 0},
         "displayTitle": display_title,
-        "conversationTitle": conversation_title,
+        "conversationTitle": display_title,
         "highlights": resolved_highlights,
-        "conceptName": vision_result.get("concept_name"),
-        "summary": vision_result.get("summary"),
-        "findings": findings,
-        "crossReferences": vision_result.get("cross_references") or [],
-        "gaps": vision_result.get("gaps") or [],
+        "conceptName": None,
+        "summary": None,
+        "findings": [],
+        "crossReferences": [],
+        "gaps": [],
     }
 
 

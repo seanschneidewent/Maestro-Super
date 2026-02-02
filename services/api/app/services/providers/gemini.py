@@ -4,12 +4,16 @@ Gemini AI service for context extraction and agent queries.
 
 import json
 import logging
+import re
+import time
 from typing import Any, AsyncIterator
 
 from google import genai
 from google.genai import types
 
-from app.config import get_settings
+from app.config import AGENT_QUERY_MODEL, get_settings
+from app.services.prompts import BRAIN_MODE_PROMPT_V4
+from app.services.utils.parsing import extract_json_response
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -166,20 +170,265 @@ Return JSON with this exact structure:
   "response": "Full narrative response..."
 }}'''
 
-
-def _extract_json_response(text: str) -> dict:
-    """Best-effort JSON extraction for Gemini responses."""
+def _extract_json_response(text: str) -> dict[str, Any]:
+    """Extract JSON from model output, including markdown code blocks."""
     if not text:
         raise ValueError("Empty response from Gemini")
 
+    code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if code_block_match:
+        text = code_block_match.group(1)
+
+    text = text.strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Try to extract first JSON object substring
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start:end + 1])
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError("Could not extract valid JSON from response")
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_bbox(bbox: Any, width: int, height: int) -> dict[str, float]:
+    """
+    Normalize bounding box coordinates to 0-1 and clamp to image bounds.
+
+    Supports:
+    - Dict format: {"x0": ..., "y0": ..., "x1": ..., "y1": ...}
+    - List/tuple format: [x0, y0, x1, y1]
+    - Values already normalized (0-1), normalized to 1000, or pixel-based
+    """
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        raw_x0, raw_y0, raw_x1, raw_y1 = bbox
+    elif isinstance(bbox, dict):
+        raw_x0 = bbox.get("x0", 0)
+        raw_y0 = bbox.get("y0", 0)
+        raw_x1 = bbox.get("x1", 0)
+        raw_y1 = bbox.get("y1", 0)
+    else:
+        raw_x0 = raw_y0 = raw_x1 = raw_y1 = 0
+
+    x0 = _coerce_float(raw_x0)
+    y0 = _coerce_float(raw_y0)
+    x1 = _coerce_float(raw_x1)
+    y1 = _coerce_float(raw_y1)
+
+    def to_unit(value: float, dimension: int) -> float:
+        abs_value = abs(value)
+        if abs_value <= 1.0:
+            return value
+        if abs_value <= 1000.0:
+            return value / 1000.0
+        if dimension > 0:
+            return value / float(dimension)
+        return 0.0
+
+    x0 = to_unit(x0, width)
+    x1 = to_unit(x1, width)
+    y0 = to_unit(y0, height)
+    y1 = to_unit(y1, height)
+
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+
+    x0 = max(0.0, min(1.0, x0))
+    y0 = max(0.0, min(1.0, y0))
+    x1 = max(0.0, min(1.0, x1))
+    y1 = max(0.0, min(1.0, y1))
+    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+
+def process_brain_mode_result(result: dict[str, Any], width: int, height: int) -> dict[str, Any]:
+    """Normalize Brain Mode result structure for storage and downstream use."""
+    regions = result.get("regions", [])
+    if not isinstance(regions, list):
+        regions = []
+
+    normalized_regions: list[dict[str, Any]] = []
+    for idx, region in enumerate(regions):
+        if not isinstance(region, dict):
+            continue
+
+        normalized = dict(region)
+        normalized["id"] = region.get("id") or f"region_{idx + 1:03d}"
+        normalized["type"] = str(region.get("type") or "unknown").lower()
+        normalized["bbox"] = normalize_bbox(region.get("bbox", {}), width, height)
+        normalized["label"] = region.get("label") or region.get("name") or ""
+        normalized["confidence"] = _coerce_float(region.get("confidence"), 0.0)
+
+        detail_number = region.get("detail_number")
+        if detail_number is not None:
+            normalized["detail_number"] = str(detail_number)
+
+        normalized_regions.append(normalized)
+
+    sheet_reflection = result.get("sheet_reflection", "")
+    if not isinstance(sheet_reflection, str):
+        sheet_reflection = ""
+
+    page_type = result.get("page_type", "unknown")
+    if not isinstance(page_type, str):
+        page_type = "unknown"
+
+    cross_refs = result.get("cross_references", [])
+    if not isinstance(cross_refs, list):
+        cross_refs = []
+    normalized_cross_refs = []
+    for cross_ref in cross_refs:
+        if isinstance(cross_ref, dict):
+            sheet_name = cross_ref.get("sheet")
+            if sheet_name:
+                normalized_cross_refs.append(str(sheet_name))
+        elif cross_ref:
+            normalized_cross_refs.append(str(cross_ref))
+
+    sheet_info = result.get("sheet_info", {})
+    if not isinstance(sheet_info, dict):
+        sheet_info = {}
+
+    index = result.get("index", {})
+    if not isinstance(index, dict):
+        index = {}
+
+    questions = result.get("questions_this_sheet_answers", [])
+    if not isinstance(questions, list):
+        questions = []
+
+    return {
+        "regions": normalized_regions,
+        "sheet_reflection": sheet_reflection,
+        "page_type": page_type,
+        "discipline": str(result.get("discipline") or ""),
+        "cross_references": normalized_cross_refs,
+        "sheet_info": sheet_info,
+        "index": index,
+        "questions_this_sheet_answers": [str(q) for q in questions if q],
+    }
+
+
+def validate_brain_mode_response(result: dict[str, Any]) -> bool:
+    """Validate minimum required response structure from Brain Mode analysis."""
+    if not isinstance(result, dict):
+        return False
+    required_keys = ["regions", "sheet_info", "index"]
+    return all(key in result for key in required_keys)
+
+
+async def analyze_sheet_brain_mode(
+    image_bytes: bytes,
+    page_name: str,
+    discipline: str,
+    custom_prompt: str | None = None,
+) -> tuple[dict[str, Any], int]:
+    """
+    Single Gemini call for Brain Mode comprehension.
+
+    Returns:
+        (result_dict, processing_time_ms)
+    """
+    start_time = time.time()
+
+    try:
+        settings = get_settings()
+        client = _get_gemini_client()
+
+        prompt_text = custom_prompt or BRAIN_MODE_PROMPT_V4
+        prompt = (
+            f"{prompt_text}\n\n"
+            f"PAGE NAME: {page_name}\n"
+            f"DISCIPLINE: {discipline}"
+        )
+
+        config_kwargs: dict[str, Any] = {
+            "response_mime_type": "application/json",
+            "temperature": 0,
+            "media_resolution": "media_resolution_high",
+        }
+
+        if settings.use_agentic_vision:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_level=settings.brain_mode_thinking_level
+            )
+            try:
+                code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution)
+            except Exception:
+                code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution())
+            config_kwargs["tools"] = [code_exec_tool]
+
+        response = client.models.generate_content(
+            model=settings.brain_mode_model,
+            contents=[
+                types.Content(
+                    parts=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                        types.Part.from_text(text=prompt),
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+        response_text = ""
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            content = getattr(candidates[0], "content", None)
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                if getattr(part, "thought", False):
+                    continue
+                text = getattr(part, "text", None)
+                if text:
+                    response_text += text
+        if not response_text:
+            response_text = getattr(response, "text", "") or ""
+
+        result = _extract_json_response(response_text)
+        if not validate_brain_mode_response(result):
+            raise ValueError("Invalid response structure")
+
+        image_width = _coerce_float(result.get("image_width"), 0.0)
+        image_height = _coerce_float(result.get("image_height"), 0.0)
+        if image_width <= 0 or image_height <= 0:
+            from io import BytesIO
+
+            from PIL import Image
+
+            image = Image.open(BytesIO(image_bytes))
+            image_width, image_height = image.size
+
+        processed_result = process_brain_mode_result(
+            result,
+            width=int(image_width),
+            height=int(image_height),
+        )
+
+        timing_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "Brain Mode analysis complete for %s in %sms (agentic_vision=%s)",
+            page_name,
+            timing_ms,
+            settings.use_agentic_vision,
+        )
+        return processed_result, timing_ms
+
+    except Exception as e:
+        logger.error(f"Brain mode processing failed: {e}")
         raise
 
 
@@ -241,7 +490,7 @@ async def run_agent_query(
         )
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -329,7 +578,7 @@ async def select_pages_for_verification(
         )
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -337,7 +586,7 @@ async def select_pages_for_verification(
             ),
         )
 
-        result = _extract_json_response(response.text)
+        result = extract_json_response(response.text)
 
         input_tokens = 0
         output_tokens = 0
@@ -438,12 +687,12 @@ async def explore_concept_with_vision(
             pass
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=parts)],
             config=types.GenerateContentConfig(**config_kwargs),
         )
 
-        result = _extract_json_response(response.text)
+        result = extract_json_response(response.text)
 
         input_tokens = 0
         output_tokens = 0
@@ -550,7 +799,7 @@ async def explore_concept_with_vision_streaming(
                 pass
 
         stream = client.models.generate_content_stream(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[types.Content(parts=parts)],
             config=types.GenerateContentConfig(**config_kwargs),
         )
@@ -579,7 +828,7 @@ async def explore_concept_with_vision_streaming(
                 else:
                     accumulated_text += text
 
-        result = _extract_json_response(accumulated_text)
+        result = extract_json_response(accumulated_text)
 
         input_tokens = 0
         output_tokens = 0
@@ -630,7 +879,7 @@ async def _analyze_page_pass_1_impl(
     )
 
     response = client.models.generate_content(
-        model="gemini-3-flash-preview",
+        model=AGENT_QUERY_MODEL,
         contents=[
             types.Content(
                 parts=[
@@ -732,7 +981,7 @@ Return JSON:
 }}"""
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=AGENT_QUERY_MODEL,
             contents=[
                 types.Content(
                     parts=[

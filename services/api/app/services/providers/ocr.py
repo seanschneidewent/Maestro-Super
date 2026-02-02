@@ -1,25 +1,49 @@
 """
-OCR service using pdf2image (Poppler) + EasyOCR hybrid extraction.
+DEPRECATED: Legacy OCR helpers.
+
+Brain Mode now uses Agentic Vision via:
+  - app.services.core.brain_mode_processor.process_page_brain_mode()
+  - app.services.providers.gemini.analyze_sheet_brain_mode()
+
+Use app.services.providers.pdf_renderer.crop_pdf_region() for PDF cropping.
+This module remains for legacy compatibility and will be removed in a future release.
 """
 
 import io
 import logging
+import warnings
 from typing import Optional
 
-import easyocr
-import numpy as np
 from PIL import Image
 
 from app.services.providers.pdf_renderer import crop_pdf_region
 
 logger = logging.getLogger(__name__)
 
+warnings.warn(
+    "app.services.providers.ocr is deprecated. "
+    "Use app.services.providers.pdf_renderer and Agentic Vision pipeline helpers instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+# Optional EasyOCR dependency (legacy pipeline)
+try:
+    import easyocr  # type: ignore
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    easyocr = None
+    np = None
+
 # Global EasyOCR reader - loaded lazily on first use
-_easyocr_reader: Optional[easyocr.Reader] = None
+_easyocr_reader: Optional[object] = None
 
 
-def get_easyocr_reader() -> easyocr.Reader:
+def get_easyocr_reader() -> Optional[object]:
     """Get or create the global EasyOCR reader (lazy loading)."""
+    if easyocr is None:
+        logger.warning("[OCR] EasyOCR not installed - OCR disabled")
+        return None
     global _easyocr_reader
     if _easyocr_reader is None:
         logger.info("[OCR] Loading EasyOCR model (first use)...")
@@ -49,12 +73,18 @@ def extract_text_with_positions(image_bytes: bytes) -> list[dict]:
     Coordinates are normalized to 0-1 relative to the input image dimensions.
     """
     try:
+        if easyocr is None or np is None:
+            logger.warning("[OCR] EasyOCR not installed - returning empty spans")
+            return []
+
         image = Image.open(io.BytesIO(image_bytes))
         width, height = image.size
         image_array = np.array(image)
 
         # Get bounding boxes from EasyOCR
         reader = get_easyocr_reader()
+        if reader is None:
+            return []
         results = reader.readtext(image_array)
 
         spans = []

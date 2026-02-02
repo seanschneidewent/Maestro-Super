@@ -1,10 +1,13 @@
 """Hybrid search service combining keyword and vector search."""
 
 import logging
+import math
+from typing import Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from app.models.page import Page
 from app.services.providers.voyage import embed_text
 
 logger = logging.getLogger(__name__)
@@ -79,3 +82,220 @@ async def search_pointers(
         {col: str(val) if col.endswith("_id") else val for col, val in zip(columns, row)}
         for row in rows
     ]
+
+
+def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
+    if not vec_a or not vec_b:
+        return 0.0
+    length = min(len(vec_a), len(vec_b))
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for i in range(length):
+        a = float(vec_a[i])
+        b = float(vec_b[i])
+        dot += a * b
+        norm_a += a * a
+        norm_b += b * b
+    if norm_a <= 0.0 or norm_b <= 0.0:
+        return 0.0
+    return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+
+
+def _to_text_list(values: Any, *, lowercase: bool = False) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    for value in values:
+        text = str(value).strip() if value is not None else ""
+        if lowercase:
+            text = text.lower()
+        if text:
+            result.append(text)
+    return result
+
+
+def _get_page_query_boost(page: Page, query_lower: str, query_tokens: list[str]) -> float:
+    boost = 1.0
+
+    # Boost when query terms align with Agentic Vision master index keywords/items.
+    master_index = page.master_index if isinstance(page.master_index, dict) else {}
+    keywords = _to_text_list(master_index.get("keywords"), lowercase=True)
+    item_terms: list[str] = []
+    items = master_index.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                item_name = item.get("name")
+                if item_name:
+                    item_terms.append(str(item_name).strip().lower())
+            elif item is not None:
+                item_terms.append(str(item).strip().lower())
+
+    all_terms = [term for term in [*keywords, *item_terms] if term]
+    if query_tokens and all_terms and any(token in term for token in query_tokens for term in all_terms):
+        boost = max(boost, 1.2)
+
+    # Boost when question intent directly matches known sheet-level Q&A prompts.
+    questions = _to_text_list(page.questions_answered, lowercase=True)
+    if questions and (
+        (query_lower and any(query_lower in q for q in questions))
+        or any(token in q for token in query_tokens for q in questions)
+    ):
+        boost = max(boost, 1.3)
+
+    return boost
+
+
+async def embed_page_reflection(
+    sheet_reflection: str,
+    master_index: dict | None = None,
+    questions_answered: list[str] | None = None,
+) -> list[float] | None:
+    if not sheet_reflection and not master_index and not questions_answered:
+        return None
+
+    parts: list[str] = []
+    if sheet_reflection:
+        parts.append(sheet_reflection)
+
+    if isinstance(master_index, dict):
+        keywords = _to_text_list(master_index.get("keywords"))
+        if keywords:
+            parts.append(" ".join(keywords[:20]))
+
+    if isinstance(questions_answered, list):
+        question_texts = [q for q in _to_text_list(questions_answered) if q]
+        if question_texts:
+            parts.extend(question_texts[:5])
+
+    text = " ".join(parts).strip()
+    if not text:
+        return None
+    return await embed_text(text)
+
+
+async def embed_regions(regions: list[dict] | None) -> list[dict]:
+    if not regions:
+        return []
+
+    embedded_regions: list[dict] = []
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        label = str(region.get("label") or "")
+        region_type = str(region.get("type") or "")
+        detail_number = region.get("detail_number")
+        text = f"{region_type}: {label}".strip()
+        if detail_number:
+            text = f"{text} (Detail {detail_number})"
+        if not text.strip():
+            embedded_regions.append(region)
+            continue
+        try:
+            region["embedding"] = await embed_text(text)
+        except Exception as e:
+            logger.warning(f"Region embedding failed for {label or region_type}: {e}")
+        embedded_regions.append(region)
+
+    return embedded_regions
+
+
+async def vector_search_pages(
+    db: Session,
+    query_embedding: list[float],
+    project_id: str,
+    limit: int = 5,
+) -> list[Page]:
+    if not query_embedding:
+        return []
+
+    if not hasattr(Page, "page_embedding"):
+        logger.warning("Page embedding column not available; vector search skipped")
+        return []
+
+    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+
+    result = db.execute(
+        text("""
+            SELECT pages.id
+            FROM pages
+            JOIN disciplines ON pages.discipline_id = disciplines.id
+            WHERE disciplines.project_id = CAST(:project_id AS uuid)
+              AND pages.page_embedding IS NOT NULL
+            ORDER BY pages.page_embedding <=> CAST(:query_embedding AS vector)
+            LIMIT :limit
+        """),
+        {
+            "project_id": project_id,
+            "query_embedding": embedding_str,
+            "limit": limit,
+        },
+    )
+
+    page_ids = [str(row[0]) for row in result.fetchall()]
+    if not page_ids:
+        return []
+
+    pages = (
+        db.query(Page)
+        .filter(Page.id.in_(page_ids))
+        .all()
+    )
+    page_map = {str(p.id): p for p in pages}
+    return [page_map[pid] for pid in page_ids if pid in page_map]
+
+
+async def search_pages_and_regions(
+    db: Session,
+    query: str,
+    project_id: str,
+    limit: int = 5,
+    similarity_threshold: float = 0.7,
+) -> dict[str, list[dict]]:
+    """
+    Two-level search:
+    1. Find relevant pages via sheet_reflection embedding
+    2. Find relevant regions within those pages
+
+    Returns: {page_id: [region1, region2, ...]}
+    """
+    query_embedding = await embed_text(query)
+    query_lower = query.lower()
+    query_tokens = [t for t in query_lower.split() if t]
+
+    pages = await vector_search_pages(
+        db,
+        query_embedding=query_embedding,
+        project_id=project_id,
+        limit=limit,
+    )
+
+    results: dict[str, list[dict]] = {}
+    for page in pages:
+        page_boost = _get_page_query_boost(page, query_lower=query_lower, query_tokens=query_tokens)
+        matching_regions: list[dict] = []
+        for region in page.regions or []:
+            if not isinstance(region, dict):
+                continue
+            embedding = region.get("embedding")
+            similarity = _cosine_similarity(query_embedding, embedding) if embedding else 0.0
+
+            if similarity <= 0.0:
+                # Fallback: keyword match on label/type
+                haystack = f"{region.get('type', '')} {region.get('label', '')} {region.get('detail_number', '')}".lower()
+                if query_tokens and any(t in haystack for t in query_tokens):
+                    similarity = max(similarity_threshold, 0.5)
+
+            adjusted_similarity = similarity * page_boost
+            if adjusted_similarity >= similarity_threshold:
+                region_copy = dict(region)
+                region_copy.pop("embedding", None)
+                region_copy["_similarity"] = adjusted_similarity
+                matching_regions.append(region_copy)
+
+        if matching_regions:
+            matching_regions.sort(key=lambda r: r.get("_similarity", 0.0), reverse=True)
+            results[str(page.id)] = matching_regions
+
+    return results

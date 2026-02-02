@@ -22,7 +22,7 @@ from app.schemas.pointer import (
     PointerUpdate,
 )
 from app.services.gemini import analyze_pointer
-from app.services.ocr import crop_pdf_region
+from app.services.pdf_renderer import crop_pdf_region
 from app.services.storage import download_file, upload_snapshot
 from app.services.usage import UsageService
 from app.services.voyage import embed_pointer as generate_embedding

@@ -1,5 +1,5 @@
 """
-Processing Job Service - Background job system for sheet-analyzer pipeline.
+Processing Job Service - Background job system for Agentic Vision pipeline.
 
 Handles:
 - Starting processing jobs
@@ -28,8 +28,8 @@ from app.models.discipline import Discipline
 from app.models.page import Page
 from app.models.processing_job import ProcessingJob
 from app.models.project import Project
-from app.services.utils.detail_parser import parse_context_markdown
-from app.services.core.sheet_analyzer import process_page
+from app.services.core.brain_mode_processor import process_page_brain_mode
+from app.services.utils.search import embed_page_reflection, embed_regions
 from app.services.utils.storage import download_file
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,8 @@ async def process_project_pages(job_id: str):
                 "id": str(p.id),
                 "page_name": p.page_name,
                 "page_image_path": p.page_image_path,
+                "discipline_name": p.discipline.display_name if p.discipline else None,
+                "has_semantic_index": bool(p.semantic_index),
             }
             for p in pages
         ]
@@ -196,6 +198,7 @@ async def process_project_pages(job_id: str):
         page_id = page_data["id"]
         page_name = page_data["page_name"]
         page_image_path = page_data["page_image_path"]
+        discipline_name = page_data.get("discipline_name") or "Unknown"
 
         logger.info(f"[{job_id}] Processing page {processed_count + 1}/{total_pages}: {page_name}")
 
@@ -226,8 +229,7 @@ async def process_project_pages(job_id: str):
             # Download page image
             png_bytes = await download_file(page_image_path)
             image = Image.open(BytesIO(png_bytes))
-            if image.mode != "RGB":
-                image = image.convert("RGB")
+            image_width, image_height = image.size
 
             # Create progress callback to emit SSE events during page processing
             async def page_progress_callback(stage: str, current: int, total: int):
@@ -240,21 +242,63 @@ async def process_project_pages(job_id: str):
                     "total": total,
                 })
 
-            # Run sheet-analyzer pipeline
-            result = await process_page(image, api_key, page_name, progress_callback=page_progress_callback)
+            # Run Brain Mode comprehension
+            if page_progress_callback:
+                await page_progress_callback("brain_mode_start", 0, 1)
 
-            # Parse details from markdown
-            details = parse_context_markdown(result["context_markdown"])
+            result = await process_page_brain_mode(
+                image_bytes=png_bytes,
+                page_name=page_name,
+                discipline_name=discipline_name,
+            )
+
+            if page_progress_callback:
+                await page_progress_callback("brain_mode_complete", 1, 1)
+
+            # Embeddings for page + regions (optional, non-fatal)
+            sheet_reflection = result.get("sheet_reflection") or ""
+            regions_with_embeddings = await embed_regions(result.get("regions") or [])
+            result["regions"] = regions_with_embeddings
+
+            page_embedding = None
+            if sheet_reflection or result.get("index") or result.get("questions_this_sheet_answers"):
+                try:
+                    page_embedding = await embed_page_reflection(
+                        sheet_reflection,
+                        master_index=result.get("index"),
+                        questions_answered=result.get("questions_this_sheet_answers"),
+                    )
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Page embedding failed for {page_name}: {e}")
+
+            details: list[dict] = []
 
             # Save results to database
             with SessionLocal() as db:
-                db.query(Page).filter(Page.id == page_id).update({
-                    "semantic_index": result["semantic_index"],
-                    "context_markdown": result["context_markdown"],
-                    "details": details,
+                update_payload = {
+                    "regions": result.get("regions"),
+                    "sheet_reflection": result.get("sheet_reflection"),
+                    "page_type": result.get("page_type"),
+                    "cross_references": result.get("cross_references"),
+                    "sheet_info": result.get("sheet_info"),
+                    "master_index": result.get("index"),
+                    "questions_answered": result.get("questions_this_sheet_answers"),
+                    "processing_time_ms": result.get("processing_time_ms"),
+                    "processing_error": None,
                     "processing_status": "completed",
                     "processed_at": datetime.utcnow(),
-                })
+                }
+                if not page_data.get("has_semantic_index"):
+                    update_payload["semantic_index"] = {
+                        "image_width": image_width,
+                        "image_height": image_height,
+                        "word_count": 0,
+                        "words": [],
+                    }
+                if hasattr(Page, "page_embedding"):
+                    update_payload["page_embedding"] = page_embedding
+
+                db.query(Page).filter(Page.id == page_id).update(update_payload)
                 db.commit()
 
             processed_count += 1
@@ -275,7 +319,9 @@ async def process_project_pages(job_id: str):
                 "total": total_pages,
             })
 
-            logger.info(f"[{job_id}] Completed page {page_name}: {len(details)} details extracted")
+            logger.info(
+                f"[{job_id}] Completed page {page_name}: {len(result.get('regions') or [])} regions mapped"
+            )
 
         except Exception as e:
             logger.error(f"[{job_id}] Failed to process page {page_name}: {e}")
@@ -283,7 +329,9 @@ async def process_project_pages(job_id: str):
             # Mark page as failed
             with SessionLocal() as db:
                 db.query(Page).filter(Page.id == page_id).update({
-                    "processing_status": "failed"
+                    "processing_status": "failed",
+                    "processing_error": str(e),
+                    "processed_at": datetime.utcnow(),
                 })
                 db.commit()
 

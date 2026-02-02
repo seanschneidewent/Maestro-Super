@@ -31,10 +31,8 @@ voyageai>=0.2.0
 # PDF Rendering
 pdf2image>=1.16.0
 
-# OCR (EasyOCR - reliable bbox detection, Gemini handles text labeling)
-easyocr>=1.7.0
+# OCR (legacy pipeline)
 Pillow>=10.0.0
-numpy>=1.24.0
 
 # Supabase Storage
 supabase>=2.0.0
