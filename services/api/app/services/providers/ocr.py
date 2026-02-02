@@ -1,9 +1,17 @@
 """
-OCR service using pdf2image (Poppler) + EasyOCR hybrid extraction.
+DEPRECATED: Legacy OCR helpers.
+
+Brain Mode now uses Agentic Vision via:
+  - app.services.core.brain_mode_processor.process_page_brain_mode()
+  - app.services.providers.gemini.analyze_sheet_brain_mode()
+
+Use app.services.providers.pdf_renderer.crop_pdf_region() for PDF cropping.
+This module remains for legacy compatibility and will be removed in a future release.
 """
 
 import io
 import logging
+import warnings
 from typing import Optional
 
 from PIL import Image
@@ -11,6 +19,13 @@ from PIL import Image
 from app.services.providers.pdf_renderer import crop_pdf_region
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "app.services.providers.ocr is deprecated. "
+    "Use app.services.providers.pdf_renderer and Agentic Vision pipeline helpers instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Optional EasyOCR dependency (legacy pipeline)
 try:

@@ -1,5 +1,5 @@
 """
-Processing Job Service - Background job system for sheet-analyzer pipeline.
+Processing Job Service - Background job system for Agentic Vision pipeline.
 
 Handles:
 - Starting processing jobs

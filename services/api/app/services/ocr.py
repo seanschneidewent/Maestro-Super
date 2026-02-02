@@ -1,4 +1,4 @@
-"""Backwards compatibility stub - module moved to providers/ocr.py"""
+"""Backwards compatibility stub for deprecated OCR module."""
 from app.services.providers.ocr import *  # noqa: F401, F403
 from app.services.providers.ocr import (
     crop_pdf_region,

@@ -1,4 +1,3 @@
-"""Legacy sheet analyzer removed.
+"""Backwards compatibility stub for deprecated sheet analyzer module."""
 
-Use app.services.core.brain_mode_processor instead.
-"""
+from app.services.core.sheet_analyzer import *  # noqa: F401, F403
