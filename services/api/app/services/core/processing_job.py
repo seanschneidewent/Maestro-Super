@@ -152,6 +152,22 @@ async def process_project_pages(job_id: str):
 
     await emit_event(job_id, {"type": "job_started", "job_id": job_id})
 
+    # Reset any pages stuck in "processing" status (from interrupted previous run)
+    # This ensures paused/crashed pages get reprocessed on resume
+    with SessionLocal() as db:
+        stuck_count = (
+            db.query(Page)
+            .join(Discipline)
+            .filter(
+                Discipline.project_id == project_id,
+                Page.processing_status == "processing",
+            )
+            .update({"processing_status": "pending"}, synchronize_session=False)
+        )
+        if stuck_count > 0:
+            db.commit()
+            logger.info(f"[{job_id}] Reset {stuck_count} stuck page(s) from 'processing' to 'pending'")
+
     # Get all pages to process
     with SessionLocal() as db:
         pages = (
