@@ -1,12 +1,15 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { X } from 'lucide-react';
+import type { Region } from '../../lib/api';
+import { RegionOverlay } from './context-panel/RegionOverlay';
 
 interface PageThumbnailModalProps {
   isOpen: boolean;
   onClose: () => void;
   imageUrl: string;
   pageName: string;
+  regions?: Region[];
 }
 
 function PageThumbnailModalComponent({
@@ -14,6 +17,7 @@ function PageThumbnailModalComponent({
   onClose,
   imageUrl,
   pageName,
+  regions,
 }: PageThumbnailModalProps) {
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [displayDimensions, setDisplayDimensions] = useState({ width: 800, height: 600 });
@@ -137,6 +141,10 @@ function PageThumbnailModalComponent({
                 className="w-full h-full"
                 draggable={false}
               />
+              {/* Region bounding boxes overlay */}
+              {regions && regions.length > 0 && (
+                <RegionOverlay regions={regions} />
+              )}
             </div>
           </TransformComponent>
         </TransformWrapper>

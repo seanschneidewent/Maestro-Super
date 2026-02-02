@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, PageResponse } from '../../../lib/api';
 import { getPublicUrl } from '../../../lib/storage';
 import { PageThumbnailModal } from '../PageThumbnailModal';
+import { RegionOverlay } from './RegionOverlay';
 
 interface PageContextViewProps {
   pageId: string;
@@ -187,8 +188,12 @@ function PageContextViewComponent({
                   alt={page.pageName}
                   className="w-full h-full"
                 />
+                {/* Region bounding boxes overlay */}
+                {page.regions && page.regions.length > 0 && (
+                  <RegionOverlay regions={page.regions} />
+                )}
                 {/* Hover overlay */}
-                <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
                   <span className="text-white text-sm font-medium flex items-center gap-1">
                     <Maximize2 size={16} /> Click to expand
                   </span>
@@ -422,6 +427,7 @@ function PageContextViewComponent({
           onClose={() => setModalOpen(false)}
           imageUrl={imageUrl}
           pageName={page.pageName}
+          regions={page.regions}
         />,
         document.body
       )}
