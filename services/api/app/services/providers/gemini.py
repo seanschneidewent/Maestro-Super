@@ -135,6 +135,7 @@ Your job:
 
 IMPORTANT:
 - candidate_regions and regions include normalized bboxes (0-1) and metadata (type/label/detailNumber/regionIndex).
+- For each finding, `page_id` must exactly match one of the `page_id` values in PAGE MANIFEST (do not use page names here).
 - If you can reference semantic OCR word IDs, use "semantic_refs".
 - If not, provide a normalized "bbox" as [x0, y0, x1, y1] in 0-1 coordinates.
 - Every finding must include page_id, category, content, confidence, and source_text.
@@ -256,6 +257,227 @@ def normalize_bbox(bbox: Any, width: int, height: int) -> dict[str, float]:
     x1 = max(0.0, min(1.0, x1))
     y1 = max(0.0, min(1.0, y1))
     return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+
+def _to_bbox_corners(raw_bbox: Any) -> list[float] | None:
+    """Convert supported bbox shapes to [x0, y0, x1, y1]."""
+    if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
+        return [
+            _coerce_float(raw_bbox[0]),
+            _coerce_float(raw_bbox[1]),
+            _coerce_float(raw_bbox[2]),
+            _coerce_float(raw_bbox[3]),
+        ]
+
+    if not isinstance(raw_bbox, dict):
+        return None
+
+    if all(key in raw_bbox for key in ("x0", "y0", "x1", "y1")):
+        return [
+            _coerce_float(raw_bbox.get("x0")),
+            _coerce_float(raw_bbox.get("y0")),
+            _coerce_float(raw_bbox.get("x1")),
+            _coerce_float(raw_bbox.get("y1")),
+        ]
+
+    if all(key in raw_bbox for key in ("left", "top", "right", "bottom")):
+        return [
+            _coerce_float(raw_bbox.get("left")),
+            _coerce_float(raw_bbox.get("top")),
+            _coerce_float(raw_bbox.get("right")),
+            _coerce_float(raw_bbox.get("bottom")),
+        ]
+
+    if all(key in raw_bbox for key in ("x", "y", "width", "height")):
+        x = _coerce_float(raw_bbox.get("x"))
+        y = _coerce_float(raw_bbox.get("y"))
+        w = _coerce_float(raw_bbox.get("width"))
+        h = _coerce_float(raw_bbox.get("height"))
+        return [x, y, x + w, y + h]
+
+    if all(key in raw_bbox for key in ("left", "top", "width", "height")):
+        x = _coerce_float(raw_bbox.get("left"))
+        y = _coerce_float(raw_bbox.get("top"))
+        w = _coerce_float(raw_bbox.get("width"))
+        h = _coerce_float(raw_bbox.get("height"))
+        return [x, y, x + w, y + h]
+
+    return None
+
+
+def _normalize_ref(ref: Any) -> int | str | None:
+    if ref is None:
+        return None
+    if isinstance(ref, bool):
+        return None
+    if isinstance(ref, int):
+        return ref
+    if isinstance(ref, float):
+        if ref.is_integer():
+            return int(ref)
+        return None
+    if isinstance(ref, str):
+        value = ref.strip()
+        if not value:
+            return None
+        if value.isdigit():
+            return int(value)
+        return value
+    return None
+
+
+def _normalize_refs(raw_refs: Any) -> list[int | str]:
+    if not isinstance(raw_refs, list):
+        return []
+    normalized: list[int | str] = []
+    for ref in raw_refs:
+        parsed = _normalize_ref(ref)
+        if parsed is not None:
+            normalized.append(parsed)
+    return normalized
+
+
+def _canonical_key(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def normalize_vision_findings(
+    findings: Any,
+    pages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Normalize deep-vision finding payloads for UI overlays.
+
+    - Ensures `page_id` maps to known selected pages (id or page-name aliases).
+    - Normalizes bbox units to 0-1 (supports normalized, 0-1000, or pixel-ish coords).
+    - Derives bbox from `semantic_refs` when explicit bbox is missing.
+    """
+    if not isinstance(findings, list):
+        return []
+
+    page_alias_to_id: dict[str, str] = {}
+    page_name_by_id: dict[str, str] = {}
+    page_size_by_id: dict[str, tuple[int, int]] = {}
+    word_bbox_by_page: dict[str, dict[str, dict[str, float]]] = {}
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+
+        page_id = str(page.get("page_id") or "").strip()
+        if not page_id:
+            continue
+
+        page_name = str(page.get("page_name") or "").strip()
+        page_name_by_id[page_id] = page_name
+
+        page_alias_to_id[_canonical_key(page_id)] = page_id
+        if page_name:
+            page_alias_to_id[_canonical_key(page_name)] = page_id
+
+        semantic_index = page.get("semantic_index")
+        if not isinstance(semantic_index, dict):
+            semantic_index = {}
+
+        width = int(round(_coerce_float(semantic_index.get("image_width"), 0)))
+        height = int(round(_coerce_float(semantic_index.get("image_height"), 0)))
+        page_size_by_id[page_id] = (max(width, 0), max(height, 0))
+
+        words = semantic_index.get("words")
+        if not isinstance(words, list):
+            words = []
+
+        word_bbox_map: dict[str, dict[str, float]] = {}
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            word_id = _normalize_ref(word.get("id"))
+            if word_id is None:
+                continue
+
+            bbox_corners = _to_bbox_corners(word.get("bbox"))
+            if not bbox_corners:
+                continue
+
+            bbox = normalize_bbox(bbox_corners, width=width, height=height)
+            if bbox["x1"] <= bbox["x0"] or bbox["y1"] <= bbox["y0"]:
+                continue
+
+            word_bbox_map[str(word_id)] = bbox
+
+        word_bbox_by_page[page_id] = word_bbox_map
+
+    normalized_findings: list[dict[str, Any]] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+
+        raw_page = (
+            finding.get("page_id")
+            or finding.get("pageId")
+            or finding.get("page_name")
+            or finding.get("pageName")
+            or ""
+        )
+        raw_page_str = str(raw_page).strip()
+        page_id = page_alias_to_id.get(_canonical_key(raw_page_str), raw_page_str)
+
+        width, height = page_size_by_id.get(page_id, (0, 0))
+        refs = _normalize_refs(finding.get("semantic_refs") or finding.get("semanticRefs") or [])
+
+        normalized_bbox: dict[str, float] | None = None
+        bbox_corners = _to_bbox_corners(finding.get("bbox"))
+        if bbox_corners:
+            candidate_bbox = normalize_bbox(bbox_corners, width=width, height=height)
+            if candidate_bbox["x1"] > candidate_bbox["x0"] and candidate_bbox["y1"] > candidate_bbox["y0"]:
+                normalized_bbox = candidate_bbox
+
+        if normalized_bbox is None and refs:
+            word_bboxes = word_bbox_by_page.get(page_id, {})
+            ref_bboxes = [word_bboxes.get(str(ref)) for ref in refs]
+            ref_bboxes = [bbox for bbox in ref_bboxes if bbox is not None]
+            if ref_bboxes:
+                normalized_bbox = {
+                    "x0": min(bbox["x0"] for bbox in ref_bboxes),
+                    "y0": min(bbox["y0"] for bbox in ref_bboxes),
+                    "x1": max(bbox["x1"] for bbox in ref_bboxes),
+                    "y1": max(bbox["y1"] for bbox in ref_bboxes),
+                }
+
+        category = str(finding.get("category") or "")
+        content = str(finding.get("content") or "").strip()
+        confidence_raw = finding.get("confidence")
+        source_text_raw = finding.get("source_text", finding.get("sourceText"))
+        page_name_raw = finding.get("page_name", finding.get("pageName"))
+
+        output: dict[str, Any] = {
+            "category": category,
+            "content": content,
+            "page_id": page_id,
+        }
+
+        if refs:
+            output["semantic_refs"] = refs
+        if normalized_bbox is not None:
+            output["bbox"] = [
+                normalized_bbox["x0"],
+                normalized_bbox["y0"],
+                normalized_bbox["x1"],
+                normalized_bbox["y1"],
+            ]
+        if isinstance(confidence_raw, str) and confidence_raw:
+            output["confidence"] = confidence_raw
+        if isinstance(source_text_raw, str) and source_text_raw:
+            output["source_text"] = source_text_raw
+
+        page_name = str(page_name_raw or "").strip() or page_name_by_id.get(page_id, "")
+        if page_name:
+            output["page_name"] = page_name
+
+        if output["content"] and output["page_id"]:
+            normalized_findings.append(output)
+
+    return normalized_findings
 
 
 def process_brain_mode_result(result: dict[str, Any], width: int, height: int) -> dict[str, Any]:
@@ -700,6 +922,7 @@ async def explore_concept_with_vision(
         )
 
         result = extract_json_response(response.text)
+        normalized_findings = normalize_vision_findings(result.get("findings"), pages)
 
         input_tokens = 0
         output_tokens = 0
@@ -710,7 +933,7 @@ async def explore_concept_with_vision(
         return {
             "concept_name": result.get("concept_name") or None,
             "summary": result.get("summary") or None,
-            "findings": result.get("findings") or [],
+            "findings": normalized_findings,
             "cross_references": result.get("cross_references") or [],
             "gaps": result.get("gaps") or [],
             "response": result.get("response") or "",
@@ -839,6 +1062,7 @@ async def explore_concept_with_vision_streaming(
                     accumulated_text += text
 
         result = extract_json_response(accumulated_text)
+        normalized_findings = normalize_vision_findings(result.get("findings"), pages)
 
         input_tokens = 0
         output_tokens = 0
@@ -851,7 +1075,7 @@ async def explore_concept_with_vision_streaming(
             "data": {
                 "concept_name": result.get("concept_name") or None,
                 "summary": result.get("summary") or None,
-                "findings": result.get("findings") or [],
+                "findings": normalized_findings,
                 "cross_references": result.get("cross_references") or [],
                 "gaps": result.get("gaps") or [],
                 "response": result.get("response") or "",
