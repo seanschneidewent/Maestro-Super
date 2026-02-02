@@ -50,8 +50,8 @@ def get_engine() -> Engine:
         url,
         pool_pre_ping=True,
         pool_recycle=300,  # Recycle connections every 5 min to prevent stale state
-        pool_size=10,       # Increased from 5 to handle concurrent requests
-        max_overflow=20,    # Increased from 10 for burst capacity
+        pool_size=20,       # Increased from 10 to handle processing + UI requests concurrently
+        max_overflow=10,    # Reduced from 20 (still 30 total capacity)
         pool_timeout=10,    # Wait max 10s for connection from pool
         connect_args=connect_args,
         echo=False,

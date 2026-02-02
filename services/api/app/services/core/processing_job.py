@@ -147,6 +147,8 @@ async def process_project_pages(job_id: str):
         db.commit()
 
         project_id = job.project_id
+        job_total_pages = job.total_pages
+        job_processed_pages = job.processed_pages
 
     await emit_event(job_id, {"type": "job_started", "job_id": job_id})
 
@@ -176,8 +178,8 @@ async def process_project_pages(job_id: str):
             for p in pages
         ]
 
-    total_pages = len(page_data_list)
-    processed_count = 0
+    total_pages = job_total_pages
+    processed_count = job_processed_pages
 
     for page_data in page_data_list:
         # Check if job was paused before processing next page
