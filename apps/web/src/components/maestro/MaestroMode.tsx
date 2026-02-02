@@ -187,6 +187,29 @@ function extractConceptDataFromTrace(
   };
 }
 
+function inferQueryModeFromTrace(
+  trace: QueryTraceStep[] | undefined
+): 'fast' | 'deep' {
+  if (!trace || trace.length === 0) return 'fast';
+
+  for (const step of trace) {
+    if (
+      step.type === 'tool_call' &&
+      step.tool === 'explore_concept_with_vision'
+    ) {
+      return 'deep';
+    }
+    if (
+      step.type === 'tool_result' &&
+      step.tool === 'explore_concept_with_vision'
+    ) {
+      return 'deep';
+    }
+  }
+
+  return 'fast';
+}
+
 interface MaestroModeProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
@@ -206,6 +229,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   // UI state
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
+  const [queryMode, setQueryMode] = useState<'fast' | 'deep'>('fast');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
   const [inputHasBeenFocused, setInputHasBeenFocused] = useState(false);
@@ -310,6 +334,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           findings: query.conceptResponse.findings || [],
           gaps: query.conceptResponse.gaps,
           crossReferences: query.conceptResponse.crossReferences,
+          mode: query.mode,
           timestamp: Date.now(),
         });
       }
@@ -321,6 +346,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           id: crypto.randomUUID(),
           content: query.finalAnswer,
           trace: query.trace,
+          mode: query.mode,
           elapsedTime: query.elapsedTime,
           timestamp: Date.now(),
         });
@@ -385,14 +411,15 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         type: 'user-query',
         id: crypto.randomUUID(),
         text: prompt,
+        mode: queryMode,
         timestamp: Date.now(),
       },
     ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     // Toast management handled by useQueryManager
-    submitQuery(prompt, conversationId ?? undefined, selectedPageId);
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
+    submitQuery(prompt, conversationId ?? undefined, selectedPageId, queryMode);
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, queryMode, tutorialActive, currentStep, advanceStep]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -477,11 +504,14 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
     const newFeedItems: FeedItem[] = [];
     for (const q of queriesToShow) {
+      const inferredMode = inferQueryModeFromTrace(q.trace);
+
       // Add user query
       newFeedItems.push({
         type: 'user-query',
         id: `feed-query-${q.id}`,
         text: q.queryText,
+        mode: inferredMode,
         timestamp: new Date(q.createdAt).getTime(),
       });
 
@@ -510,6 +540,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           findings: conceptData.findings || [],
           gaps: conceptData.gaps,
           crossReferences: conceptData.crossReferences,
+          mode: inferredMode,
           timestamp: new Date(q.createdAt).getTime() + 2,
         });
       }
@@ -523,6 +554,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           id: `feed-text-${q.id}`,
           content: responseText,
           trace: (cachedTrace || []) as AgentTraceStep[],
+          mode: inferredMode,
           timestamp: new Date(q.createdAt).getTime() + 3,
         });
       }
@@ -906,17 +938,20 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
                           type: 'user-query',
                           id: crypto.randomUUID(),
                           text: trimmedQuery,
+                          mode: queryMode,
                           timestamp: Date.now(),
                         },
                       ]);
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
                       // Toast management handled by useQueryManager
-                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId);
+                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId, queryMode);
                       setQueryInput('');
                     }
                   }}
                   isProcessing={isStreaming}
+                  queryMode={queryMode}
+                  onQueryModeChange={setQueryMode}
                   onFocus={() => {
                     setInputHasBeenFocused(true);
                   }}

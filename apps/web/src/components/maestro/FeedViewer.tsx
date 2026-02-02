@@ -18,10 +18,10 @@ const RENDER_SCALE = 3;
 
 // Feed item types
 export type FeedItem =
-  | { type: 'user-query'; id: string; text: string; timestamp: number }
+  | { type: 'user-query'; id: string; text: string; mode?: 'fast' | 'deep'; timestamp: number }
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; timestamp: number }
-  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; elapsedTime?: number; timestamp: number }
-  | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; timestamp: number }
+  | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; mode?: 'fast' | 'deep'; elapsedTime?: number; timestamp: number }
+  | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; mode?: 'fast' | 'deep'; timestamp: number }
   | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
 
 interface PageImage {
@@ -40,13 +40,29 @@ const FINDING_CATEGORY_LABELS: Record<string, string> = {
   note: 'Note',
 };
 
+const ModeBadge: React.FC<{ mode?: 'fast' | 'deep' }> = ({ mode }) => {
+  if (!mode) return null;
+
+  const label = mode === 'deep' ? 'Deep Mode' : 'Fast Mode';
+  const classes = mode === 'deep'
+    ? 'bg-cyan-100 text-cyan-700 border-cyan-200'
+    : 'bg-slate-100 text-slate-600 border-slate-200';
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${classes}`}>
+      {label}
+    </span>
+  );
+};
+
 const FindingsCard: React.FC<{
   conceptName?: string | null;
   summary?: string | null;
   findings: AgentFinding[];
   gaps?: string[];
   crossReferences?: AgentCrossReference[];
-}> = ({ conceptName, summary, findings, gaps = [], crossReferences = [] }) => {
+  mode?: 'fast' | 'deep';
+}> = ({ conceptName, summary, findings, gaps = [], crossReferences = [], mode }) => {
   const grouped = findings.reduce<Record<string, AgentFinding[]>>((acc, finding) => {
     const key = finding.category || 'other';
     if (!acc[key]) acc[key] = [];
@@ -66,7 +82,10 @@ const FindingsCard: React.FC<{
     <div className="mx-auto w-full max-w-3xl">
       <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl shadow-sm p-4 md:p-6 space-y-4">
         <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">Concept Findings</div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Concept Findings</div>
+            <ModeBadge mode={mode} />
+          </div>
           <div className="text-lg font-semibold text-slate-800">
             {conceptName || 'Concept Summary'}
           </div>
@@ -755,10 +774,11 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
           switch (item.type) {
             case 'user-query':
               return (
-                <div key={item.id} className="flex justify-end max-w-4xl mx-auto">
+                <div key={item.id} className="flex flex-col items-end gap-1 max-w-4xl mx-auto">
                   <div className="max-w-[80%] bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-md">
                     {item.text}
                   </div>
+                  <ModeBadge mode={item.mode} />
                 </div>
               );
 
@@ -802,6 +822,9 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                   {hasContent ? (
                     <div className="mx-auto w-full max-w-3xl">
                       <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl shadow-sm p-4 md:p-6">
+                        <div className="mb-3">
+                          <ModeBadge mode={item.mode} />
+                        </div>
                         <div className="text-sm text-slate-700 leading-relaxed">
                           <ReactMarkdown
                             components={{
@@ -877,6 +900,7 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                     findings={item.findings}
                     gaps={item.gaps}
                     crossReferences={item.crossReferences}
+                    mode={item.mode}
                   />
                 </div>
               );

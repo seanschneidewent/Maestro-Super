@@ -123,14 +123,18 @@ You will be given:
 - A set of page images (in the SAME ORDER as the manifest below)
 - Per-page semantic OCR data (word-level bboxes + roles)
 - Per-page context summaries and extracted details
+- Per-page Brain Mode regions with bounding boxes
+- Per-page candidate_regions ranked by RAG relevance to the user query
 - A verification plan from Phase 1
 
 Your job:
-1. Visually inspect each page image as needed to confirm facts.
-2. Use code execution to zoom into fine details when needed.
-3. Return structured findings with precise references.
+1. Start with candidate_regions first (these are the best RAG hints).
+2. Decide which regions to inspect in detail and use code execution to zoom/crop.
+3. Expand to other page regions only if candidate_regions are insufficient.
+4. Return structured findings with precise references.
 
 IMPORTANT:
+- candidate_regions and regions include normalized bboxes (0-1) and metadata (type/label/detailNumber/regionIndex).
 - If you can reference semantic OCR word IDs, use "semantic_refs".
 - If not, provide a normalized "bbox" as [x0, y0, x1, y1] in 0-1 coordinates.
 - Every finding must include page_id, category, content, confidence, and source_text.
@@ -647,6 +651,9 @@ async def explore_concept_with_vision(
                 "context_markdown": p.get("context_markdown"),
                 "details": p.get("details"),
                 "semantic_index": p.get("semantic_index"),
+                "regions": p.get("regions"),
+                "candidate_regions": p.get("candidate_regions"),
+                "master_index": p.get("master_index"),
             }
             for p in pages
         ]
@@ -753,6 +760,9 @@ async def explore_concept_with_vision_streaming(
                 "context_markdown": p.get("context_markdown"),
                 "details": p.get("details"),
                 "semantic_index": p.get("semantic_index"),
+                "regions": p.get("regions"),
+                "candidate_regions": p.get("candidate_regions"),
+                "master_index": p.get("master_index"),
             }
             for p in pages
         ]
