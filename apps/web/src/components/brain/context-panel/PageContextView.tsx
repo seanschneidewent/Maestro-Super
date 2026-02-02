@@ -207,21 +207,37 @@ function PageContextViewComponent({
         </div>
       </div>
 
-        {/* Context Markdown */}
+        {/* Sheet Analysis - Agentic Vision output */}
         <div className="p-4 pb-0">
           <h3 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
             <FileText size={14} /> Sheet Analysis
           </h3>
 
-        {page.contextMarkdown ? (
+        {/* Sheet Info Header */}
+        {page.sheetInfo && (
+          <div className="mb-4 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+            {page.sheetInfo.sheetNumber && (
+              <p className="text-cyan-400 font-mono text-sm mb-1">
+                {page.sheetInfo.sheetNumber}
+              </p>
+            )}
+            {page.sheetInfo.sheetTitle && (
+              <p className="text-slate-200 font-medium">{page.sheetInfo.sheetTitle}</p>
+            )}
+            {page.pageType && (
+              <p className="text-xs text-slate-500 mt-1 capitalize">{page.pageType.replace(/_/g, ' ')}</p>
+            )}
+          </div>
+        )}
+
+        {/* Sheet Reflection (main analysis) */}
+        {page.sheetReflection ? (
           <div className="prose prose-sm prose-invert prose-slate max-w-none">
             <div
               className="text-sm text-slate-400 leading-relaxed whitespace-pre-wrap"
               style={{ fontFamily: 'inherit' }}
             >
-              {/* Simple markdown rendering - headers and lists */}
-              {page.contextMarkdown.split('\n').map((line, i) => {
-                // H3 headers
+              {page.sheetReflection.split('\n').map((line, i) => {
                 if (line.startsWith('### ')) {
                   return (
                     <h4 key={i} className="text-cyan-400 font-semibold mt-4 mb-2 text-sm">
@@ -229,7 +245,6 @@ function PageContextViewComponent({
                     </h4>
                   );
                 }
-                // H2 headers
                 if (line.startsWith('## ')) {
                   return (
                     <h3 key={i} className="text-slate-200 font-semibold mt-4 mb-2">
@@ -237,7 +252,6 @@ function PageContextViewComponent({
                     </h3>
                   );
                 }
-                // Bold text
                 if (line.startsWith('**') && line.endsWith('**')) {
                   return (
                     <p key={i} className="text-slate-300 font-medium mt-2">
@@ -245,10 +259,8 @@ function PageContextViewComponent({
                     </p>
                   );
                 }
-                // List items
                 if (line.startsWith('- ')) {
                   const content = line.slice(2);
-                  // Check for bold prefix like "- **Shows:**"
                   const boldMatch = content.match(/^\*\*([^*]+)\*\*\s*(.*)$/);
                   if (boldMatch) {
                     return (
@@ -264,17 +276,22 @@ function PageContextViewComponent({
                     </p>
                   );
                 }
-                // Empty lines
                 if (line.trim() === '') {
                   return <div key={i} className="h-2" />;
                 }
-                // Regular text
                 return (
                   <p key={i} className="text-slate-400">
                     {line}
                   </p>
                 );
               })}
+            </div>
+          </div>
+        ) : page.contextMarkdown ? (
+          // Fallback to legacy contextMarkdown
+          <div className="prose prose-sm prose-invert prose-slate max-w-none">
+            <div className="text-sm text-slate-400 leading-relaxed whitespace-pre-wrap">
+              {page.contextMarkdown}
             </div>
           </div>
         ) : page.fullContext || page.initialContext ? (
@@ -291,8 +308,71 @@ function PageContextViewComponent({
           </p>
         )}
 
-        {/* Details list */}
-        {page.details && page.details.length > 0 && (
+        {/* Cross References */}
+        {page.crossReferences && page.crossReferences.length > 0 && (
+          <div className="mt-4">
+            <h4 className="text-xs font-medium text-slate-400 mb-2">Referenced Sheets</h4>
+            <div className="flex flex-wrap gap-1">
+              {page.crossReferences.map((ref, idx) => (
+                <span
+                  key={idx}
+                  className="px-2 py-0.5 bg-slate-700/50 rounded text-xs text-cyan-400"
+                >
+                  {ref}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Questions This Sheet Answers */}
+        {page.questionsAnswered && page.questionsAnswered.length > 0 && (
+          <div className="mt-4">
+            <h4 className="text-xs font-medium text-slate-400 mb-2">Questions This Sheet Answers</h4>
+            <ul className="space-y-1">
+              {page.questionsAnswered.map((q, idx) => (
+                <li key={idx} className="text-sm text-slate-400 pl-3 relative">
+                  <span className="absolute left-0 text-cyan-500">•</span>
+                  {q}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Regions (structural areas identified on the sheet) */}
+        {page.regions && page.regions.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-sm font-medium text-slate-300 mb-3">
+              Identified Regions ({page.regions.length})
+            </h3>
+            <div className="space-y-2">
+              {page.regions.map((region, idx) => (
+                <div
+                  key={region.id || idx}
+                  className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-cyan-400 font-mono text-xs uppercase">
+                      {region.type || 'region'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      {region.label && (
+                        <p className="text-slate-200 text-sm font-medium">{region.label}</p>
+                      )}
+                      {region.content && (
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">{region.content}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Legacy details fallback */}
+        {!page.regions?.length && page.details && page.details.length > 0 && (
           <div className="mt-6">
             <h3 className="text-sm font-medium text-slate-300 mb-3">
               Extracted Details ({page.details.length})
