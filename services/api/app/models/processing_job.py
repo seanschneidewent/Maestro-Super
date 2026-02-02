@@ -34,7 +34,13 @@ class ProcessingJob(Base):
         String(20),
         default="pending",
         nullable=False,
-    )  # pending | processing | completed | failed
+    )  # pending | processing | completed | failed | paused
+
+    job_type: Mapped[str] = mapped_column(
+        String(20),
+        default="brain_mode",
+        nullable=False,
+    )  # png_rendering | brain_mode
 
     total_pages: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     processed_pages: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

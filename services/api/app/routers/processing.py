@@ -16,6 +16,13 @@ from app.models.page import Page
 from app.models.project import Project
 from app.services.pdf_renderer import get_pdf_page_count, pdf_page_to_image
 from app.services.storage import download_file, upload_page_image
+from app.services.core.png_rendering_job import (
+    create_png_job_queue,
+    get_active_png_job_for_project,
+    process_png_rendering,
+    sse_png_event_generator,
+    start_png_rendering_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -554,6 +561,213 @@ async def retry_page_png(
         return {"success": True, "pageImagePath": storage_path}
     else:
         return {"success": False, "error": error or "Unknown error"}
+
+
+# =============================================================================
+# PNG Rendering Job Endpoints (background task, survives page refresh)
+# =============================================================================
+
+
+@router.post("/projects/{project_id}/png-rendering/start")
+async def start_png_rendering(
+    project_id: str,
+    request: ProcessUploadsRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Start background PNG rendering for a project.
+
+    Optionally accepts a request body to bulk-insert disciplines/pages first.
+    Returns immediately with job_id - rendering continues in background.
+
+    Returns:
+        {"job_id": "...", "total_pages": N, "status": "pending"}
+    """
+    # Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check for existing active PNG job
+    existing_job = get_active_png_job_for_project(project_id, db)
+    if existing_job:
+        return {
+            "job_id": existing_job.id,
+            "total_pages": existing_job.total_pages,
+            "processed_pages": existing_job.processed_pages,
+            "status": existing_job.status,
+            "message": "PNG rendering already in progress",
+        }
+
+    # Count pages in each PDF (async, before DB insert)
+    pdf_page_counts: dict[str, int] = {}
+    if request and request.disciplines:
+        unique_pdf_paths: set[str] = set()
+        for disc_data in request.disciplines:
+            for page_input in disc_data.pages:
+                unique_pdf_paths.add(page_input.storage_path)
+
+        for pdf_path in unique_pdf_paths:
+            try:
+                pdf_bytes = await download_file(pdf_path)
+                page_count = get_pdf_page_count(pdf_bytes)
+                pdf_page_counts[pdf_path] = page_count
+                logger.info(f"PDF {pdf_path} has {page_count} page(s)")
+            except Exception as e:
+                logger.warning(f"Failed to count pages in {pdf_path}: {e}, defaulting to 1")
+                pdf_page_counts[pdf_path] = 1
+
+    # Bulk insert disciplines/pages
+    if request and request.disciplines:
+        for disc_data in request.disciplines:
+            discipline = Discipline(
+                project_id=project_id,
+                name=disc_data.code,
+                display_name=disc_data.display_name,
+            )
+            db.add(discipline)
+            db.flush()
+
+            for page_input in disc_data.pages:
+                page_count = pdf_page_counts.get(page_input.storage_path, 1)
+                base_name = page_input.page_name
+
+                for idx in range(page_count):
+                    if page_count > 1:
+                        page_name = f"({idx + 1} of {page_count}) {base_name}"
+                    else:
+                        page_name = base_name
+
+                    page = Page(
+                        discipline_id=str(discipline.id),
+                        page_name=page_name,
+                        file_path=page_input.storage_path,
+                        page_index=idx,
+                    )
+                    db.add(page)
+
+        db.commit()
+        logger.info(f"Bulk inserted {len(request.disciplines)} disciplines for project {project_id}")
+
+    # Create PNG rendering job
+    job = start_png_rendering_job(project_id, db)
+
+    # Start background task
+    create_png_job_queue(job.id)
+    asyncio.create_task(process_png_rendering(job.id))
+
+    return {
+        "job_id": job.id,
+        "total_pages": job.total_pages,
+        "status": job.status,
+    }
+
+
+@router.get("/projects/{project_id}/png-rendering/stream")
+async def stream_png_rendering(
+    project_id: str,
+):
+    """
+    SSE endpoint for streaming PNG rendering progress.
+
+    Reconnects to an active or recent PNG rendering job.
+
+    SSE events:
+    - {"type": "init", "status": "...", "total_pages": N, "processed_pages": M}
+    - {"type": "png_progress", "current": N, "total": T}
+    - {"type": "png_failures", "page_ids": [...]}
+    - {"type": "job_completed", "processed_pages": N, "total_pages": T}
+    - {"type": "job_failed", "error": "..."}
+    """
+    from app.models.processing_job import ProcessingJob
+
+    with SessionLocal() as db:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Find active PNG job
+        job = get_active_png_job_for_project(project_id, db)
+        if not job:
+            # Check for most recent PNG job
+            job = (
+                db.query(ProcessingJob)
+                .filter(
+                    ProcessingJob.project_id == project_id,
+                    ProcessingJob.job_type == "png_rendering",
+                )
+                .order_by(ProcessingJob.created_at.desc())
+                .first()
+            )
+            if not job:
+                raise HTTPException(status_code=404, detail="No PNG rendering job found")
+
+        job_id = job.id
+
+    return StreamingResponse(
+        sse_png_event_generator(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/projects/{project_id}/png-rendering/status")
+async def get_png_rendering_status(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get current PNG rendering status for a project.
+
+    Returns:
+        {"status": "...", "job_id": "...", "total_pages": N, "processed_pages": M, ...}
+    """
+    from app.models.processing_job import ProcessingJob
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check for active PNG job
+    job = get_active_png_job_for_project(project_id, db)
+    if job:
+        return {
+            "status": job.status,
+            "job_id": job.id,
+            "total_pages": job.total_pages,
+            "processed_pages": job.processed_pages,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+        }
+
+    # Check for most recent completed PNG job
+    job = (
+        db.query(ProcessingJob)
+        .filter(
+            ProcessingJob.project_id == project_id,
+            ProcessingJob.job_type == "png_rendering",
+        )
+        .order_by(ProcessingJob.created_at.desc())
+        .first()
+    )
+
+    if job:
+        return {
+            "status": job.status,
+            "job_id": job.id,
+            "total_pages": job.total_pages,
+            "processed_pages": job.processed_pages,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "error_message": job.error_message,
+        }
+
+    return {
+        "status": "none",
+        "message": "No PNG rendering jobs found for this project",
+    }
 
 
 # =============================================================================
