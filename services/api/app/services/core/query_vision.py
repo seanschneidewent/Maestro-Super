@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 
 from app.config import get_settings, QUERY_VISION_MODEL
-from app.services.utils.parsing import coerce_int, extract_json_response
+from app.services.utils.parsing import extract_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,34 @@ def _build_query_prompt(
 def crop_region(image_bytes: bytes, bbox: dict, padding: int = 50) -> tuple[bytes, dict]:
     """Crop image to region bbox with padding. Returns (bytes, crop_bbox)."""
     image = Image.open(BytesIO(image_bytes))
-    x0 = coerce_int(bbox.get("x0"), 0)
-    y0 = coerce_int(bbox.get("y0"), 0)
-    x1 = coerce_int(bbox.get("x1"), 0)
-    y1 = coerce_int(bbox.get("y1"), 0)
+    raw_x0 = bbox.get("x0", 0) if isinstance(bbox, dict) else 0
+    raw_y0 = bbox.get("y0", 0) if isinstance(bbox, dict) else 0
+    raw_x1 = bbox.get("x1", 0) if isinstance(bbox, dict) else 0
+    raw_y1 = bbox.get("y1", 0) if isinstance(bbox, dict) else 0
+
+    def as_float(value: object) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    x0 = as_float(raw_x0)
+    y0 = as_float(raw_y0)
+    x1 = as_float(raw_x1)
+    y1 = as_float(raw_y1)
+
+    # Brain Mode stores normalized coordinates (0-1). Keep pixel fallback for older data.
+    coords = [x0, y0, x1, y1]
+    if all(0.0 <= coord <= 1.0 for coord in coords):
+        x0 = x0 * image.width
+        x1 = x1 * image.width
+        y0 = y0 * image.height
+        y1 = y1 * image.height
+
+    x0 = int(round(x0))
+    y0 = int(round(y0))
+    x1 = int(round(x1))
+    y1 = int(round(y1))
 
     x0 = max(0, x0 - padding)
     y0 = max(0, y0 - padding)

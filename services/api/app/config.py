@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Model Constants
 # Centralized model names to avoid hardcoding throughout the codebase.
 # ---------------------------------------------------------------------------
-BRAIN_MODE_MODEL = "gemini-2.0-flash"
+BRAIN_MODE_MODEL = "gemini-2.5-flash-preview-04-17"
+BRAIN_MODE_THINKING_LEVEL = "high"
+USE_AGENTIC_VISION = True
 QUERY_VISION_MODEL = "gemini-2.0-flash"
 AGENT_QUERY_MODEL = "gemini-3-flash-preview"
 
@@ -43,6 +45,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     openrouter_api_key: str | None = None  # For Kimi K2 query agent
     voyage_api_key: str | None = None
+
+    # Brain Mode - Agentic Vision
+    brain_mode_model: str = BRAIN_MODE_MODEL
+    brain_mode_thinking_level: str = BRAIN_MODE_THINKING_LEVEL
+    use_agentic_vision: bool = USE_AGENTIC_VISION
 
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production

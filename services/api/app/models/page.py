@@ -61,6 +61,11 @@ class Page(Base):
     sheet_reflection: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Brain Mode reflection
     page_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # detail_sheet, plan, etc.
     cross_references: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Referenced sheets
+    sheet_info: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Sheet metadata
+    master_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Aggregated RAG index
+    questions_answered: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Suggested QA prompts
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Brain Mode latency
+    processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Last processing failure
 
     # Vector embedding for page-level semantic search (Voyage 1024 dimensions)
     if PAGE_EMBEDDING_COLUMN_TYPE is not None:

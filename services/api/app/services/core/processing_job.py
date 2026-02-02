@@ -276,6 +276,11 @@ async def process_project_pages(job_id: str):
                     "sheet_reflection": result.get("sheet_reflection"),
                     "page_type": result.get("page_type"),
                     "cross_references": result.get("cross_references"),
+                    "sheet_info": result.get("sheet_info"),
+                    "master_index": result.get("index"),
+                    "questions_answered": result.get("questions_this_sheet_answers"),
+                    "processing_time_ms": result.get("processing_time_ms"),
+                    "processing_error": None,
                     "processing_status": "completed",
                     "processed_at": datetime.utcnow(),
                 }
@@ -320,7 +325,9 @@ async def process_project_pages(job_id: str):
             # Mark page as failed
             with SessionLocal() as db:
                 db.query(Page).filter(Page.id == page_id).update({
-                    "processing_status": "failed"
+                    "processing_status": "failed",
+                    "processing_error": str(e),
+                    "processed_at": datetime.utcnow(),
                 })
                 db.commit()
 
