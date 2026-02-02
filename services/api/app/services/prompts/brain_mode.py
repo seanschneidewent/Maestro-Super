@@ -231,7 +231,7 @@ Return JSON with this structure:
     "What keynotes are on the demo RCP?"
   ],
   
-  "sheet_reflection": "Demo RCP showing ceiling elements to remove (ACT in dining/kitchen) and protect (canopies). Key coordination: electrical fixtures in demo zones. See A201 for new configuration.",
+  "sheet_reflection": "## A002: DEMOLITION RCP\n\nThis sheet shows ceiling demolition scope for the renovation, identifying ACT ceiling areas to remove in dining and kitchen zones.\n\n**Key Details:**\n- **Demo Area 1 - Dining:** Remove existing ACT ceiling grid and tiles\n- **Demo Area 2 - Kitchen:** Remove ceiling to deck for new hood installation\n\n**Materials & Specs:**\n- ACT ceiling: 2x4 grid system to be removed\n- Protect existing canopy structures\n\n**Coordination Notes:**\n- Verify electrical fixture locations before demo\n- See A201 for new ceiling configuration",
   
   "cross_references": ["A201", "A301"]
 }
@@ -306,11 +306,26 @@ Pre-generate 5-8 natural questions based on WHAT'S ACTUALLY ON THE SHEET:
 - "What's the roof assembly?"
 - "Where is the vapor barrier?"
 
-### Sheet Reflection (superintendent_summary)
-2-3 sentences maximum. Focus on:
-- What does this sheet tell me to DO?
-- What coordination is needed?
-- What's the key takeaway for the field?
+### Sheet Reflection (superintendent briefing)
+Write a structured markdown summary. Use this format:
+
+## [Sheet Number]: [Sheet Title]
+
+[One paragraph overview - what type of sheet, what it covers, key purpose]
+
+**Key Details:**
+- **Detail [#] - [Name]:** [What it shows, key specs]
+- **Detail [#] - [Name]:** [What it shows, key specs]
+
+**Materials & Specs:**
+- [Material 1 with spec]
+- [Material 2 with spec]
+
+**Coordination Notes:**
+- [Cross-reference or coordination point]
+- [Another coordination point]
+
+Be specific. Name the details. Include actual specs and dimensions when visible.
 
 ### Regions (with bounding boxes)
 Create a region for EACH distinct area:
