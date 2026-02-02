@@ -540,7 +540,7 @@ export const api = {
         body: data,
       }),
     get: (id: string) => request<PageResponse>(`/pages/${id}`),
-    update: (id: string, data: { pageName?: string; filePath?: string; initialContext?: string; fullContext?: string }) =>
+    update: (id: string, data: { pageName?: string; filePath?: string; initialContext?: string; fullContext?: string; regions?: Region[] }) =>
       request<PageResponse>(`/pages/${id}`, { method: 'PATCH', body: data }),
     delete: (id: string) => request<void>(`/pages/${id}`, { method: 'DELETE' }),
     retryPng: (id: string) =>

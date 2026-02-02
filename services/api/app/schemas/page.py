@@ -24,6 +24,7 @@ class PageUpdate(BaseModel):
     full_context: str | None = Field(default=None, alias="fullContext")
     processed_pass_1: bool | None = Field(default=None, alias="processedPass1")
     processed_pass_2: bool | None = Field(default=None, alias="processedPass2")
+    regions: list[dict] | None = Field(default=None, alias="regions")
 
     model_config = ConfigDict(populate_by_name=True)
 

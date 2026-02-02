@@ -1,8 +1,8 @@
-import { memo, useState, useEffect, useRef } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Eye, Maximize2, Loader2, Check, AlertCircle, FileText } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { api, PageResponse } from '../../../lib/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, PageResponse, Region } from '../../../lib/api';
 import { getPublicUrl } from '../../../lib/storage';
 import { PageThumbnailModal } from '../PageThumbnailModal';
 import { RegionOverlay } from './RegionOverlay';
@@ -25,6 +25,7 @@ function PageContextViewComponent({
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [thumbnailDimensions, setThumbnailDimensions] = useState({ width: 0, height: 0 });
   const thumbnailContainerRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
 
   // Fetch page data
   const { data: page, isLoading, error } = useQuery<PageResponse>({
@@ -32,6 +33,13 @@ function PageContextViewComponent({
     queryFn: () => api.pages.get(pageId),
     staleTime: 60_000,
   });
+
+  /** Save updated regions to the backend */
+  const handleRegionsSave = useCallback(async (regions: Region[]) => {
+    await api.pages.update(pageId, { regions });
+    // Invalidate and refetch page data
+    await queryClient.invalidateQueries({ queryKey: ['page', pageId] });
+  }, [pageId, queryClient]);
 
   // Get image URL
   const imageUrl = page?.pageImagePath ? getPublicUrl(page.pageImagePath) : page?.filePath ? getPublicUrl(page.filePath) : null;
@@ -427,7 +435,9 @@ function PageContextViewComponent({
           onClose={() => setModalOpen(false)}
           imageUrl={imageUrl}
           pageName={page.pageName}
+          pageId={pageId}
           regions={page.regions}
+          onRegionsSave={handleRegionsSave}
         />,
         document.body
       )}
