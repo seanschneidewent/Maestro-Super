@@ -6,6 +6,8 @@ interface QueryInputProps {
   onChange: (value: string) => void
   onSubmit: () => void
   isProcessing: boolean
+  queryMode?: 'fast' | 'deep'
+  onQueryModeChange?: (mode: 'fast' | 'deep') => void
   placeholder?: string
   onFocus?: () => void
 }
@@ -18,6 +20,8 @@ export function QueryInput({
   onChange,
   onSubmit,
   isProcessing,
+  queryMode = 'fast',
+  onQueryModeChange,
   placeholder = 'Ask about your plans...',
   onFocus,
 }: QueryInputProps) {
@@ -187,6 +191,35 @@ export function QueryInput({
           ${isRecording ? 'placeholder:text-red-400' : ''}
         `}
       />
+
+      {/* Fast/Deep mode toggle */}
+      {onQueryModeChange && (
+        <button
+          type="button"
+          onClick={() => onQueryModeChange(queryMode === 'fast' ? 'deep' : 'fast')}
+          disabled={isProcessing}
+          title={queryMode === 'deep' ? 'Deep mode enabled' : 'Fast mode enabled'}
+          className={`
+            flex-shrink-0 rounded-full px-3 mr-2
+            text-xs font-semibold uppercase tracking-wide
+            transition-all duration-150
+            ${isProcessing ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : ''}
+            ${
+              !isProcessing && queryMode === 'deep'
+                ? 'bg-cyan-500 text-white hover:bg-cyan-600'
+                : ''
+            }
+            ${
+              !isProcessing && queryMode === 'fast'
+                ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                : ''
+            }
+          `}
+          style={{ height: buttonSize }}
+        >
+          {queryMode === 'deep' ? 'Deep' : 'Fast'}
+        </button>
+      )}
 
       {/* Action button - Mic / Stop / Send */}
       <button

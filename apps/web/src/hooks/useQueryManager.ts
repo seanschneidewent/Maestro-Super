@@ -53,6 +53,7 @@ export interface AgentSelectedPage {
 export interface CompletedQuery {
   queryId: string
   queryText: string
+  mode: 'fast' | 'deep'
   displayTitle: string | null
   conversationTitle: string | null
   pages: AgentSelectedPage[]
@@ -63,10 +64,12 @@ export interface CompletedQuery {
 }
 
 export type QueryStatus = 'streaming' | 'complete' | 'error'
+export type QueryMode = 'fast' | 'deep'
 
 export interface QueryState {
   id: string
   queryText: string
+  mode: QueryMode
   conversationId: string | null
   viewingPageId: string | null
   toastId: string
@@ -94,7 +97,12 @@ interface UseQueryManagerOptions {
 
 interface UseQueryManagerReturn {
   // Submit a new query (doesn't abort existing ones)
-  submitQuery: (query: string, conversationId?: string, viewingPageId?: string | null) => string | null
+  submitQuery: (
+    query: string,
+    conversationId?: string,
+    viewingPageId?: string | null,
+    mode?: QueryMode
+  ) => string | null
 
   // The "active" query being displayed in main UI
   activeQueryId: string | null
@@ -239,6 +247,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
           query: queryState.queryText,
           conversationId: queryState.conversationId,
           viewingPageId: queryState.viewingPageId,
+          mode: queryState.mode,
         }),
         signal: abortController.signal,
       })
@@ -426,9 +435,13 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
           // Cache page data from search_pages
           if (data.tool === 'search_pages') {
-            const result = data.result as { pages?: Array<{ page_id: string; page_name: string; file_path: string; discipline_id: string }> }
-            if (result?.pages) {
-              for (const p of result.pages) {
+            const result = data.result as
+              | { pages?: Array<{ page_id: string; page_name: string; file_path?: string; discipline_id?: string }> }
+              | Array<{ page_id: string; page_name: string; file_path?: string; discipline_id?: string }>
+            const pages = Array.isArray(result) ? result : result?.pages
+            if (pages) {
+              for (const p of pages) {
+                if (!p.file_path || !p.discipline_id) continue
                 pageDataCacheRef.current.set(p.page_id, {
                   filePath: p.file_path,
                   pageName: p.page_name,
@@ -721,6 +734,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             onQueryCompleteRef.current({
               queryId,
               queryText: query.queryText,
+              mode: query.mode,
               displayTitle,
               conversationTitle,
               pages: [...accumulator.selectedPages],
@@ -784,7 +798,8 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
   const submitQuery = useCallback((
     queryText: string,
     conversationId?: string,
-    viewingPageId?: string | null
+    viewingPageId?: string | null,
+    mode: QueryMode = 'fast'
   ): string | null => {
     // Check concurrent limit
     const runningCount = Array.from(queries.values()).filter(q => q.status === 'streaming').length
@@ -798,9 +813,10 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     const toastId = addToast(queryText, conversationId ?? null)
 
     // Create initial state
-      const queryState: QueryState = {
+    const queryState: QueryState = {
         id: queryId,
         queryText,
+        mode,
         conversationId: conversationId ?? null,
         viewingPageId: viewingPageId ?? null,
         toastId,
@@ -874,6 +890,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     const queryState: QueryState = {
       id: queryId,
       queryText: '',
+      mode: 'fast',
       conversationId: null,
       viewingPageId: null,
       toastId: '',

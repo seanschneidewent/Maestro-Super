@@ -1,7 +1,8 @@
 """Query agent for navigating construction plan graph.
 
-Uses Gemini structured output for single-shot queries (fast path)
-with Grok 4.1 Fast via OpenRouter as fallback.
+Fast mode routes users to likely pages using RAG + project structure context.
+Deep mode adds streamed Gemini agentic vision exploration on top of the same RAG seed.
+Grok via OpenRouter remains available for legacy fast-mode behavior.
 """
 
 import asyncio
@@ -9,7 +10,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 import openai
 from sqlalchemy.orm import Session, joinedload
@@ -20,9 +21,10 @@ from app.models.page import Page
 
 logger = logging.getLogger(__name__)
 
-VISION_PAGE_LIMIT = 3
-REGIONS_PER_PAGE_LIMIT = 3
-REGION_QUERY_LIMIT = 6
+FAST_PAGE_LIMIT = 8
+DEEP_PAGE_LIMIT = 5
+CROSS_REF_PAGE_LIMIT = 3
+DEEP_CANDIDATE_REGION_LIMIT = 8
 
 
 def _build_history_context(history_messages: list[dict[str, Any]] | None) -> str:
@@ -185,6 +187,76 @@ def _extract_cross_reference_sheet_names(cross_references: Any) -> set[str]:
         if sheet_name:
             names.add(sheet_name)
     return names
+
+
+def _expand_with_cross_reference_pages(
+    db: Session,
+    project_id: str,
+    page_ids: list[str],
+    *,
+    seed_limit: int = CROSS_REF_PAGE_LIMIT,
+    expansion_limit: int = CROSS_REF_PAGE_LIMIT,
+) -> list[str]:
+    """Add a few cross-referenced pages to improve navigation context."""
+    if not page_ids:
+        return []
+
+    pages_for_cross_refs = _load_pages_for_vision(db, page_ids[:seed_limit])
+    cross_ref_sheet_names: set[str] = set()
+    for page in pages_for_cross_refs:
+        cross_ref_sheet_names.update(_extract_cross_reference_sheet_names(page.cross_references))
+
+    if not cross_ref_sheet_names:
+        return page_ids
+
+    cross_ref_pages = (
+        db.query(Page)
+        .join(Discipline)
+        .filter(
+            Discipline.project_id == project_id,
+            Page.page_name.in_(list(cross_ref_sheet_names)),
+        )
+        .order_by(Page.page_name)
+        .limit(expansion_limit)
+        .all()
+    )
+    cross_ref_ids = [str(p.id) for p in cross_ref_pages]
+    return page_ids + [pid for pid in cross_ref_ids if pid not in page_ids]
+
+
+def _order_page_ids(
+    db: Session,
+    page_ids: list[str],
+) -> tuple[list[str], dict[str, Page]]:
+    """Sort selected pages by sheet number and return a lookup map."""
+    if not page_ids:
+        return [], {}
+
+    pages_for_order = _load_pages_for_vision(db, page_ids)
+    page_map = {str(p.id): p for p in pages_for_order}
+    ordered_page_ids = sorted(
+        [pid for pid in page_ids if pid in page_map],
+        key=lambda pid: _page_sort_key(page_map[pid].page_name or ""),
+    )
+    return ordered_page_ids, page_map
+
+
+async def _load_page_image_bytes(page: Page) -> bytes | None:
+    """Load a rendered page image (PNG preferred, PDF fallback)."""
+    from app.services.providers.pdf_renderer import pdf_page_to_image
+    from app.services.utils.storage import download_file
+
+    try:
+        if page.page_image_path and str(page.page_image_path).lower().endswith(".png"):
+            return await download_file(page.page_image_path)
+        if page.file_path and str(page.file_path).lower().endswith(".pdf"):
+            pdf_bytes = await download_file(page.file_path)
+            return pdf_page_to_image(pdf_bytes, page.page_index, dpi=150)
+        if page.file_path and str(page.file_path).lower().endswith(".png"):
+            return await download_file(page.file_path)
+    except Exception as e:
+        logger.warning("Failed to load page image for %s: %s", page.page_name, e)
+    return None
 
 
 # Tool definitions in OpenAI format
@@ -480,13 +552,18 @@ async def run_agent_query(
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
     viewing_context: dict[str, Any] | None = None,
+    mode: Literal["fast", "deep"] = "fast",
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events.
 
-    Uses AGENT_BACKEND env var to select implementation:
-    - "gemini" (default): Fast single-shot Gemini structured output
-    - "grok": Multi-turn Grok 4.1 Fast via OpenRouter (legacy)
+    Modes:
+    - fast (default): RAG + project structure routing (no vision calls)
+    - deep: RAG + agentic vision exploration with streamed thinking
+
+    Backend selection:
+    - AGENT_BACKEND=grok is only used for fast mode
+    - Deep mode always uses Gemini vision exploration
 
     Yields events:
     - {"type": "text", "content": "..."} - Model's reasoning/response
@@ -500,15 +577,476 @@ async def run_agent_query(
         query: User's question
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
+        mode: "fast" or "deep"
     """
+    mode = "deep" if mode == "deep" else "fast"
     backend = os.environ.get("AGENT_BACKEND", "gemini").lower()
 
-    if backend == "grok":
+    if mode == "deep":
+        async for event in run_agent_query_deep(
+            db, project_id, query, history_messages, viewing_context
+        ):
+            yield event
+    elif backend == "grok":
         async for event in run_agent_query_grok(db, project_id, query, history_messages, viewing_context):
             yield event
     else:
-        async for event in run_agent_query_gemini(db, project_id, query, history_messages, viewing_context):
+        async for event in run_agent_query_fast(db, project_id, query, history_messages, viewing_context):
             yield event
+
+
+async def run_agent_query_fast(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+) -> AsyncIterator[dict]:
+    """
+    Fast mode:
+    - Pull project structure summary
+    - Use RAG to identify likely pages
+    - Route user to those pages without running vision inference
+    """
+    from app.services.tools import get_project_structure_summary, search_pages, select_pages
+    from app.services.utils.search import search_pages_and_regions
+
+    _ = history_messages, viewing_context
+
+    trace: list[dict] = []
+
+    # 1) Load project structure summary for context
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
+    trace.append({"type": "tool_call", "tool": "list_project_pages", "input": {}})
+
+    project_structure: dict[str, Any] = {"disciplines": [], "total_pages": 0}
+    try:
+        structure_result = await get_project_structure_summary(db, project_id=project_id)
+        if isinstance(structure_result, dict):
+            project_structure = structure_result
+    except Exception as e:
+        logger.warning("Project structure summary failed: %s", e)
+
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure}
+    trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
+
+    # 2) RAG search by regions
+    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
+
+    try:
+        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
+    except Exception as e:
+        logger.exception("Region search failed: %s", e)
+        yield {"type": "error", "message": f"Search failed: {str(e)}"}
+        return
+
+    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+    # 3) Secondary keyword search to improve routing confidence
+    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
+    page_results = await search_pages(db, query=query, project_id=project_id, limit=FAST_PAGE_LIMIT)
+    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+    trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+
+    region_page_ids = [pid for pid in region_matches.keys() if pid]
+    keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+
+    page_ids = list(dict.fromkeys([*region_page_ids, *keyword_page_ids]))
+
+    if not page_ids:
+        # Last fallback: choose a few sheets from project structure if available.
+        disciplines = project_structure.get("disciplines", [])
+        if isinstance(disciplines, list):
+            for discipline in disciplines:
+                pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                if not isinstance(pages, list):
+                    continue
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    page_id = page.get("page_id")
+                    if page_id and page_id not in page_ids:
+                        page_ids.append(page_id)
+                    if len(page_ids) >= FAST_PAGE_LIMIT:
+                        break
+                if len(page_ids) >= FAST_PAGE_LIMIT:
+                    break
+
+    if page_ids:
+        page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+
+    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:FAST_PAGE_LIMIT]
+    ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+
+    # 4) Select pages for frontend display
+    if ordered_page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
+        try:
+            result = await select_pages(db, page_ids=ordered_page_ids)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            yield {"type": "tool_result", "tool": "select_pages", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
+        except Exception as e:
+            logger.error(f"select_pages failed: {e}")
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
+
+    # 5) Compose response text
+    if ordered_page_ids:
+        top_names = [
+            page_map[pid].page_name
+            for pid in ordered_page_ids[:4]
+            if pid in page_map and page_map[pid].page_name
+        ]
+        if top_names:
+            response_text = f"Best sheets to check first: {', '.join(top_names)}."
+            if len(ordered_page_ids) > len(top_names):
+                response_text += f" I also pulled {len(ordered_page_ids) - len(top_names)} related sheets."
+        else:
+            response_text = f"Pulled {len(ordered_page_ids)} relevant sheets for review."
+    else:
+        response_text = "I couldn't find a strong page match yet. Try adding a sheet number or discipline keyword."
+
+    if response_text:
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+
+    # 6) Done
+    tokens = _extract_query_tokens(query)
+    display_title = " ".join(tokens[:3]).title() if tokens else "Query"
+
+    yield {
+        "type": "done",
+        "trace": trace,
+        "usage": {"inputTokens": 0, "outputTokens": 0},
+        "displayTitle": display_title,
+        "conversationTitle": display_title,
+        "highlights": [],
+        "conceptName": None,
+        "summary": None,
+        "findings": [],
+        "crossReferences": [],
+        "gaps": [],
+    }
+
+
+async def run_agent_query_deep(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+) -> AsyncIterator[dict]:
+    """
+    Deep mode:
+    - Same RAG page retrieval as fast mode
+    - Streams Gemini thinking while exploring regions with vision
+    - Returns structured findings/cross-references/gaps
+    """
+    from app.services.providers.gemini import explore_concept_with_vision_streaming
+    from app.services.tools import get_project_structure_summary, search_pages, select_pages
+    from app.services.utils.search import search_pages_and_regions
+
+    trace: list[dict] = []
+
+    # 1) Project structure summary
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
+    trace.append({"type": "tool_call", "tool": "list_project_pages", "input": {}})
+
+    project_structure: dict[str, Any] = {"disciplines": [], "total_pages": 0}
+    try:
+        structure_result = await get_project_structure_summary(db, project_id=project_id)
+        if isinstance(structure_result, dict):
+            project_structure = structure_result
+    except Exception as e:
+        logger.warning("Project structure summary failed: %s", e)
+
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure}
+    trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
+
+    # 2) RAG region search
+    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
+
+    try:
+        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
+    except Exception as e:
+        logger.exception("Region search failed: %s", e)
+        yield {"type": "error", "message": f"Search failed: {str(e)}"}
+        return
+
+    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+    page_ids = [pid for pid in region_matches.keys() if pid]
+
+    # 3) Fallback keyword search when region retrieval is empty
+    if not page_ids:
+        yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+        trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
+        page_results = await search_pages(db, query=query, project_id=project_id, limit=DEEP_PAGE_LIMIT)
+        yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+        trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+        page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+
+    if not page_ids:
+        disciplines = project_structure.get("disciplines", [])
+        if isinstance(disciplines, list):
+            for discipline in disciplines:
+                pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                if not isinstance(pages, list):
+                    continue
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    page_id = page.get("page_id")
+                    if page_id and page_id not in page_ids:
+                        page_ids.append(page_id)
+                    if len(page_ids) >= DEEP_PAGE_LIMIT:
+                        break
+                if len(page_ids) >= DEEP_PAGE_LIMIT:
+                    break
+
+    if page_ids:
+        page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+
+    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
+    ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+
+    # 4) Select pages so frontend and persistence stay consistent
+    if ordered_page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
+        try:
+            result = await select_pages(db, page_ids=ordered_page_ids)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            yield {"type": "tool_result", "tool": "select_pages", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
+        except Exception as e:
+            logger.error("select_pages failed: %s", e)
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
+
+    if not ordered_page_ids:
+        response_text = "I couldn't find a reliable set of sheets to analyze deeply."
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+        tokens = _extract_query_tokens(query)
+        display_title = " ".join(tokens[:3]).title() if tokens else "Query"
+        yield {
+            "type": "done",
+            "trace": trace,
+            "usage": {"inputTokens": 0, "outputTokens": 0},
+            "displayTitle": display_title,
+            "conversationTitle": display_title,
+            "highlights": [],
+            "conceptName": None,
+            "summary": None,
+            "findings": [],
+            "crossReferences": [],
+            "gaps": [],
+        }
+        return
+
+    # 5) Prepare deep vision page payload
+    query_tokens = _extract_query_tokens(query)
+    history_context = _build_history_context(history_messages)
+    viewing_context_str = _build_viewing_context_str(viewing_context)
+
+    pages_for_vision: list[dict[str, Any]] = []
+    for page_id in ordered_page_ids[:DEEP_PAGE_LIMIT]:
+        page = page_map.get(page_id)
+        if not page:
+            continue
+
+        image_bytes = await _load_page_image_bytes(page)
+        if not image_bytes:
+            continue
+
+        raw_regions = page.regions if isinstance(page.regions, list) else []
+        regions: list[dict[str, Any]] = []
+        region_index_by_id: dict[str, int] = {}
+        for idx, raw_region in enumerate(raw_regions):
+            if not isinstance(raw_region, dict):
+                continue
+            region = dict(raw_region)
+            region.pop("embedding", None)
+            if not isinstance(region.get("bbox"), dict):
+                continue
+            region.setdefault("regionIndex", idx)
+            if region.get("detailNumber") is None and region.get("detail_number") is not None:
+                region["detailNumber"] = region.get("detail_number")
+            region_id = region.get("id")
+            if region_id:
+                region_index_by_id[str(region_id)] = int(region["regionIndex"])
+            regions.append(region)
+
+        candidate_regions: list[dict[str, Any]] = []
+        for raw_region in (region_matches.get(str(page.id)) or [])[:DEEP_CANDIDATE_REGION_LIMIT]:
+            if not isinstance(raw_region, dict):
+                continue
+            region = dict(raw_region)
+            region.pop("embedding", None)
+            region_id = region.get("id")
+            if region.get("regionIndex") is None and region_id and str(region_id) in region_index_by_id:
+                region["regionIndex"] = region_index_by_id[str(region_id)]
+            if region.get("detailNumber") is None and region.get("detail_number") is not None:
+                region["detailNumber"] = region.get("detail_number")
+            candidate_regions.append(region)
+
+        context_markdown = (
+            page.sheet_reflection
+            or page.context_markdown
+            or page.full_context
+            or page.initial_context
+            or ""
+        )
+        details = _filter_details(page.details if isinstance(page.details, list) else [], query_tokens)
+        semantic_index = _filter_semantic_index(page.semantic_index, query_tokens)
+
+        pages_for_vision.append(
+            {
+                "page_id": str(page.id),
+                "page_name": page.page_name,
+                "discipline": page.discipline.display_name if page.discipline else None,
+                "context_markdown": context_markdown,
+                "details": details,
+                "semantic_index": semantic_index,
+                "regions": regions,
+                "candidate_regions": candidate_regions,
+                "master_index": page.master_index if isinstance(page.master_index, dict) else None,
+                "image_bytes": image_bytes,
+            }
+        )
+
+    if not pages_for_vision:
+        response_text = "I found relevant sheets, but I couldn't load page images for deep analysis."
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+        tokens = _extract_query_tokens(query)
+        display_title = " ".join(tokens[:3]).title() if tokens else "Query"
+        yield {
+            "type": "done",
+            "trace": trace,
+            "usage": {"inputTokens": 0, "outputTokens": 0},
+            "displayTitle": display_title,
+            "conversationTitle": display_title,
+            "highlights": [],
+            "conceptName": None,
+            "summary": None,
+            "findings": [],
+            "crossReferences": [],
+            "gaps": [],
+        }
+        return
+
+    vision_page_ids = [str(p.get("page_id")) for p in pages_for_vision if p.get("page_id")]
+    tool_input = {"query": query, "page_ids": vision_page_ids}
+    yield {"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input}
+    trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input})
+
+    concept_result: dict[str, Any] = {}
+    try:
+        async for event in explore_concept_with_vision_streaming(
+            query=query,
+            pages=pages_for_vision,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        ):
+            event_type = event.get("type")
+            if event_type == "thinking":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "thinking", "content": content}
+                    trace.append({"type": "thinking", "content": content})
+            elif event_type == "result":
+                data = event.get("data")
+                if isinstance(data, dict):
+                    concept_result = data
+    except Exception as e:
+        logger.exception("Deep vision exploration failed: %s", e)
+        yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
+        return
+
+    yield {
+        "type": "tool_result",
+        "tool": "explore_concept_with_vision",
+        "result": concept_result,
+    }
+    trace.append(
+        {
+            "type": "tool_result",
+            "tool": "explore_concept_with_vision",
+            "result": concept_result,
+        }
+    )
+
+    response_text = concept_result.get("response")
+    if not isinstance(response_text, str) or not response_text.strip():
+        summary = concept_result.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            response_text = summary.strip()
+        else:
+            top_names = [
+                page_map[pid].page_name
+                for pid in ordered_page_ids[:3]
+                if pid in page_map and page_map[pid].page_name
+            ]
+            if top_names:
+                response_text = f"I ran a deep review on {', '.join(top_names)}."
+            else:
+                response_text = "Deep analysis complete."
+
+    yield {"type": "text", "content": response_text}
+    trace.append({"type": "reasoning", "content": response_text})
+
+    usage_raw = concept_result.get("usage") if isinstance(concept_result.get("usage"), dict) else {}
+
+    def _to_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = _to_int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens"))
+    output_tokens = _to_int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens"))
+
+    concept_name = concept_result.get("concept_name")
+    if not isinstance(concept_name, str):
+        concept_name = None
+    summary = concept_result.get("summary")
+    if not isinstance(summary, str):
+        summary = None
+    findings = concept_result.get("findings") if isinstance(concept_result.get("findings"), list) else []
+    cross_references = concept_result.get("cross_references")
+    if not isinstance(cross_references, list):
+        cross_references = concept_result.get("crossReferences") if isinstance(concept_result.get("crossReferences"), list) else []
+    gaps = concept_result.get("gaps") if isinstance(concept_result.get("gaps"), list) else []
+
+    tokens = _extract_query_tokens(query)
+    display_title = concept_name or (" ".join(tokens[:3]).title() if tokens else "Query")
+
+    yield {
+        "type": "done",
+        "trace": trace,
+        "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
+        "displayTitle": display_title,
+        "conversationTitle": display_title,
+        "highlights": [],
+        "conceptName": concept_name,
+        "summary": summary,
+        "findings": findings,
+        "crossReferences": cross_references,
+        "gaps": gaps,
+    }
 
 
 async def run_agent_query_gemini(
@@ -519,262 +1057,10 @@ async def run_agent_query_gemini(
     viewing_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
     """
-    Query-time vision flow:
-    - Vector search pages + regions
-    - Crop to relevant regions
-    - Answer with precise highlights
+    Backwards-compatible alias for the default fast-mode Gemini path.
     """
-    from app.services.core.query_vision import crop_region, query_with_vision
-    from app.services.tools import search_pages, select_pages
-    from app.services.utils.search import search_pages_and_regions
-
-    trace: list[dict] = []
-
-    # 1) Vector search for relevant regions
-    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
-    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
-
-    try:
-        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
-    except Exception as e:
-        logger.exception(f"Region search failed: {e}")
-        yield {"type": "error", "message": f"Search failed: {str(e)}"}
-        return
-
-    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
-    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
-
-    page_ids = list(region_matches.keys())
-
-    # 2) Fallback to keyword search if no region matches
-    page_results = []
-    if not page_ids:
-        yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
-        trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
-        page_results = await search_pages(db, query=query, project_id=project_id, limit=5)
-        yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
-        trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
-        page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
-
-    # Expand with cross-referenced sheets from top matches (lower priority).
-    if page_ids:
-        pages_for_cross_refs = _load_pages_for_vision(db, page_ids[:3])
-        cross_ref_sheet_names: set[str] = set()
-        for page in pages_for_cross_refs:
-            cross_ref_sheet_names.update(_extract_cross_reference_sheet_names(page.cross_references))
-
-        if cross_ref_sheet_names:
-            cross_ref_pages = (
-                db.query(Page)
-                .join(Discipline)
-                .filter(
-                    Discipline.project_id == project_id,
-                    Page.page_name.in_(list(cross_ref_sheet_names)),
-                )
-                .order_by(Page.page_name)
-                .limit(3)
-                .all()
-            )
-            cross_ref_ids = [str(p.id) for p in cross_ref_pages]
-            page_ids = page_ids + [pid for pid in cross_ref_ids if pid not in page_ids]
-
-    # De-dupe page IDs while preserving order
-    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))
-
-    # Order pages by sheet number where possible
-    pages_for_order = _load_pages_for_vision(db, page_ids)
-    page_map = {str(p.id): p for p in pages_for_order}
-    ordered_page_ids = sorted(
-        page_ids,
-        key=lambda pid: _page_sort_key(page_map.get(pid).page_name if page_map.get(pid) else ""),
-    )
-
-    # 3) Select pages for frontend display
-    pages_result = None
-    if ordered_page_ids:
-        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
-        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
-        try:
-            result = await select_pages(db, page_ids=ordered_page_ids)
-            if hasattr(result, "model_dump"):
-                result = result.model_dump(by_alias=True, mode="json")
-            pages_result = result
-            yield {"type": "tool_result", "tool": "select_pages", "result": result}
-            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
-        except Exception as e:
-            logger.error(f"select_pages failed: {e}")
-            error_result = {"error": str(e)}
-            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
-            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
-
-    # 4) Query-time vision on matching regions
-    answer_candidates: list[dict] = []
-    highlight_map: dict[str, list[dict]] = {}
-
-    vision_page_ids = ordered_page_ids[:VISION_PAGE_LIMIT]
-    vision_pages = [page_map[pid] for pid in vision_page_ids if pid in page_map]
-
-    if vision_pages:
-        from app.services.utils.storage import download_file
-        from app.services.providers.pdf_renderer import pdf_page_to_image
-
-        query_count = 0
-
-        for page in vision_pages:
-            if query_count >= REGION_QUERY_LIMIT:
-                break
-
-            image_bytes = None
-            try:
-                if page.page_image_path and str(page.page_image_path).lower().endswith(".png"):
-                    image_bytes = await download_file(page.page_image_path)
-                elif page.file_path and str(page.file_path).lower().endswith(".pdf"):
-                    pdf_bytes = await download_file(page.file_path)
-                    image_bytes = pdf_page_to_image(pdf_bytes, page.page_index, dpi=150)
-                elif page.file_path and str(page.file_path).lower().endswith(".png"):
-                    image_bytes = await download_file(page.file_path)
-            except Exception as e:
-                logger.warning(f"Failed to load image for page {page.page_name}: {e}")
-                image_bytes = None
-
-            if not image_bytes:
-                continue
-
-            regions = region_matches.get(str(page.id)) or []
-            if regions:
-                regions = sorted(regions, key=lambda r: r.get("_similarity", 0.0), reverse=True)
-            regions = regions[:REGIONS_PER_PAGE_LIMIT]
-
-            for region in regions:
-                if query_count >= REGION_QUERY_LIMIT:
-                    break
-
-                try:
-                    bbox = region.get("bbox")
-                    if not isinstance(bbox, dict):
-                        continue
-                    cropped_bytes, crop_box = crop_region(image_bytes, bbox)
-                    vision_result = await query_with_vision(
-                        question=query,
-                        page_image_bytes=cropped_bytes,
-                        relevant_regions=[region],
-                        page_context=page.sheet_reflection or "",
-                        page_name=page.page_name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Query vision failed for {page.page_name}: {e}")
-                    continue
-
-                query_count += 1
-
-                answer = vision_result.get("answer") or ""
-                confidence = vision_result.get("confidence") or "low"
-                if answer:
-                    answer_candidates.append({
-                        "page_name": page.page_name,
-                        "region_label": region.get("label") or region.get("type") or "",
-                        "answer": answer,
-                        "confidence": confidence,
-                    })
-
-                elements = vision_result.get("elements") or []
-                if elements:
-                    words = highlight_map.setdefault(str(page.id), [])
-                    for element in elements:
-                        if not isinstance(element, dict):
-                            continue
-                        bbox = element.get("bbox") or {}
-                        x0 = bbox.get("x0")
-                        y0 = bbox.get("y0")
-                        x1 = bbox.get("x1")
-                        y1 = bbox.get("y1")
-                        try:
-                            x0 = int(round(float(x0)))
-                            y0 = int(round(float(y0)))
-                            x1 = int(round(float(x1)))
-                            y1 = int(round(float(y1)))
-                        except Exception:
-                            continue
-
-                        x0 = crop_box["x0"] + x0
-                        y0 = crop_box["y0"] + y0
-                        x1 = crop_box["x0"] + x1
-                        y1 = crop_box["y0"] + y1
-
-                        if x1 < x0:
-                            x0, x1 = x1, x0
-                        if y1 < y0:
-                            y0, y1 = y1, y0
-
-                        words.append({
-                            "id": None,
-                            "text": element.get("text") or "",
-                            "bbox": {
-                                "x0": x0,
-                                "y0": y0,
-                                "x1": x1,
-                                "y1": y1,
-                                "width": max(0, x1 - x0),
-                                "height": max(0, y1 - y0),
-                            },
-                            "role": element.get("role"),
-                            "source": "agent",
-                        })
-
-    # 5) Emit resolve_highlights tool result for frontend
-    resolved_highlights = [
-        {"page_id": page_id, "words": words}
-        for page_id, words in highlight_map.items()
-        if words
-    ]
-
-    if resolved_highlights:
-        yield {"type": "tool_call", "tool": "resolve_highlights", "input": {"page_ids": list(highlight_map.keys())}}
-        yield {"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}}
-        trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": {"page_ids": list(highlight_map.keys())}})
-        trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": {"highlights": resolved_highlights}})
-
-    # 6) Compose response text
-    response_text = ""
-    if answer_candidates:
-        confidence_rank = {"high": 3, "medium": 2, "low": 1}
-        answer_candidates.sort(
-            key=lambda a: confidence_rank.get(a.get("confidence"), 0),
-            reverse=True,
-        )
-        primary = answer_candidates[0]
-        prefix = f"{primary['page_name']} {primary['region_label']}".strip()
-        response_text = f"{prefix}: {primary['answer']}".strip()
-        if len(answer_candidates) > 1:
-            secondary = answer_candidates[1]
-            secondary_prefix = f"{secondary['page_name']} {secondary['region_label']}".strip()
-            response_text = f"{response_text}. Also {secondary_prefix}: {secondary['answer']}"
-    elif ordered_page_ids:
-        response_text = f"Pulled {len(ordered_page_ids)} relevant sheets for review."
-    else:
-        response_text = "I couldn't find a precise match for that detail."
-
-    if response_text:
-        yield {"type": "text", "content": response_text}
-        trace.append({"type": "reasoning", "content": response_text})
-
-    # 7) Done
-    tokens = _extract_query_tokens(query)
-    display_title = " ".join(tokens[:3]).title() if tokens else "Query"
-
-    yield {
-        "type": "done",
-        "trace": trace,
-        "usage": {"inputTokens": 0, "outputTokens": 0},
-        "displayTitle": display_title,
-        "conversationTitle": display_title,
-        "highlights": resolved_highlights,
-        "conceptName": None,
-        "summary": None,
-        "findings": [],
-        "crossReferences": [],
-        "gaps": [],
-    }
+    async for event in run_agent_query_fast(db, project_id, query, history_messages, viewing_context):
+        yield event
 
 
 async def run_agent_query_grok(

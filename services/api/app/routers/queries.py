@@ -216,6 +216,10 @@ async def stream_query(
     - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
     - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "...", "conversationTitle": "..."} - Final event
     - data: {"type": "error", "message": "..."} - Error event
+
+    Request mode:
+    - mode="fast" routes user to likely sheets using RAG + project structure
+    - mode="deep" runs agentic vision exploration after the same RAG seed
     """
     verify_project_exists(project_id, db)
 
@@ -306,7 +310,12 @@ async def stream_query(
         stored_trace = []
         try:
             async for event in run_agent_query(
-                db, project_id, data.query, history_messages=history_messages, viewing_context=viewing_context
+                db,
+                project_id,
+                data.query,
+                history_messages=history_messages,
+                viewing_context=viewing_context,
+                mode=data.mode,
             ):
                 # Check if client disconnected - stop processing to save resources
                 if await request.is_disconnected():
