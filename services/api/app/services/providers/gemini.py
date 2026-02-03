@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator
 from google import genai
 from google.genai import types
 
-from app.config import AGENT_QUERY_MODEL, get_settings
+from app.config import AGENT_QUERY_MODEL, QUERY_VISION_MODEL, get_settings
 from app.services.prompts import BRAIN_MODE_PROMPT_V4
 from app.services.utils.parsing import extract_json_response
 from app.utils.retry import with_retry
@@ -122,7 +122,7 @@ SMART_PAGE_SELECTION_PROMPT = '''You are a construction plan assistant focused o
 PROJECT STRUCTURE (disciplines and pages):
 {project_structure}
 
-CANDIDATE PAGES (from RAG search):
+CANDIDATE PAGES (sheet cards + compact context from RAG search):
 {page_candidates}
 
 {history_section}
@@ -150,6 +150,31 @@ Return JSON:
   "response": "Brief helpful response (1-2 sentences)"
 }}'''
 
+FAST_QUERY_ROUTER_PROMPT = '''You are a lightweight query router for construction drawing retrieval.
+
+{history_section}
+{viewing_section}
+USER QUERY: {query}
+
+Return JSON only:
+{{
+  "intent": "page_navigation|qa|comparison|coordination|troubleshooting|scope_review",
+  "must_terms": ["up to 4 short terms or phrases required for retrieval"],
+  "preferred_page_types": ["up to 3 page types"],
+  "strict": true,
+  "k": 4
+}}
+
+Rules:
+- This is FAST MODE: support any question type, but keep retrieval at PAGE level only.
+- intent=page_navigation when the user asks to show/open/list sheets/pages/plans.
+- Use qa/comparison/coordination/troubleshooting/scope_review for non-navigation questions.
+- strict=true only when user expects exact sheet type/title matching (usually navigation intent).
+- preferred_page_types values should use: floor_plan, plan, schedule, spec, detail_sheet, notes, rcp, demo, section, elevation, cover.
+- k must be an integer 1-8 (smaller means tighter results).
+- Keep must_terms concise and query-grounded; do not add filler words.
+'''
+
 VISION_EXPLORATION_PROMPT = '''You are a construction plan specialist with visual analysis and code execution.
 
 You will be given:
@@ -158,12 +183,13 @@ You will be given:
 - Per-page context summaries and extracted details
 - Per-page Brain Mode regions with bounding boxes
 - Per-page candidate_regions ranked by RAG relevance to the user query
-- A verification plan from Phase 1
+- Per-page expansion_regions (secondary fallback regions)
+- A verification plan with pass budgets and target evidence
 
 Your job:
 1. Start with candidate_regions first (these are the best RAG hints).
 2. Decide which regions to inspect in detail and use code execution to zoom/crop.
-3. Expand to other page regions only if candidate_regions are insufficient.
+3. Expand to expansion_regions only if candidate_regions are insufficient.
 4. Return structured findings with precise references.
 
 IMPORTANT:
@@ -172,6 +198,14 @@ IMPORTANT:
 - If you can reference semantic OCR word IDs, use "semantic_refs".
 - If not, provide a normalized "bbox" as [x0, y0, x1, y1] in 0-1 coordinates.
 - Every finding must include page_id, category, content, confidence, and source_text.
+- If confidence is "verified_via_zoom", include verification_method and verification_pass.
+- verification_method must be one of: semantic_ref, region_crop, multi_pass_zoom.
+- verification_pass must be 1, 2, or 3 when verification_method != semantic_ref.
+- candidate_region_id should be set when the finding came from candidate_regions.
+- Include execution_summary pass counts when available:
+  - pass_1: candidate-region crop inspections
+  - pass_2: tighter cluster crop inspections
+  - pass_3: micro-crop disambiguation inspections
 - Return gaps for expected-but-not-found information.
 
 PAGE MANIFEST (images provided in same order):
@@ -196,12 +230,20 @@ Return JSON with this exact structure:
       "semantic_refs": [142, 143, 144],
       "bbox": [0.45, 0.32, 0.52, 0.35],
       "confidence": "high|medium|verified_via_zoom",
-      "source_text": "Actual text read from document"
+      "source_text": "Actual text read from document",
+      "verification_method": "semantic_ref|region_crop|multi_pass_zoom",
+      "verification_pass": 1,
+      "candidate_region_id": "region_001"
     }}
   ],
   "cross_references": [
     {{"from_page": "A2.3", "to_page": "E2.1", "relationship": "electrical connection"}}
   ],
+  "execution_summary": {{
+    "pass_1": 0,
+    "pass_2": 0,
+    "pass_3": 0
+  }},
   "gaps": [
     "Could not locate refrigerant line routing on mechanical sheets"
   ],
@@ -232,6 +274,278 @@ def _extract_json_response(text: str) -> dict[str, Any]:
             pass
 
     raise ValueError("Could not extract valid JSON from response")
+
+
+FAST_ROUTER_FALLBACK_MODEL = QUERY_VISION_MODEL
+FAST_ROUTER_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+    "with", "by", "is", "are", "was", "were", "be", "been", "being", "have",
+    "has", "had", "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "must", "shall", "can", "need", "dare", "ought", "used",
+    "it", "its", "this", "that", "these", "those", "i", "you", "he", "she",
+    "we", "they", "what", "which", "who", "whom", "where", "when", "why",
+    "how", "all", "each", "every", "both", "few", "more", "most", "other",
+    "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+    "too", "very", "just", "also", "there", "literally", "please", "pull",
+    "up", "show", "open", "find", "called",
+}
+FAST_ROUTER_NAV_TERMS = {
+    "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings",
+}
+FAST_ROUTER_ALLOWED_INTENTS = {
+    "page_navigation",
+    "qa",
+    "comparison",
+    "coordination",
+    "troubleshooting",
+    "scope_review",
+    # Backward-compatible aliases from earlier revisions.
+    "fact_lookup",
+    "detail_lookup",
+}
+FAST_ROUTER_PAGE_TYPE_MAP = {
+    "floor plan": "floor_plan",
+    "floor_plan": "floor_plan",
+    "plan": "plan",
+    "schedule": "schedule",
+    "spec": "spec",
+    "specs": "spec",
+    "specification": "spec",
+    "detail": "detail_sheet",
+    "detail sheet": "detail_sheet",
+    "detail_sheet": "detail_sheet",
+    "notes": "notes",
+    "note": "notes",
+    "rcp": "rcp",
+    "demo": "demo",
+    "demolition": "demo",
+    "section": "section",
+    "elevation": "elevation",
+    "cover": "cover",
+}
+
+
+def _dedupe_strings(values: list[str], limit: int) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _normalize_router_page_type(value: str) -> str:
+    raw = re.sub(r"[_\-]+", " ", str(value or "").strip().lower())
+    return FAST_ROUTER_PAGE_TYPE_MAP.get(raw, raw.replace(" ", "_"))
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+    return default
+
+
+def _fallback_fast_query_route(query: str) -> dict[str, Any]:
+    query_lower = query.lower()
+    navigation = (
+        any(term in query_lower for term in FAST_ROUTER_NAV_TERMS)
+        or "floor plan" in query_lower
+        or "sheet list" in query_lower
+    )
+    intent = "page_navigation" if navigation else "qa"
+
+    must_terms: list[str] = []
+    if "floor plan" in query_lower:
+        must_terms.append("floor plan")
+
+    tokens = re.findall(r"[a-z0-9][a-z0-9\-/]*", query_lower)
+    for token in tokens:
+        if token in FAST_ROUTER_STOP_WORDS:
+            continue
+        if token in FAST_ROUTER_NAV_TERMS:
+            continue
+        if len(token) <= 1:
+            continue
+        must_terms.append(token)
+
+    preferred_page_types: list[str] = []
+    for raw, canonical in FAST_ROUTER_PAGE_TYPE_MAP.items():
+        if raw in query_lower:
+            preferred_page_types.append(canonical)
+
+    must_terms = _dedupe_strings(must_terms, limit=4)
+    preferred_page_types = _dedupe_strings(preferred_page_types, limit=3)
+
+    strict = intent == "page_navigation" and bool(must_terms or preferred_page_types)
+    k = 4 if navigation else 6
+
+    return {
+        "intent": intent,
+        "must_terms": must_terms,
+        "preferred_page_types": preferred_page_types,
+        "strict": strict,
+        "k": k,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+
+
+def _normalize_fast_query_route_output(
+    result: dict[str, Any],
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    intent_raw = str(result.get("intent") or "").strip().lower()
+    if intent_raw not in FAST_ROUTER_ALLOWED_INTENTS:
+        intent_raw = str(fallback.get("intent") or "qa")
+
+    must_terms_raw = result.get("must_terms")
+    must_terms: list[str] = []
+    if isinstance(must_terms_raw, list):
+        for term in must_terms_raw:
+            text = str(term or "").strip().lower()
+            text = re.sub(r"\s+", " ", text)
+            if not text:
+                continue
+            if text in FAST_ROUTER_NAV_TERMS:
+                continue
+            if text in FAST_ROUTER_STOP_WORDS:
+                continue
+            must_terms.append(text)
+    if not must_terms:
+        must_terms = [str(term) for term in fallback.get("must_terms", [])]
+    must_terms = _dedupe_strings(must_terms, limit=4)
+
+    preferred_raw = result.get("preferred_page_types")
+    preferred_page_types: list[str] = []
+    if isinstance(preferred_raw, list):
+        for value in preferred_raw:
+            normalized = _normalize_router_page_type(str(value or ""))
+            if normalized:
+                preferred_page_types.append(normalized)
+    if not preferred_page_types:
+        preferred_page_types = [str(value) for value in fallback.get("preferred_page_types", [])]
+    preferred_page_types = _dedupe_strings(preferred_page_types, limit=3)
+
+    strict = _to_bool(result.get("strict"), default=False)
+    if intent_raw != "page_navigation":
+        strict = False
+    if not (must_terms or preferred_page_types):
+        strict = False
+
+    k_default = int(fallback.get("k") or 4)
+    try:
+        k = int(result.get("k"))
+    except (TypeError, ValueError):
+        k = k_default
+    k = max(1, min(8, k))
+
+    return {
+        "intent": intent_raw,
+        "must_terms": must_terms,
+        "preferred_page_types": preferred_page_types,
+        "strict": strict,
+        "k": k,
+    }
+
+
+async def route_fast_query(
+    query: str,
+    history_context: str = "",
+    viewing_context: str = "",
+) -> dict[str, Any]:
+    """
+    Lightweight routing pass that shapes fast-mode retrieval before full selection.
+    """
+    fallback = _fallback_fast_query_route(query)
+    try:
+        client = _get_gemini_client()
+    except Exception:
+        return fallback
+
+    try:
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        history_section = ""
+        history_context = (history_context or "").strip()
+        if history_context:
+            truncated = history_context[-500:]
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(truncated)}\n"
+
+        viewing_section = ""
+        viewing_context = (viewing_context or "").strip()
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
+
+        prompt = FAST_QUERY_ROUTER_PROMPT.format(
+            query=escape_braces(query),
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        settings = get_settings()
+        configured_model = str(getattr(settings, "fast_router_model", "") or "").strip()
+        router_models: list[str] = []
+        if configured_model:
+            router_models.append(configured_model)
+        if FAST_ROUTER_FALLBACK_MODEL not in router_models:
+            router_models.append(FAST_ROUTER_FALLBACK_MODEL)
+
+        response = None
+        model_used = ""
+        last_model_error: Exception | None = None
+        for model_name in router_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0,
+                    ),
+                )
+                model_used = model_name
+                break
+            except Exception as model_error:
+                last_model_error = model_error
+                logger.warning("Fast router model %s failed: %s", model_name, model_error)
+
+        if response is None:
+            if last_model_error:
+                raise last_model_error
+            raise RuntimeError("No fast router model available")
+
+        result = _extract_json_response(response.text)
+        normalized = _normalize_fast_query_route_output(result, fallback)
+
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+
+        normalized["usage"] = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+        normalized["model"] = model_used
+        return normalized
+    except Exception as e:
+        logger.warning("Fast query routing failed, using fallback route: %s", e)
+        return fallback
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -374,6 +688,107 @@ def _canonical_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _normalize_verification_method(raw_method: Any) -> str | None:
+    if not isinstance(raw_method, str):
+        return None
+    method = raw_method.strip().lower().replace("-", "_").replace(" ", "_")
+    if not method:
+        return None
+    aliases = {
+        "semantic": "semantic_ref",
+        "semanticrefs": "semantic_ref",
+        "semantic_refs": "semantic_ref",
+        "semantic_reference": "semantic_ref",
+        "region": "region_crop",
+        "crop": "region_crop",
+        "zoom": "multi_pass_zoom",
+        "multipasszoom": "multi_pass_zoom",
+        "multi_zoom": "multi_pass_zoom",
+    }
+    method = aliases.get(method, method)
+    if method in {"semantic_ref", "region_crop", "multi_pass_zoom"}:
+        return method
+    return None
+
+
+def _normalize_verification_pass(raw_pass: Any) -> int | None:
+    try:
+        value = int(raw_pass)
+    except (TypeError, ValueError):
+        return None
+    if value in {1, 2, 3}:
+        return value
+    return None
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_vision_execution_summary(raw_summary: Any) -> dict[str, int]:
+    """
+    Normalize optional model-reported Deep pass counters.
+
+    Expected canonical output:
+      {"pass_1": int, "pass_2": int, "pass_3": int}
+    """
+    summary = raw_summary if isinstance(raw_summary, dict) else {}
+    output: dict[str, int] = {"pass_1": 0, "pass_2": 0, "pass_3": 0}
+
+    alias_map = {
+        "pass_1": (
+            "pass_1",
+            "pass1",
+            "pass_1_count",
+            "pass1_count",
+            "pass_1_crop_count",
+            "pass_1_crops",
+            "candidate_crop_count",
+            "1",
+        ),
+        "pass_2": (
+            "pass_2",
+            "pass2",
+            "pass_2_count",
+            "pass2_count",
+            "pass_2_crop_count",
+            "pass_2_crops",
+            "cluster_crop_count",
+            "2",
+        ),
+        "pass_3": (
+            "pass_3",
+            "pass3",
+            "pass_3_count",
+            "pass3_count",
+            "pass_3_crop_count",
+            "pass_3_crops",
+            "micro_crop_count",
+            "3",
+        ),
+    }
+
+    def _consume(container: Any) -> None:
+        if not isinstance(container, dict):
+            return
+        for canonical, keys in alias_map.items():
+            for key in keys:
+                if key not in container:
+                    continue
+                value = _coerce_int(container.get(key), default=-1)
+                if value >= 0:
+                    output[canonical] = value
+                    break
+
+    _consume(summary)
+    _consume(summary.get("pass_counts"))
+    _consume(summary.get("passes"))
+    return output
+
+
 def normalize_vision_findings(
     findings: Any,
     pages: list[dict[str, Any]],
@@ -482,6 +897,20 @@ def normalize_vision_findings(
         confidence_raw = finding.get("confidence")
         source_text_raw = finding.get("source_text", finding.get("sourceText"))
         page_name_raw = finding.get("page_name", finding.get("pageName"))
+        verification_method = _normalize_verification_method(
+            finding.get("verification_method", finding.get("verificationMethod"))
+        )
+        verification_pass = _normalize_verification_pass(
+            finding.get("verification_pass", finding.get("verificationPass"))
+        )
+        candidate_region_id = str(
+            finding.get("candidate_region_id")
+            or finding.get("candidateRegionId")
+            or finding.get("region_id")
+            or ""
+        ).strip()
+        if verification_pass is not None and verification_method is None:
+            verification_method = "multi_pass_zoom"
 
         output: dict[str, Any] = {
             "category": category,
@@ -502,6 +931,12 @@ def normalize_vision_findings(
             output["confidence"] = confidence_raw
         if isinstance(source_text_raw, str) and source_text_raw:
             output["source_text"] = source_text_raw
+        if verification_method:
+            output["verification_method"] = verification_method
+        if verification_pass is not None:
+            output["verification_pass"] = verification_pass
+        if candidate_region_id:
+            output["candidate_region_id"] = candidate_region_id
 
         page_name = str(page_name_raw or "").strip() or page_name_by_id.get(page_id, "")
         if page_name:
@@ -1009,9 +1444,19 @@ async def select_pages_smart(
                 candidate_ids.append(page_id)
                 candidate_id_set.add(page_id)
 
-            content = str(candidate.get("content") or "").strip()
-            if len(content) > 3000:
-                content = f"{content[:3000]}..."
+            sheet_card = candidate.get("sheet_card")
+            if not isinstance(sheet_card, dict):
+                sheet_card = {}
+            card_title = str(sheet_card.get("reflection_title") or "").strip()
+            card_summary = str(sheet_card.get("reflection_summary") or "").strip()
+            card_headings = _to_text_list(sheet_card.get("reflection_headings"), 8)
+            card_keywords = _to_text_list(sheet_card.get("reflection_keywords"), 16)
+            card_entities = _to_text_list(sheet_card.get("reflection_entities"), 12)
+            card_cross_refs = _to_text_list(sheet_card.get("cross_references"), 8)
+
+            content = card_summary or str(candidate.get("content") or "").strip()
+            if len(content) > 800:
+                content = f"{content[:800]}..."
 
             master_index = candidate.get("master_index")
             if not isinstance(master_index, dict):
@@ -1031,6 +1476,14 @@ async def select_pages_smart(
                     "page_name": candidate.get("page_name"),
                     "discipline": candidate.get("discipline"),
                     "page_type": candidate.get("page_type"),
+                    "sheet_card": {
+                        "reflection_title": card_title or None,
+                        "reflection_summary": card_summary or None,
+                        "reflection_headings": card_headings,
+                        "reflection_keywords": card_keywords,
+                        "reflection_entities": card_entities,
+                        "cross_references": card_cross_refs,
+                    },
                     "keywords": _to_text_list(candidate.get("keywords"), 10),
                     "questions_answered": _to_text_list(candidate.get("questions_answered"), 3),
                     "master_index": compact_master_index,
@@ -1147,7 +1600,7 @@ async def select_pages_smart(
 async def explore_concept_with_vision(
     query: str,
     pages: list[dict[str, Any]],
-    verification_plan: list[dict[str, Any]] | None = None,
+    verification_plan: dict[str, Any] | list[dict[str, Any]] | None = None,
     history_context: str = "",
     viewing_context: str = "",
 ) -> dict[str, Any]:
@@ -1183,6 +1636,7 @@ async def explore_concept_with_vision(
                 "semantic_index": p.get("semantic_index"),
                 "regions": p.get("regions"),
                 "candidate_regions": p.get("candidate_regions"),
+                "expansion_regions": p.get("expansion_regions"),
                 "master_index": p.get("master_index"),
             }
             for p in pages
@@ -1231,6 +1685,7 @@ async def explore_concept_with_vision(
 
         result = extract_json_response(response.text)
         normalized_findings = normalize_vision_findings(result.get("findings"), pages)
+        execution_summary = normalize_vision_execution_summary(result.get("execution_summary"))
 
         input_tokens = 0
         output_tokens = 0
@@ -1243,6 +1698,7 @@ async def explore_concept_with_vision(
             "summary": result.get("summary") or None,
             "findings": normalized_findings,
             "cross_references": result.get("cross_references") or [],
+            "execution_summary": execution_summary,
             "gaps": result.get("gaps") or [],
             "response": result.get("response") or "",
             "usage": {
@@ -1258,7 +1714,7 @@ async def explore_concept_with_vision(
 async def explore_concept_with_vision_streaming(
     query: str,
     pages: list[dict[str, Any]],
-    verification_plan: list[dict[str, Any]] | None = None,
+    verification_plan: dict[str, Any] | list[dict[str, Any]] | None = None,
     history_context: str = "",
     viewing_context: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
@@ -1293,6 +1749,7 @@ async def explore_concept_with_vision_streaming(
                 "semantic_index": p.get("semantic_index"),
                 "regions": p.get("regions"),
                 "candidate_regions": p.get("candidate_regions"),
+                "expansion_regions": p.get("expansion_regions"),
                 "master_index": p.get("master_index"),
             }
             for p in pages
@@ -1371,6 +1828,7 @@ async def explore_concept_with_vision_streaming(
 
         result = extract_json_response(accumulated_text)
         normalized_findings = normalize_vision_findings(result.get("findings"), pages)
+        execution_summary = normalize_vision_execution_summary(result.get("execution_summary"))
 
         input_tokens = 0
         output_tokens = 0
@@ -1385,6 +1843,7 @@ async def explore_concept_with_vision_streaming(
                 "summary": result.get("summary") or None,
                 "findings": normalized_findings,
                 "cross_references": result.get("cross_references") or [],
+                "execution_summary": execution_summary,
                 "gaps": result.get("gaps") or [],
                 "response": result.get("response") or "",
                 "usage": {

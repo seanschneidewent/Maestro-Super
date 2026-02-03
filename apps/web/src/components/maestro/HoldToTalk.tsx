@@ -6,8 +6,8 @@ interface QueryInputProps {
   onChange: (value: string) => void
   onSubmit: () => void
   isProcessing: boolean
-  queryMode?: 'fast' | 'deep'
-  onQueryModeChange?: (mode: 'fast' | 'deep') => void
+  queryMode?: 'fast' | 'med' | 'deep'
+  onQueryModeChange?: (mode: 'fast' | 'med' | 'deep') => void
   placeholder?: string
   onFocus?: () => void
 }
@@ -139,6 +139,7 @@ export function QueryInput({
 
   // Button size matches the pill height for seamless integration
   const buttonSize = 52
+  const nextMode = queryMode === 'fast' ? 'med' : queryMode === 'med' ? 'deep' : 'fast'
 
   // Determine button state and icon
   const getButtonContent = () => {
@@ -196,9 +197,9 @@ export function QueryInput({
       {onQueryModeChange && (
         <button
           type="button"
-          onClick={() => onQueryModeChange(queryMode === 'fast' ? 'deep' : 'fast')}
+          onClick={() => onQueryModeChange(nextMode)}
           disabled={isProcessing}
-          title={queryMode === 'deep' ? 'Deep mode enabled' : 'Fast mode enabled'}
+          title={`${queryMode.charAt(0).toUpperCase()}${queryMode.slice(1)} mode enabled`}
           className={`
             flex-shrink-0 rounded-full px-3 mr-2
             text-xs font-semibold uppercase tracking-wide
@@ -210,6 +211,11 @@ export function QueryInput({
                 : ''
             }
             ${
+              !isProcessing && queryMode === 'med'
+                ? 'bg-amber-400 text-amber-900 hover:bg-amber-500'
+                : ''
+            }
+            ${
               !isProcessing && queryMode === 'fast'
                 ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 : ''
@@ -217,7 +223,7 @@ export function QueryInput({
           `}
           style={{ height: buttonSize }}
         >
-          {queryMode === 'deep' ? 'Deep' : 'Fast'}
+          {queryMode === 'deep' ? 'Deep' : queryMode === 'med' ? 'Med' : 'Fast'}
         </button>
       )}
 

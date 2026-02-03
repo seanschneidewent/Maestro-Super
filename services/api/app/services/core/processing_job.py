@@ -29,6 +29,7 @@ from app.models.page import Page
 from app.models.processing_job import ProcessingJob
 from app.models.project import Project
 from app.services.core.brain_mode_processor import process_page_brain_mode
+from app.services.utils.sheet_cards import build_sheet_card
 from app.services.utils.search import embed_page_reflection, embed_regions
 from app.services.utils.storage import download_file
 
@@ -294,6 +295,20 @@ async def process_project_pages(job_id: str):
                 except Exception as e:
                     logger.warning(f"[{job_id}] Page embedding failed for {page_name}: {e}")
 
+            sheet_card = build_sheet_card(
+                sheet_number=page_name,
+                page_type=result.get("page_type"),
+                discipline_name=discipline_name,
+                sheet_reflection=sheet_reflection,
+                master_index=result.get("index") if isinstance(result.get("index"), dict) else None,
+                keywords=(
+                    result.get("index", {}).get("keywords")
+                    if isinstance(result.get("index"), dict)
+                    else None
+                ),
+                cross_references=result.get("cross_references"),
+            )
+
             details: list[dict] = []
 
             # Save results to database
@@ -306,6 +321,7 @@ async def process_project_pages(job_id: str):
                     "sheet_info": result.get("sheet_info"),
                     "master_index": result.get("index"),
                     "questions_answered": result.get("questions_this_sheet_answers"),
+                    "sheet_card": sheet_card,
                     "processing_time_ms": result.get("processing_time_ms"),
                     "processing_error": None,
                     "processing_status": "completed",

@@ -38,7 +38,17 @@ export function TextHighlightOverlay({
       {highlights.map((word, idx) => {
         if (!word.bbox) return null
 
-        const { x0, y0, width, height } = word.bbox
+        const { x0, y0, x1, y1, width, height } = word.bbox
+        const isNormalized =
+          x0 >= 0 && x0 <= 1 &&
+          y0 >= 0 && y0 <= 1 &&
+          x1 >= 0 && x1 <= 1 &&
+          y1 >= 0 && y1 <= 1
+
+        const rectX = isNormalized ? x0 * sourceWidth : x0
+        const rectY = isNormalized ? y0 * sourceHeight : y0
+        const rectWidth = isNormalized ? (x1 - x0) * sourceWidth : width
+        const rectHeight = isNormalized ? (y1 - y0) * sourceHeight : height
 
         // Determine color based on source/role
         const fillColor = getHighlightColor(word)
@@ -47,10 +57,10 @@ export function TextHighlightOverlay({
           <g key={word.id ?? idx}>
             {/* Highlight rectangle */}
             <rect
-              x={x0}
-              y={y0}
-              width={width}
-              height={height}
+              x={rectX}
+              y={rectY}
+              width={rectWidth}
+              height={rectHeight}
               fill={fillColor}
               fillOpacity={0.3}
               stroke={fillColor}

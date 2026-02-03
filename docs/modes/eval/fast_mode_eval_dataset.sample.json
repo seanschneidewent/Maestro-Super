@@ -1,0 +1,16 @@
+[
+  {
+    "query": "equipment floor plan pages",
+    "expected_page_ids": [],
+    "expected_sheet_numbers": ["K-101", "K-201"],
+    "expected_sheet_titles": ["Equipment Floor Plan"],
+    "expected_keywords": ["equipment", "floor plan"]
+  },
+  {
+    "query": "show me the panel schedule sheets",
+    "expected_page_ids": [],
+    "expected_sheet_numbers": ["E-3.2"],
+    "expected_sheet_titles": ["Panel Schedule"],
+    "expected_keywords": ["panel", "schedule"]
+  }
+]

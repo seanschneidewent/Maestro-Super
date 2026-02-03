@@ -32,6 +32,7 @@ from app.schemas.tools import (
     PointerSummary,
     ProjectPages,
 )
+from app.services.utils.sheet_cards import build_sheet_card
 from app.services.utils.search import search_pointers  # Re-export existing search
 
 
@@ -206,6 +207,18 @@ async def search_pages(
             if compact_items:
                 compact_master_index["items"] = compact_items
 
+        sheet_card = page.sheet_card if isinstance(page.sheet_card, dict) else None
+        if not sheet_card:
+            sheet_card = build_sheet_card(
+                sheet_number=page.page_name,
+                page_type=page.page_type,
+                discipline_name=page.discipline.display_name if page.discipline else None,
+                sheet_reflection=page.sheet_reflection,
+                master_index=compact_master_index,
+                keywords=keywords,
+                cross_references=page.cross_references,
+            )
+
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
@@ -213,9 +226,11 @@ async def search_pages(
             "content": content,  # Full content for Gemini to read
             "sheet_reflection": page.sheet_reflection,
             "page_type": page.page_type,
+            "cross_references": page.cross_references if isinstance(page.cross_references, list) else [],
             "keywords": keywords,
             "questions_answered": questions_answered,
             "master_index": compact_master_index,
+            "sheet_card": sheet_card,
         })
 
     return results
@@ -705,14 +720,30 @@ def resolve_highlights(
         meta = page_meta_lookup.get(page_id) or {}
         image_width = meta.get("image_width")
         image_height = meta.get("image_height")
-        if not image_width or not image_height:
-            return None
 
         x0, y0, x1, y1 = bbox
-        # If coords are normalized (0-1), convert to pixels
+
+        # If dimensions are unavailable, preserve incoming coordinates and let the
+        # frontend render them in native space (or normalized space if 0-1).
+        if not image_width or not image_height:
+            if x1 < x0 or y1 < y0:
+                x1 = x0 + x1
+                y1 = y0 + y1
+            width = max(0, x1 - x0)
+            height = max(0, y1 - y0)
+            return {
+                "x0": x0,
+                "y0": y0,
+                "x1": x1,
+                "y1": y1,
+                "width": width,
+                "height": height,
+            }
+
+        # If coords are normalized (0-1), convert to pixels.
         if 0 <= x0 <= 1 and 0 <= y0 <= 1 and 0 <= x1 <= 1 and 0 <= y1 <= 1:
             if x1 < x0 or y1 < y0:
-                # Treat as x,y,w,h in normalized space
+                # Treat as x,y,w,h in normalized space.
                 x1 = x0 + x1
                 y1 = y0 + y1
             x0_px = x0 * image_width
@@ -720,7 +751,7 @@ def resolve_highlights(
             x1_px = x1 * image_width
             y1_px = y1 * image_height
         else:
-            # Assume already in pixel space
+            # Assume already in pixel space.
             x0_px, y0_px, x1_px, y1_px = x0, y0, x1, y1
 
         width = max(0, x1_px - x0_px)
@@ -793,14 +824,9 @@ def resolve_highlights(
         if not page_id:
             continue
 
-        ocr_words = page_words_lookup.get(page_id, [])
-        if not ocr_words:
-            logger.warning(f"No OCR words found for page {page_id}")
-            continue
-
         matched_words: list[dict] = []
 
-        # If semantic_refs or bbox provided, resolve those directly (agentic vision path)
+        # If semantic_refs or bbox provided, resolve those directly.
         if semantic_refs or bboxes or bbox_single:
             meta = page_meta_lookup.get(page_id) or {}
             word_by_id = meta.get("word_by_id") or {}
@@ -847,6 +873,11 @@ def resolve_highlights(
                     "page_id": page_id,
                     "words": merged_words,
                 })
+            continue
+
+        ocr_words = page_words_lookup.get(page_id, [])
+        if not ocr_words:
+            logger.warning(f"No OCR words found for page {page_id}")
             continue
 
         if not text_matches:

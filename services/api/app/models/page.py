@@ -70,6 +70,7 @@ class Page(Base):
     sheet_info: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Sheet metadata
     master_index: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Aggregated RAG index
     questions_answered: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # Suggested QA prompts
+    sheet_card: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Reflection-first routing card
     processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Brain Mode latency
     processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Last processing failure
 

@@ -189,7 +189,7 @@ function extractConceptDataFromTrace(
 
 function inferQueryModeFromTrace(
   trace: QueryTraceStep[] | undefined
-): 'fast' | 'deep' {
+): 'fast' | 'med' | 'deep' {
   if (!trace || trace.length === 0) return 'fast';
 
   for (const step of trace) {
@@ -204,6 +204,18 @@ function inferQueryModeFromTrace(
       step.tool === 'explore_concept_with_vision'
     ) {
       return 'deep';
+    }
+    if (
+      step.type === 'tool_call' &&
+      step.tool === 'med_mode_trace'
+    ) {
+      return 'med';
+    }
+    if (
+      step.type === 'tool_result' &&
+      step.tool === 'med_mode_trace'
+    ) {
+      return 'med';
     }
   }
 
@@ -229,7 +241,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   // UI state
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
-  const [queryMode, setQueryMode] = useState<'fast' | 'deep'>('fast');
+  const [queryMode, setQueryMode] = useState<'fast' | 'med' | 'deep'>('fast');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
   const [inputHasBeenFocused, setInputHasBeenFocused] = useState(false);

@@ -53,7 +53,7 @@ export interface AgentSelectedPage {
 export interface CompletedQuery {
   queryId: string
   queryText: string
-  mode: 'fast' | 'deep'
+  mode: 'fast' | 'med' | 'deep'
   displayTitle: string | null
   conversationTitle: string | null
   pages: AgentSelectedPage[]
@@ -64,7 +64,7 @@ export interface CompletedQuery {
 }
 
 export type QueryStatus = 'streaming' | 'complete' | 'error'
-export type QueryMode = 'fast' | 'deep'
+export type QueryMode = 'fast' | 'med' | 'deep'
 
 export interface QueryState {
   id: string

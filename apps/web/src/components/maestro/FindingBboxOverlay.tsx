@@ -39,6 +39,16 @@ function toFindingRect(finding: AgentFinding): FindingRect | null {
   return { finding, left, top, width, height };
 }
 
+function getFindingColorClasses(confidence?: string): string {
+  if (confidence === 'verified_via_zoom') {
+    return 'border-emerald-500/80 bg-emerald-500/10';
+  }
+  if (confidence === 'high') {
+    return 'border-cyan-500/75 bg-cyan-500/10';
+  }
+  return 'border-amber-500/70 bg-amber-500/10';
+}
+
 export const FindingBboxOverlay: FC<FindingBboxOverlayProps> = ({
   findings,
   pageId,
@@ -58,7 +68,7 @@ export const FindingBboxOverlay: FC<FindingBboxOverlayProps> = ({
       {findingRects.map((rect, idx) => (
         <div
           key={`${rect.finding.pageId}-${idx}-${rect.left}-${rect.top}`}
-          className={`absolute border-2 border-amber-500/70 bg-amber-500/10 rounded-sm ${
+          className={`absolute border-2 rounded-sm ${getFindingColorClasses(rect.finding.confidence)} ${
             interactive ? 'group cursor-help pointer-events-auto' : 'pointer-events-none'
           }`}
           style={{
@@ -72,6 +82,7 @@ export const FindingBboxOverlay: FC<FindingBboxOverlayProps> = ({
           {interactive && (
             <div className="pointer-events-none absolute left-0 top-0 -translate-y-[calc(100%+4px)] rounded bg-slate-800/90 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 max-w-xs z-20 whitespace-normal">
               {rect.finding.content}
+              {rect.finding.confidence ? ` (${rect.finding.confidence.replace(/_/g, ' ')})` : ''}
             </div>
           )}
         </div>

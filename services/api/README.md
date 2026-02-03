@@ -33,6 +33,16 @@ pytest tests/ -v
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
+## Fast-Mode Evaluation Harness
+
+```bash
+# From services/api
+python scripts/evaluate_fast_mode.py \
+  --project-id <PROJECT_UUID> \
+  --dataset ../docs/modes/eval/fast_mode_eval_dataset.sample.json \
+  --k 4
+```
+
 ## Production Deployment
 
 Deployed on Railway with Supabase Postgres.

@@ -2,6 +2,9 @@
 
 import json
 import logging
+import re
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -94,6 +97,64 @@ def extract_pages_from_trace(trace: list[dict]) -> list[dict]:
         {"page_id": page_id, "pointers": pages_seen[page_id]}
         for page_id in page_order
     ]
+
+
+def extract_mode_trace_payload(
+    trace: list[dict[str, Any]] | None,
+    tool_name: str,
+) -> dict[str, Any] | None:
+    """Extract the latest mode instrumentation payload from trace by tool name."""
+    if not trace:
+        return None
+    for step in reversed(trace):
+        if not isinstance(step, dict):
+            continue
+        if step.get("type") != "tool_result":
+            continue
+        if step.get("tool") != tool_name:
+            continue
+        result = step.get("result")
+        if isinstance(result, dict):
+            return result
+    return None
+
+
+def extract_fast_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Extract the latest fast-mode instrumentation payload from trace."""
+    return extract_mode_trace_payload(trace, "fast_mode_trace")
+
+
+def extract_med_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Extract the latest med-mode instrumentation payload from trace."""
+    return extract_mode_trace_payload(trace, "med_mode_trace")
+
+
+def extract_deep_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Extract the latest deep-mode instrumentation payload from trace."""
+    return extract_mode_trace_payload(trace, "deep_mode_trace")
+
+
+def is_navigation_retry_query(query_text: str) -> bool:
+    """Heuristic for users re-asking to navigate to pages."""
+    normalized = (query_text or "").strip().lower()
+    if not normalized:
+        return False
+    patterns = (
+        r"\b(can you )?pull up\b",
+        r"\bthose pages\b",
+        r"\bthese pages\b",
+        r"\bshow (me )?again\b",
+        r"\bopen (that|those|the) (sheet|sheets|page|pages)\b",
+        r"\bbring up\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def verify_project_exists(project_id: str, db: Session) -> Project:
@@ -219,6 +280,7 @@ async def stream_query(
 
     Request mode:
     - mode="fast" routes user to likely sheets using RAG + project structure
+    - mode="med" highlights likely regions from precomputed metadata
     - mode="deep" runs agentic vision exploration after the same RAG seed
     """
     verify_project_exists(project_id, db)
@@ -236,6 +298,7 @@ async def stream_query(
     # Validate conversation if provided
     conversation_id = data.conversation_id
     sequence_order = None
+    user_followup_within_60s = False
     if conversation_id:
         conversation = (
             db.query(Conversation)
@@ -257,6 +320,16 @@ async def stream_query(
         )
         sequence_order = existing_count + 1
         logger.info(f"Query will be #{sequence_order} in conversation {conversation_id}")
+
+        previous_query = (
+            db.query(Query)
+            .filter(Query.conversation_id == conversation_id)
+            .order_by(Query.created_at.desc())
+            .first()
+        )
+        if previous_query and previous_query.created_at:
+            elapsed = datetime.utcnow() - previous_query.created_at
+            user_followup_within_60s = elapsed <= timedelta(seconds=60)
 
     # Create query record in database
     query_record = Query(
@@ -303,11 +376,14 @@ async def stream_query(
 
     async def event_generator():
         total_tokens = 0
+        usage_input_tokens = 0
+        usage_output_tokens = 0
         response_text = ""
         display_title = None
         conversation_title_from_agent = None
         referenced_pointers = []
         stored_trace = []
+        pages_data: list[dict[str, Any]] = []
         try:
             async for event in run_agent_query(
                 db,
@@ -325,7 +401,9 @@ async def stream_query(
                 # Track tokens from done event and extract final answer
                 if event.get("type") == "done":
                     usage = event.get("usage", {})
-                    total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
+                    usage_input_tokens = _to_int(usage.get("inputTokens", 0))
+                    usage_output_tokens = _to_int(usage.get("outputTokens", 0))
+                    total_tokens = usage_input_tokens + usage_output_tokens
                     # Extract titles if provided by agent
                     display_title = event.get("displayTitle")
                     conversation_title_from_agent = event.get("conversationTitle")
@@ -390,10 +468,207 @@ async def stream_query(
                 except Exception as e:
                     logger.warning(f"Failed to track tokens: {e}")
 
+            if data.mode == "fast":
+                try:
+                    fast_trace_payload = extract_fast_mode_trace_payload(stored_trace)
+                    token_cost = (
+                        fast_trace_payload.get("token_cost", {})
+                        if isinstance(fast_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(token_cost, dict):
+                        token_cost = {}
+                    if "total" not in token_cost:
+                        token_cost["total"] = {
+                            "input_tokens": usage_input_tokens,
+                            "output_tokens": usage_output_tokens,
+                        }
+
+                    structured_log = {
+                        "event": "fast_mode_query_metrics",
+                        "query_id": query_id,
+                        "project_id": str(project_id),
+                        "conversation_id": str(conversation_id) if conversation_id else None,
+                        "user_id": str(user.id),
+                        "mode": data.mode,
+                        "query_text": data.query,
+                        "metrics": {
+                            "fast_mode.token_cost": token_cost,
+                            "fast_mode.pages_selected_count": len(pages_data),
+                            "fast_mode.user_click_first_sheet_id": None,
+                            "fast_mode.user_followup_within_60s": user_followup_within_60s,
+                            "fast_mode.navigation_retry_rate": 1.0 if is_navigation_retry_query(data.query) else 0.0,
+                        },
+                        "query_plan": (
+                            fast_trace_payload.get("query_plan", {})
+                            if isinstance(fast_trace_payload, dict)
+                            else {}
+                        ),
+                        "candidate_sets": (
+                            fast_trace_payload.get("candidate_sets", {})
+                            if isinstance(fast_trace_payload, dict)
+                            else {}
+                        ),
+                        "rank_breakdown": (
+                            fast_trace_payload.get("rank_breakdown", [])
+                            if isinstance(fast_trace_payload, dict)
+                            else []
+                        ),
+                        "final_selection": (
+                            fast_trace_payload.get("final_selection", {})
+                            if isinstance(fast_trace_payload, dict)
+                            else {}
+                        ),
+                    }
+                    logger.info("fast_mode.metrics %s", json.dumps(structured_log, default=str))
+                except Exception as e:
+                    logger.warning("Failed to emit fast-mode structured metrics log: %s", e)
+            elif data.mode == "med":
+                try:
+                    med_trace_payload = extract_med_mode_trace_payload(stored_trace)
+                    token_cost = (
+                        med_trace_payload.get("token_cost", {})
+                        if isinstance(med_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(token_cost, dict):
+                        token_cost = {}
+                    if "total" not in token_cost:
+                        token_cost["total"] = {
+                            "input_tokens": usage_input_tokens,
+                            "output_tokens": usage_output_tokens,
+                        }
+
+                    final_highlights = (
+                        med_trace_payload.get("final_highlights", {})
+                        if isinstance(med_trace_payload, dict)
+                        else {}
+                    )
+                    highlight_count = _to_int(final_highlights.get("count", 0))
+                    resolved_page_count = _to_int(final_highlights.get("resolved_page_count", 0))
+
+                    structured_log = {
+                        "event": "med_mode_query_metrics",
+                        "query_id": query_id,
+                        "project_id": str(project_id),
+                        "conversation_id": str(conversation_id) if conversation_id else None,
+                        "user_id": str(user.id),
+                        "mode": data.mode,
+                        "query_text": data.query,
+                        "metrics": {
+                            "med_mode.token_cost": token_cost,
+                            "med_mode.pages_selected_count": len(pages_data),
+                            "med_mode.highlighted_regions_count": highlight_count,
+                            "med_mode.highlighted_pages_count": resolved_page_count,
+                        },
+                        "query_plan": (
+                            med_trace_payload.get("query_plan", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "candidate_sets": (
+                            med_trace_payload.get("candidate_sets", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "rank_breakdown": (
+                            med_trace_payload.get("rank_breakdown", [])
+                            if isinstance(med_trace_payload, dict)
+                            else []
+                        ),
+                        "page_selection": (
+                            med_trace_payload.get("page_selection", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "region_candidates": (
+                            med_trace_payload.get("region_candidates", [])
+                            if isinstance(med_trace_payload, dict)
+                            else []
+                        ),
+                    }
+                    logger.info("med_mode.metrics %s", json.dumps(structured_log, default=str))
+                except Exception as e:
+                    logger.warning("Failed to emit med-mode structured metrics log: %s", e)
+            elif data.mode == "deep":
+                try:
+                    deep_trace_payload = extract_deep_mode_trace_payload(stored_trace)
+                    token_cost = (
+                        deep_trace_payload.get("token_cost", {})
+                        if isinstance(deep_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(token_cost, dict):
+                        token_cost = {}
+                    if "total" not in token_cost:
+                        token_cost["total"] = {
+                            "input_tokens": usage_input_tokens,
+                            "output_tokens": usage_output_tokens,
+                        }
+
+                    execution_summary = (
+                        deep_trace_payload.get("execution_summary", {})
+                        if isinstance(deep_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(execution_summary, dict):
+                        execution_summary = {}
+
+                    final_findings = (
+                        deep_trace_payload.get("final_findings", {})
+                        if isinstance(deep_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(final_findings, dict):
+                        final_findings = {}
+
+                    structured_log = {
+                        "event": "deep_mode_query_metrics",
+                        "query_id": query_id,
+                        "project_id": str(project_id),
+                        "conversation_id": str(conversation_id) if conversation_id else None,
+                        "user_id": str(user.id),
+                        "mode": data.mode,
+                        "query_text": data.query,
+                        "metrics": {
+                            "deep_mode.token_cost": token_cost,
+                            "deep_mode.pages_selected_count": len(pages_data),
+                            "deep_mode.candidate_regions_count": _to_int(execution_summary.get("candidate_region_count", 0)),
+                            "deep_mode.expanded_regions_count": _to_int(execution_summary.get("expanded_region_count", 0)),
+                            "deep_mode.pass_1_count": _to_int(execution_summary.get("pass_1", 0)),
+                            "deep_mode.pass_2_count": _to_int(execution_summary.get("pass_2", 0)),
+                            "deep_mode.pass_3_count": _to_int(execution_summary.get("pass_3", 0)),
+                            "deep_mode.pass_total_count": _to_int(execution_summary.get("pass_total", 0)),
+                            "deep_mode.verified_findings_count": _to_int(final_findings.get("verified_via_zoom", 0)),
+                            "deep_mode.evidence_incomplete_findings_count": _to_int(final_findings.get("evidence_incomplete", 0)),
+                            "deep_mode.fallback_used": bool(execution_summary.get("fallback_used")),
+                            "deep_mode.latency_ms": _to_int(execution_summary.get("latency_ms", 0)),
+                        },
+                        "query_plan": (
+                            deep_trace_payload.get("query_plan", {})
+                            if isinstance(deep_trace_payload, dict)
+                            else {}
+                        ),
+                        "page_selection": (
+                            deep_trace_payload.get("page_selection", [])
+                            if isinstance(deep_trace_payload, dict)
+                            else []
+                        ),
+                        "verification_plan": (
+                            deep_trace_payload.get("verification_plan", {})
+                            if isinstance(deep_trace_payload, dict)
+                            else {}
+                        ),
+                        "execution_summary": execution_summary,
+                        "final_findings": final_findings,
+                    }
+                    logger.info("deep_mode.metrics %s", json.dumps(structured_log, default=str))
+                except Exception as e:
+                    logger.warning("Failed to emit deep-mode structured metrics log: %s", e)
+
             # Update conversation title
             if conversation_id and conversation_title_from_agent:
                 try:
-                    from datetime import datetime
                     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
                     if conv:
                         conv.title = conversation_title_from_agent
