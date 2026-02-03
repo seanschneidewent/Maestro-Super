@@ -2487,6 +2487,10 @@ async def run_agent_query_fast(
     trace: list[dict] = []
     history_context = _build_history_context(history_messages)
     viewing_context_str = _build_viewing_context_str(viewing_context)
+    # Extract memory_context if passed through viewing_context (from Big Maestro)
+    memory_context = ""
+    if viewing_context and isinstance(viewing_context, dict):
+        memory_context = viewing_context.get("memory_context", "")
     page_navigation_intent = _is_page_navigation_query(query)
     settings = get_settings()
     fast_ranker_v2 = bool(getattr(settings, "fast_ranker_v2", False))
@@ -2509,6 +2513,7 @@ async def run_agent_query_fast(
             query=query,
             history_context=history_context,
             viewing_context=viewing_context_str,
+            memory_context=memory_context,
         )
     except Exception as e:
         logger.warning("route_fast_query failed, continuing with defaults: %s", e)
@@ -2643,6 +2648,7 @@ async def run_agent_query_fast(
                 query=query,
                 history_context=history_context,
                 viewing_context=viewing_context_str,
+                memory_context=memory_context,
             )
             selection_result = selection
         except Exception as e:
@@ -3061,6 +3067,10 @@ async def run_agent_query_med(
     trace: list[dict] = []
     history_context = _build_history_context(history_messages)
     viewing_context_str = _build_viewing_context_str(viewing_context)
+    # Extract memory_context if passed through viewing_context (from Big Maestro)
+    memory_context = ""
+    if viewing_context and isinstance(viewing_context, dict):
+        memory_context = viewing_context.get("memory_context", "")
     page_navigation_intent = _is_page_navigation_query(query)
 
     # 0) Query routing (same lightweight router used by fast mode).
@@ -3079,6 +3089,7 @@ async def run_agent_query_med(
             query=query,
             history_context=history_context,
             viewing_context=viewing_context_str,
+            memory_context=memory_context,
         )
     except Exception as e:
         logger.warning("route_fast_query failed for med mode, continuing with defaults: %s", e)
@@ -3215,6 +3226,7 @@ async def run_agent_query_med(
             query=query,
             history_context=history_context,
             viewing_context=viewing_context_str,
+            memory_context=memory_context,
         )
         selection_result: dict[str, Any] = selection
     except Exception as e:
@@ -3658,6 +3670,10 @@ async def run_agent_query_deep(
     settings = get_settings()
     deep_v2_enabled = bool(getattr(settings, "deep_mode_vision_v2", False))
     deep_started_at = asyncio.get_running_loop().time()
+    # Extract memory_context if passed through viewing_context (from Big Maestro)
+    memory_context = ""
+    if viewing_context and isinstance(viewing_context, dict):
+        memory_context = viewing_context.get("memory_context", "")
 
     # 1) Project structure summary
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
