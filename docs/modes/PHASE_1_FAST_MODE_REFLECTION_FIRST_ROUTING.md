@@ -2,114 +2,127 @@
 
 ## Objective
 
-Make Fast mode reliably route users to the correct sheets using Brain Mode `sheet_reflection` (markdown) + metadata, while keeping token use low and fallbacks deterministic.
+Make Fast mode reliably route users to the correct sheets using Brain Mode `sheet_reflection` + metadata, while reducing token spend and keeping fallbacks deterministic.
 
 Key outcomes:
 - Exact sheet-title queries ("equipment floor plan pages") become near-perfect.
-- Broad questions still return the best *pages* quickly (not details).
-- The system remains robust when reflections are missing/partial.
+- Broad questions still return the best pages quickly (not detail-level assertions).
+- Missing/partial reflections degrade gracefully.
+
+## Phase 0 Baseline (Already Shipped)
+
+From commit `1ac8d53`, Fast mode already includes:
+- Router plan + strict mode (`route_fast_query`) and routed query construction.
+- Candidate source tracing (`candidate_sets`), score diagnostics (`rank_breakdown`), and `final_selection` reason codes.
+- Exact-title and strict keyword helper logic in the current flow.
+- Structured metrics logs (`fast_mode.metrics`) and replay harness (`scripts/evaluate_fast_mode.py`).
+
+Phase 1 should build on this baseline without regressing Phase 0 observability contracts.
 
 ## Scope
 
 In scope:
-- Using `sheet_reflection` and its derived structure for retrieval/ranking.
-- Deterministic ranking with clear fallbacks.
-- Minimized LLM prompt sizes.
+- Reflection-first retrieval and ranking with deterministic scoring.
+- Sheet-card extraction for small, structured candidate payloads.
+- Lower-token selection path (deterministic or tiny reranker).
+- Better construction-aware fallback behavior.
 
 Out of scope:
-- Region/detail highlighting (Med mode).
-- Live vision verification (Deep mode).
-
-## Why Reflection-First Works
-
-The reflection markdown is the best semantic "index card" for each sheet:
-- It explicitly says what the sheet covers, key regions, and cross-refs.
-- It encodes sheet type (plan/schedule/detail/notes) better than raw OCR.
-- It can be used for both lexical and vector retrieval.
+- Region/detail highlights (Phase 2).
+- Live vision verification (Phase 3).
 
 ## Deliverables
 
-### D1.1 "Sheet Card" extraction (processing-time)
-Create a derived per-page structure from the reflection markdown and stored metadata.
+### D1.1 Sheet-card extraction contract
 
-Suggested fields:
-- `reflection_title` (normalized, one line)
-- `reflection_summary` (first paragraph, 1-2 sentences)
-- `reflection_headings` (list)
-- `reflection_keywords` (merged set: reflection + master_index keywords)
-- `reflection_entities` (light extraction: room names, equipment tags, systems)
-- `page_type`, `sheet_number`, `discipline_name`
-- `cross_references` (already)
+Create a derived `sheet_card` structure from reflection + metadata.
 
-Storage options:
-- `pages.sheet_card` JSONB (fast to ship, flexible)
-- or discrete indexed columns for `reflection_title`, `reflection_keywords`, etc.
+Required fields:
+- `reflection_title`
+- `reflection_summary`
+- `reflection_headings`
+- `reflection_keywords` (reflection + master_index)
+- `reflection_entities` (light tags: rooms/equipment/systems)
+- `sheet_number`, `page_type`, `discipline_name`
+- `cross_references`
 
-### D1.2 Lexical retrieval lane (exact-title / phrase-first)
-Add a retrieval step that can dominate when it should:
-- Exact phrase match on `reflection_title`
-- Strong match on `reflection_title + sheet_number + page_type`
-- Soft match on headings/keywords
+Storage path:
+- Prefer `pages.sheet_card` JSONB for first ship, with optional indexed columns later.
 
-This lane should beat vector similarity for explicit navigation.
+### D1.2 Lexical retrieval lane (title/phrase-first)
 
-### D1.3 Unified scoring + selection (replace merge-then-sort)
-Replace:
-- "merge ids then sort by sheet order"
+Add a retrieval lane that can dominate vector hits for explicit navigation:
+- Exact/near-exact phrase match on `reflection_title`.
+- Strong match on `reflection_title + sheet_number + page_type`.
+- Soft match on headings/keywords/entities.
 
-With:
-- "score candidates then pick primary/supporting"
+### D1.3 Deterministic ranker V2 (replace merge-then-sort)
+
+Replace merge-order selection with unified scoring across candidate sources.
 
 Minimum scoring signals:
-- exact title phrase match (huge)
-- page_type match (plan vs schedule vs notes vs detail)
-- discipline match (kitchen vs mech vs electrical)
-- area/level hints (kitchen, dining, roof, level 1)
-- entity/tag match (WIC-1, AHU-2, panel L1)
-- vector similarity (moderate)
-- penalties for generic sheets unless requested
+- exact title phrase match (high weight)
+- page_type match
+- discipline match
+- area/level hints
+- entity/tag match
+- vector rank contribution (moderate)
+- penalty for generic/admin sheets unless explicitly requested
 
 Selection policy:
-- `k_primary` (2-4 typical)
-- `k_supporting` (0-2): schedules/notes/details referenced by primary
+- `k_primary`: 2-4
+- `k_supporting`: 0-2 (cross-referenced schedules/notes/details)
 
-### D1.4 Prompt minimization strategy
-End-state options (pick one):
-1) No LLM page selector: deterministic scoring chooses sheets; LLM only writes the 1-sentence response (or templated).
-2) Tiny LLM re-ranker: provide only ~8-16 sheet cards (not full markdown) and ask it to pick top 4 + response.
+Ship behind feature flag:
+- `FAST_RANKER_V2`
 
-### D1.5 Construction-aware fallbacks
-If no strong hits:
-- Prefer cover/index/sheet list pages (A0xx/G0xx) over random early sheets.
-- Prefer vector top pages over "first pages from project structure".
+### D1.4 Prompt minimization / selector strategy
 
-## Implementation Steps (Suggested Order)
+Use one of these end states:
+1) Deterministic ranker selects pages; optional template response (no selector LLM).
+2) Tiny reranker on 8-16 `sheet_card` objects only (no full markdown payload).
 
-1) Build sheet-card extraction from `sheet_reflection` (processing job).
-2) Add DB storage + minimal indexing.
-3) Implement lexical "exact title / phrase" retrieval step.
-4) Implement scoring function + ranked selection.
-5) Gate new ranker behind feature flag:
-   - `FAST_RANKER_V2`
-6) Reduce selector prompt payloads (sheet cards only).
-7) Tune weights using real query logs + eval harness (Phase 4).
+### D1.5 Construction-aware fallback policy
+
+If strong matches are missing:
+- Prefer cover/index/sheet-list pages over random early pages.
+- Prefer vector top hits over project-tree "first pages".
+- Keep strict-mode fallbacks narrow.
+
+### D1.6 Validation updates
+
+Extend tests + eval to cover:
+- exact-title routing
+- strict navigation filtering
+- generic-page penalty behavior
+- token-cost deltas vs baseline
+
+## Implementation Steps (Session Order)
+
+1) Add `sheet_card` builder utility from `sheet_reflection` (+ unit tests).
+2) Thread `sheet_card` through fast-mode candidate payloads.
+3) Implement lexical retrieval lane and integrate with existing candidate sets.
+4) Implement `FAST_RANKER_V2` scoring/selection in `run_agent_query_fast`.
+5) Keep/adjust trace payloads so `query_plan`, `candidate_sets`, `rank_breakdown`, `final_selection`, and `token_cost` remain stable.
+6) Minimize selector payloads (or bypass selector) behind config flags.
+7) Run replay harness + targeted tests; tune weights with logged query samples.
 
 ## Acceptance Criteria
 
-- For explicit navigation queries, top 1-3 sheets include exact title matches when they exist.
-- For broad QA queries, top sheets are relevant and *not* dominated by cover/schedule/admin pages.
-- Token usage in fast mode decreases or remains flat compared to current behavior.
-- Deterministic fallbacks never return "random early pages" when index/cover exists.
+- Explicit navigation queries return exact-title sheets in top 1-3 when present.
+- Broad QA routing avoids being dominated by cover/notes/admin pages.
+- Token usage is flat or lower than current fast-mode baseline.
+- Deterministic fallback no longer returns arbitrary first project pages.
+- Phase 0 trace + metrics contracts remain intact.
 
 ## Risks / Edge Cases
 
-- Some projects do not have consistent sheet titles; rely on headings/keywords and master_index.
-- Some pages may have missing reflections; fall back to vector embedding + minimal keyword search.
-- Inconsistent discipline naming (Kitchen vs Food Service vs K).
+- Inconsistent sheet naming across projects; rely on headings/keywords/entities.
+- Missing reflections on some pages; require keyword/vector fallback.
+- Discipline alias drift (Kitchen vs Food Service vs K) can weaken discipline scoring.
 
 ## Open Questions
 
-- Where should "title" come from if reflection title extraction fails?
-- How aggressive should cross-reference expansion be in fast mode:
-  - likely 0-2 supporting pages max
-
+- If `reflection_title` extraction fails, what is canonical title priority order?
+- Should cross-reference expansion happen before or after primary page cap?
+- Do we keep a tiny selector reranker long-term, or move fully deterministic?
