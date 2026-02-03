@@ -125,6 +125,7 @@ PROJECT STRUCTURE (disciplines and pages):
 CANDIDATE PAGES (sheet cards + compact context from RAG search):
 {page_candidates}
 
+{memory_section}
 {history_section}
 {viewing_section}
 USER QUERY: {query}
@@ -152,6 +153,7 @@ Return JSON:
 
 FAST_QUERY_ROUTER_PROMPT = '''You are a lightweight query router for construction drawing retrieval.
 
+{memory_section}
 {history_section}
 {viewing_section}
 USER QUERY: {query}
@@ -471,6 +473,7 @@ async def route_fast_query(
     query: str,
     history_context: str = "",
     viewing_context: str = "",
+    memory_context: str = "",
 ) -> dict[str, Any]:
     """
     Lightweight routing pass that shapes fast-mode retrieval before full selection.
@@ -485,6 +488,11 @@ async def route_fast_query(
         def escape_braces(s: str) -> str:
             return s.replace("{", "{{").replace("}", "}}")
 
+        memory_section = ""
+        memory_context = (memory_context or "").strip()
+        if memory_context:
+            memory_section = f"LEARNED CONTEXT:\n{escape_braces(memory_context)}\n"
+
         history_section = ""
         history_context = (history_context or "").strip()
         if history_context:
@@ -498,6 +506,7 @@ async def route_fast_query(
 
         prompt = FAST_QUERY_ROUTER_PROMPT.format(
             query=escape_braces(query),
+            memory_section=memory_section,
             history_section=history_section,
             viewing_section=viewing_section,
         )
@@ -1423,6 +1432,7 @@ async def select_pages_smart(
     query: str,
     history_context: str = "",
     viewing_context: str = "",
+    memory_context: str = "",
 ) -> dict[str, Any]:
     """
     Smart Fast Mode page selection with Gemini Flash.
@@ -1432,6 +1442,7 @@ async def select_pages_smart(
         query: User question
         history_context: Optional formatted history
         viewing_context: Optional current page context
+        memory_context: Optional learned context from Big Maestro memory
 
     Returns:
         {
@@ -1607,6 +1618,10 @@ async def select_pages_smart(
         allowed_page_ids = set(candidate_id_set)
         allowed_page_ids.update(project_structure_page_id_set)
 
+        memory_section = ""
+        if memory_context:
+            memory_section = f"LEARNED CONTEXT:\n{escape_braces(memory_context)}\n"
+
         history_section = ""
         if history_context:
             history_section = f"CONVERSATION HISTORY:\n{escape_braces(history_context)}\n"
@@ -1619,6 +1634,7 @@ async def select_pages_smart(
             project_structure=json.dumps(compact_project_structure, indent=2),
             page_candidates=json.dumps(condensed_candidates, indent=2),
             query=escape_braces(query),
+            memory_section=memory_section,
             history_section=history_section,
             viewing_section=viewing_section,
         )
