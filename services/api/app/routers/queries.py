@@ -22,7 +22,6 @@ from app.models.query_page import QueryPage
 from app.models.conversation import Conversation
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
-from app.services.core.big_maestro import run_with_learning
 from app.services.conversation_memory import fetch_conversation_history
 from app.services.usage import UsageService
 from app.services.search import search_pointers
@@ -386,28 +385,14 @@ async def stream_query(
         stored_trace = []
         pages_data: list[dict[str, Any]] = []
         try:
-            # Use Big Maestro if learning mode is enabled
-            if data.learning_mode:
-                agent_generator = run_with_learning(
-                    db,
-                    project_id,
-                    user.id,
-                    data.query,
-                    history_messages=history_messages,
-                    viewing_context=viewing_context,
-                    mode=data.mode,
-                )
-            else:
-                agent_generator = run_agent_query(
-                    db,
-                    project_id,
-                    data.query,
-                    history_messages=history_messages,
-                    viewing_context=viewing_context,
-                    mode=data.mode,
-                )
-            
-            async for event in agent_generator:
+            async for event in run_agent_query(
+                db,
+                project_id,
+                data.query,
+                history_messages=history_messages,
+                viewing_context=viewing_context,
+                mode=data.mode,
+            ):
                 # Check if client disconnected - stop processing to save resources
                 if await request.is_disconnected():
                     logger.info(f"Client disconnected for query {query_id}, stopping stream")

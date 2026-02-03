@@ -27,11 +27,6 @@ class AgentQueryRequest(BaseModel):
         default="fast",
         description="Query mode: fast routes sheets, med highlights likely regions from precomputed metadata, deep performs agentic vision analysis",
     )
-    learning_mode: bool = Field(
-        default=False,
-        alias="learningMode",
-        description="Enable Big Maestro learning mode - detects corrections and updates memory",
-    )
 
     model_config = ConfigDict(populate_by_name=True)
 
