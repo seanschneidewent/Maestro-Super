@@ -605,15 +605,17 @@ async def run_agent_query_fast(
     """
     Fast mode:
     - Pull project structure summary
-    - Use RAG to identify likely pages
+    - Use RAG to identify candidate pages
+    - Let Gemini Flash select the most relevant pages with concise reasoning
     - Route user to those pages without running vision inference
     """
+    from app.services.providers.gemini import select_pages_smart
     from app.services.tools import get_project_structure_summary, search_pages, select_pages
     from app.services.utils.search import search_pages_and_regions
 
-    _ = history_messages, viewing_context
-
     trace: list[dict] = []
+    history_context = _build_history_context(history_messages)
+    viewing_context_str = _build_viewing_context_str(viewing_context)
 
     # 1) Load project structure summary for context
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
@@ -651,10 +653,61 @@ async def run_agent_query_fast(
     yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
     trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
 
-    region_page_ids = [pid for pid in region_matches.keys() if pid]
-    keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+    # 4) Smart LLM page selection over candidates
+    selection_input = {
+        "query": query,
+        "candidate_page_ids": [p.get("page_id") for p in page_results if isinstance(p, dict) and p.get("page_id")],
+    }
+    yield {"type": "tool_call", "tool": "select_pages_smart", "input": selection_input}
+    trace.append({"type": "tool_call", "tool": "select_pages_smart", "input": selection_input})
 
-    page_ids = list(dict.fromkeys([*region_page_ids, *keyword_page_ids]))
+    selection: dict[str, Any] = {}
+    try:
+        selection = await select_pages_smart(
+            page_candidates=page_results,
+            query=query,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        )
+        selection_result: dict[str, Any] = selection
+    except Exception as e:
+        logger.warning("Smart page selection failed, falling back to deterministic routing: %s", e)
+        selection_result = {
+            "error": str(e),
+            "selected_pages": [],
+            "chat_title": None,
+            "conversation_title": None,
+            "response": "",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+
+    yield {"type": "tool_result", "tool": "select_pages_smart", "result": selection_result}
+    trace.append({"type": "tool_result", "tool": "select_pages_smart", "result": selection_result})
+
+    selected_page_ids: list[str] = []
+    raw_selected_pages = selection.get("selected_pages")
+    if isinstance(raw_selected_pages, list):
+        for item in raw_selected_pages:
+            if not isinstance(item, dict):
+                continue
+            page_id = str(item.get("page_id") or "").strip()
+            if page_id:
+                selected_page_ids.append(page_id)
+
+    if not selected_page_ids:
+        raw_page_ids = selection.get("page_ids")
+        if isinstance(raw_page_ids, list):
+            for item in raw_page_ids:
+                page_id = str(item).strip()
+                if page_id:
+                    selected_page_ids.append(page_id)
+
+    if selected_page_ids:
+        page_ids = list(dict.fromkeys(selected_page_ids))
+    else:
+        region_page_ids = [pid for pid in region_matches.keys() if pid]
+        keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+        page_ids = list(dict.fromkeys([*region_page_ids, *keyword_page_ids]))
 
     if not page_ids:
         # Last fallback: choose a few sheets from project structure if available.
@@ -681,7 +734,7 @@ async def run_agent_query_fast(
     page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:FAST_PAGE_LIMIT]
     ordered_page_ids, page_map = _order_page_ids(db, page_ids)
 
-    # 4) Select pages for frontend display
+    # 5) Select pages for frontend display
     if ordered_page_ids:
         yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
         trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
@@ -697,8 +750,11 @@ async def run_agent_query_fast(
             yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
-    # 5) Compose response text
-    if ordered_page_ids:
+    # 6) Compose response text
+    response_text = selection.get("response") if isinstance(selection.get("response"), str) else ""
+    response_text = response_text.strip()
+
+    if not response_text and ordered_page_ids:
         top_names = [
             page_map[pid].page_name
             for pid in ordered_page_ids[:4]
@@ -710,23 +766,34 @@ async def run_agent_query_fast(
                 response_text += f" I also pulled {len(ordered_page_ids) - len(top_names)} related sheets."
         else:
             response_text = f"Pulled {len(ordered_page_ids)} relevant sheets for review."
-    else:
+    elif not response_text:
         response_text = "I couldn't find a strong page match yet. Try adding a sheet number or discipline keyword."
 
     if response_text:
         yield {"type": "text", "content": response_text}
         trace.append({"type": "reasoning", "content": response_text})
 
-    # 6) Done
+    def _to_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    usage_raw = selection.get("usage") if isinstance(selection.get("usage"), dict) else {}
+    input_tokens = _to_int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens"))
+    output_tokens = _to_int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens"))
+
     tokens = _extract_query_tokens(query)
-    display_title = " ".join(tokens[:3]).title() if tokens else "Query"
+    fallback_title = " ".join(tokens[:3]).title() if tokens else "Query"
+    display_title = str(selection.get("chat_title") or "").strip() or fallback_title
+    conversation_title = str(selection.get("conversation_title") or "").strip() or display_title
 
     yield {
         "type": "done",
         "trace": trace,
-        "usage": {"inputTokens": 0, "outputTokens": 0},
+        "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
         "displayTitle": display_title,
-        "conversationTitle": display_title,
+        "conversationTitle": conversation_title,
         "highlights": [],
         "conceptName": None,
         "summary": None,

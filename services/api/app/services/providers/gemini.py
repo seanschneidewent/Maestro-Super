@@ -117,6 +117,34 @@ Return JSON with this exact structure:
   "conversation_title": "2-6 word title"
 }}'''
 
+SMART_PAGE_SELECTION_PROMPT = '''You are a construction plan assistant. Select the most relevant pages for the user's query.
+
+CANDIDATE PAGES (from RAG search):
+{page_candidates}
+
+{history_section}
+{viewing_section}
+USER QUERY: {query}
+
+Select 1-6 pages that best answer the query. For each selected page, explain WHY it's relevant in one sentence.
+
+GUIDELINES:
+- Prioritize pages that directly answer the question
+- Include related spec/schedule pages if they contain supporting data
+- Order by relevance (most relevant first)
+- Only use page_id values that appear in CANDIDATE PAGES
+
+Return JSON:
+{{
+  "selected_pages": [
+    {{"page_id": "uuid1", "relevance": "Contains panel schedule with circuit assignments"}},
+    {{"page_id": "uuid2", "relevance": "Shows electrical one-line diagram"}}
+  ],
+  "chat_title": "2-4 word title",
+  "conversation_title": "2-6 word title",
+  "response": "Brief helpful response (1-2 sentences)"
+}}'''
+
 VISION_EXPLORATION_PROMPT = '''You are a construction plan specialist with visual analysis and code execution.
 
 You will be given:
@@ -833,6 +861,212 @@ async def select_pages_for_verification(
         }
     except Exception as e:
         logger.error(f"Gemini page selection failed: {e}")
+        raise
+
+
+async def select_pages_smart(
+    page_candidates: list[dict[str, Any]],
+    query: str,
+    history_context: str = "",
+    viewing_context: str = "",
+) -> dict[str, Any]:
+    """
+    Smart Fast Mode page selection with Gemini Flash.
+
+    Args:
+        page_candidates: RAG candidate pages with metadata.
+        query: User question
+        history_context: Optional formatted history
+        viewing_context: Optional current page context
+
+    Returns:
+        {
+            "selected_pages": [{"page_id": "...", "relevance": "..."}],
+            "page_ids": ["..."],
+            "chat_title": "...",
+            "conversation_title": "...",
+            "response": "...",
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        }
+    """
+    try:
+        client = _get_gemini_client()
+
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        def _to_text_list(values: Any, limit: int) -> list[str]:
+            if not isinstance(values, list):
+                return []
+            items: list[str] = []
+            for value in values:
+                text = str(value).strip() if value is not None else ""
+                if text:
+                    items.append(text)
+                if len(items) >= limit:
+                    break
+            return items
+
+        def _to_master_items(values: Any, limit: int) -> list[str]:
+            if not isinstance(values, list):
+                return []
+            items: list[str] = []
+            for value in values:
+                if isinstance(value, dict):
+                    text = str(
+                        value.get("name")
+                        or value.get("label")
+                        or value.get("title")
+                        or ""
+                    ).strip()
+                else:
+                    text = str(value).strip() if value is not None else ""
+                if text:
+                    items.append(text)
+                if len(items) >= limit:
+                    break
+            return items
+
+        candidate_ids: list[str] = []
+        candidate_id_set: set[str] = set()
+        condensed_candidates: list[dict[str, Any]] = []
+
+        for candidate in page_candidates:
+            if not isinstance(candidate, dict):
+                continue
+
+            page_id = str(candidate.get("page_id") or "").strip()
+            if not page_id:
+                continue
+
+            if page_id not in candidate_id_set:
+                candidate_ids.append(page_id)
+                candidate_id_set.add(page_id)
+
+            content = str(candidate.get("content") or "").strip()
+            if len(content) > 3000:
+                content = f"{content[:3000]}..."
+
+            master_index = candidate.get("master_index")
+            if not isinstance(master_index, dict):
+                master_index = {}
+            master_keywords = _to_text_list(master_index.get("keywords"), 10)
+            master_items = _to_master_items(master_index.get("items"), 5)
+            compact_master_index = None
+            if master_keywords or master_items:
+                compact_master_index = {
+                    "keywords": master_keywords,
+                    "items": master_items,
+                }
+
+            condensed_candidates.append(
+                {
+                    "page_id": page_id,
+                    "page_name": candidate.get("page_name"),
+                    "discipline": candidate.get("discipline"),
+                    "page_type": candidate.get("page_type"),
+                    "keywords": _to_text_list(candidate.get("keywords"), 10),
+                    "questions_answered": _to_text_list(candidate.get("questions_answered"), 3),
+                    "master_index": compact_master_index,
+                    "content": content,
+                }
+            )
+
+        history_section = ""
+        if history_context:
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(history_context)}\n"
+
+        viewing_section = ""
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
+
+        prompt = SMART_PAGE_SELECTION_PROMPT.format(
+            page_candidates=json.dumps(condensed_candidates, indent=2),
+            query=escape_braces(query),
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        response = client.models.generate_content(
+            model=AGENT_QUERY_MODEL,
+            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+            ),
+        )
+
+        result = _extract_json_response(response.text)
+
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+
+        selected_pages: list[dict[str, str]] = []
+        selected_seen: set[str] = set()
+
+        def add_selected(page_id: str, relevance: str) -> None:
+            if page_id in selected_seen:
+                return
+            if page_id not in candidate_id_set:
+                return
+            selected_seen.add(page_id)
+            selected_pages.append(
+                {
+                    "page_id": page_id,
+                    "relevance": relevance or "Relevant to the query.",
+                }
+            )
+
+        raw_selected = result.get("selected_pages")
+        if isinstance(raw_selected, list):
+            for item in raw_selected:
+                if isinstance(item, dict):
+                    page_id = str(item.get("page_id") or "").strip()
+                    relevance = str(item.get("relevance") or "").strip()
+                    if page_id:
+                        add_selected(page_id, relevance)
+                elif isinstance(item, str):
+                    page_id = item.strip()
+                    if page_id:
+                        add_selected(page_id, "")
+
+        if not selected_pages:
+            raw_page_ids = result.get("page_ids")
+            if isinstance(raw_page_ids, list):
+                for item in raw_page_ids:
+                    page_id = str(item).strip()
+                    if page_id:
+                        add_selected(page_id, "")
+
+        if not selected_pages and candidate_ids:
+            for page_id in candidate_ids[:3]:
+                add_selected(page_id, "Strong match from search results.")
+
+        selected_pages = selected_pages[:6]
+        selected_page_ids = [item["page_id"] for item in selected_pages]
+
+        chat_title = str(result.get("chat_title") or "").strip() or "Query"
+        conversation_title = str(result.get("conversation_title") or "").strip() or chat_title
+        response_text = str(result.get("response") or "").strip()
+        if not response_text:
+            response_text = "I found the most relevant sheets and pulled them up for review."
+
+        return {
+            "selected_pages": selected_pages,
+            "page_ids": selected_page_ids,
+            "chat_title": chat_title,
+            "conversation_title": conversation_title,
+            "response": response_text,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Gemini smart page selection failed: {e}")
         raise
 
 

@@ -56,7 +56,8 @@ async def search_pages(
         limit: Max results (default 10)
 
     Returns:
-        List of matching pages with id, name, discipline, and full content
+        List of matching pages with id, name, discipline, full content,
+        and compact Brain Mode metadata for smart selection.
     """
     from sqlalchemy import or_, func, and_
 
@@ -164,11 +165,57 @@ async def search_pages(
             or ""
         )
 
+        keywords: list[str] = []
+        master_index = page.master_index if isinstance(page.master_index, dict) else {}
+        raw_keywords = master_index.get("keywords")
+        if isinstance(raw_keywords, list):
+            for keyword in raw_keywords:
+                text = str(keyword).strip() if keyword is not None else ""
+                if text:
+                    keywords.append(text)
+                if len(keywords) >= 10:
+                    break
+
+        questions_answered: list[str] = []
+        if isinstance(page.questions_answered, list):
+            for question in page.questions_answered:
+                text = str(question).strip() if question is not None else ""
+                if text:
+                    questions_answered.append(text)
+                if len(questions_answered) >= 3:
+                    break
+
+        compact_items: list[str] = []
+        raw_items = master_index.get("items")
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if isinstance(item, dict):
+                    text = str(item.get("name") or "").strip()
+                else:
+                    text = str(item).strip() if item is not None else ""
+                if text:
+                    compact_items.append(text)
+                if len(compact_items) >= 5:
+                    break
+
+        compact_master_index: dict | None = None
+        if keywords or compact_items:
+            compact_master_index = {}
+            if keywords:
+                compact_master_index["keywords"] = keywords
+            if compact_items:
+                compact_master_index["items"] = compact_items
+
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
             "discipline": page.discipline.display_name,
             "content": content,  # Full content for Gemini to read
+            "sheet_reflection": page.sheet_reflection,
+            "page_type": page.page_type,
+            "keywords": keywords,
+            "questions_answered": questions_answered,
+            "master_index": compact_master_index,
         })
 
     return results
