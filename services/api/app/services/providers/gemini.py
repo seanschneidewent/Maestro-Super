@@ -122,7 +122,7 @@ SMART_PAGE_SELECTION_PROMPT = '''You are a construction plan assistant focused o
 PROJECT STRUCTURE (disciplines and pages):
 {project_structure}
 
-CANDIDATE PAGES (from RAG search):
+CANDIDATE PAGES (sheet cards + compact context from RAG search):
 {page_candidates}
 
 {history_section}
@@ -1306,9 +1306,19 @@ async def select_pages_smart(
                 candidate_ids.append(page_id)
                 candidate_id_set.add(page_id)
 
-            content = str(candidate.get("content") or "").strip()
-            if len(content) > 3000:
-                content = f"{content[:3000]}..."
+            sheet_card = candidate.get("sheet_card")
+            if not isinstance(sheet_card, dict):
+                sheet_card = {}
+            card_title = str(sheet_card.get("reflection_title") or "").strip()
+            card_summary = str(sheet_card.get("reflection_summary") or "").strip()
+            card_headings = _to_text_list(sheet_card.get("reflection_headings"), 8)
+            card_keywords = _to_text_list(sheet_card.get("reflection_keywords"), 16)
+            card_entities = _to_text_list(sheet_card.get("reflection_entities"), 12)
+            card_cross_refs = _to_text_list(sheet_card.get("cross_references"), 8)
+
+            content = card_summary or str(candidate.get("content") or "").strip()
+            if len(content) > 800:
+                content = f"{content[:800]}..."
 
             master_index = candidate.get("master_index")
             if not isinstance(master_index, dict):
@@ -1328,6 +1338,14 @@ async def select_pages_smart(
                     "page_name": candidate.get("page_name"),
                     "discipline": candidate.get("discipline"),
                     "page_type": candidate.get("page_type"),
+                    "sheet_card": {
+                        "reflection_title": card_title or None,
+                        "reflection_summary": card_summary or None,
+                        "reflection_headings": card_headings,
+                        "reflection_keywords": card_keywords,
+                        "reflection_entities": card_entities,
+                        "cross_references": card_cross_refs,
+                    },
                     "keywords": _to_text_list(candidate.get("keywords"), 10),
                     "questions_answered": _to_text_list(candidate.get("questions_answered"), 3),
                     "master_index": compact_master_index,

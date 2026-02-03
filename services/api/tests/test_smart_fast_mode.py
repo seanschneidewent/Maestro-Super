@@ -14,6 +14,7 @@ sys.modules.setdefault("pdf2image", SimpleNamespace(convert_from_bytes=lambda *a
 from app.services.core import agent as core_agent
 from app.routers.queries import extract_fast_mode_trace_payload, is_navigation_retry_query
 from app.services.providers.gemini import route_fast_query, select_pages_smart
+from app.services.utils.sheet_cards import build_sheet_card
 
 
 def test_select_pages_smart_filters_invalid_and_deduplicates(monkeypatch) -> None:
@@ -199,6 +200,7 @@ def test_run_agent_query_fast_uses_smart_selection_response(monkeypatch) -> None
             "usage": {"input_tokens": 11, "output_tokens": 7},
         }
 
+    monkeypatch.setattr(core_agent, "get_settings", lambda: SimpleNamespace(fast_ranker_v2=False, fast_selector_rerank=False))
     monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
     monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
     monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
@@ -208,7 +210,7 @@ def test_run_agent_query_fast_uses_smart_selection_response(monkeypatch) -> None
     monkeypatch.setattr(
         core_agent,
         "_order_page_ids",
-        lambda db, page_ids: (
+        lambda db, page_ids, sort_by_sheet_number=True: (
             page_ids,
             {pid: SimpleNamespace(page_name="E-3.2" if pid == "page-1" else "E-3.1") for pid in page_ids},
         ),
@@ -287,6 +289,7 @@ def test_run_agent_query_fast_page_navigation_uses_sheet_list_response(monkeypat
             "usage": {"input_tokens": 9, "output_tokens": 4},
         }
 
+    monkeypatch.setattr(core_agent, "get_settings", lambda: SimpleNamespace(fast_ranker_v2=False, fast_selector_rerank=False))
     monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
     monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
     monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
@@ -296,7 +299,7 @@ def test_run_agent_query_fast_page_navigation_uses_sheet_list_response(monkeypat
     monkeypatch.setattr(
         core_agent,
         "_order_page_ids",
-        lambda db, page_ids: (
+        lambda db, page_ids, sort_by_sheet_number=True: (
             page_ids,
             {
                 "page-1": SimpleNamespace(page_name="K-101"),
@@ -407,6 +410,7 @@ def test_run_agent_query_fast_router_strict_filters_noise(monkeypatch) -> None:
             ]
         }
 
+    monkeypatch.setattr(core_agent, "get_settings", lambda: SimpleNamespace(fast_ranker_v2=False, fast_selector_rerank=False))
     monkeypatch.setattr("app.services.providers.gemini.route_fast_query", fake_route_fast_query)
     monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
     monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
@@ -417,7 +421,7 @@ def test_run_agent_query_fast_router_strict_filters_noise(monkeypatch) -> None:
     monkeypatch.setattr(
         core_agent,
         "_order_page_ids",
-        lambda db, page_ids: (
+        lambda db, page_ids, sort_by_sheet_number=True: (
             page_ids,
             {pid: SimpleNamespace(page_name={"page-1": "K-101", "page-2": "K-102", "page-3": "A-101"}[pid]) for pid in page_ids},
         ),
@@ -467,3 +471,160 @@ def test_extract_fast_mode_trace_payload_returns_latest() -> None:
 def test_is_navigation_retry_query_heuristic() -> None:
     assert is_navigation_retry_query("can you pull up those pages again?")
     assert not is_navigation_retry_query("where is the walk-in cooler")
+
+
+def test_build_sheet_card_extracts_reflection_metadata() -> None:
+    card = build_sheet_card(
+        sheet_number="K-101",
+        page_type="floor_plan",
+        discipline_name="Kitchen",
+        sheet_reflection=(
+            "## K-101 Equipment Floor Plan\n\n"
+            "Shows kitchen equipment layout with WIC-1, RTU-2, and panel L1 locations.\n\n"
+            "**Key Details:**\n"
+            "- Verify hood curb dimensions.\n"
+            "- Coordinate with electrical schedule.\n"
+        ),
+        master_index={"keywords": ["equipment", "kitchen"], "items": ["WIC-1", "RTU-2"]},
+        keywords=["floor plan"],
+        cross_references=["E-3.2", {"sheet": "M-1.1"}],
+    )
+
+    assert card["reflection_title"] == "K-101 Equipment Floor Plan"
+    assert "WIC-1" in card["reflection_entities"]
+    assert "E-3.2" in card["cross_references"]
+    assert "M-1.1" in card["cross_references"]
+    assert "equipment" in " ".join(card["reflection_keywords"]).lower()
+
+
+def test_run_agent_query_fast_v2_skips_selector_and_ranks_deterministically(monkeypatch) -> None:
+    async def fake_route_fast_query(query, history_context="", viewing_context=""):
+        return {
+            "intent": "page_navigation",
+            "must_terms": ["equipment floor plan"],
+            "preferred_page_types": ["floor_plan"],
+            "strict": True,
+            "k": 3,
+            "usage": {"input_tokens": 5, "output_tokens": 2},
+            "model": "fake-router",
+        }
+
+    async def fake_get_project_structure_summary(db, project_id):
+        return {
+            "disciplines": [
+                {
+                    "name": "Kitchen",
+                    "pages": [
+                        {"page_id": "page-1", "sheet_number": "K-101", "title": "Equipment Floor Plan"},
+                        {"page_id": "page-2", "sheet_number": "K-001", "title": "Cover Sheet"},
+                        {"page_id": "page-3", "sheet_number": "K-102", "title": "Equipment Notes"},
+                    ],
+                }
+            ],
+            "total_pages": 3,
+        }
+
+    async def fake_search_pages(db, query, project_id, limit):
+        return [
+            {
+                "page_id": "page-1",
+                "page_name": "K-101",
+                "discipline": "Kitchen",
+                "page_type": "floor_plan",
+                "content": "Equipment floor plan with WIC-1 and RTU-2.",
+                "sheet_reflection": "## Equipment Floor Plan\nWIC-1 layout and major equipment tags.",
+                "keywords": ["equipment", "floor plan"],
+                "master_index": {"keywords": ["equipment", "kitchen"]},
+            },
+            {
+                "page_id": "page-2",
+                "page_name": "K-001",
+                "discipline": "Kitchen",
+                "page_type": "cover",
+                "content": "General cover and sheet index.",
+                "sheet_reflection": "## Cover Sheet\nGeneral notes and sheet list.",
+                "keywords": ["cover"],
+                "master_index": {"keywords": ["cover", "index"]},
+            },
+            {
+                "page_id": "page-3",
+                "page_name": "K-102",
+                "discipline": "Kitchen",
+                "page_type": "notes",
+                "content": "Equipment notes for kitchen systems.",
+                "sheet_reflection": "## Equipment Notes\nSupport notes for equipment plan.",
+                "keywords": ["notes", "equipment"],
+                "master_index": {"keywords": ["notes", "equipment"]},
+            },
+        ]
+
+    async def fake_search_pages_and_regions(db, query, project_id):
+        return {"page-3": [{"id": "region-1"}]}
+
+    async def fake_select_pages(db, page_ids):
+        return {
+            "pages": [
+                {
+                    "page_id": page_id,
+                    "page_name": {"page-1": "K-101", "page-2": "K-001", "page-3": "K-102"}.get(page_id, ""),
+                    "file_path": f"/tmp/{page_id}.png",
+                    "discipline_id": "disc-1",
+                    "discipline_name": "Kitchen",
+                    "semantic_index": None,
+                }
+                for page_id in page_ids
+            ]
+        }
+
+    async def fake_select_pages_smart(*args, **kwargs):
+        raise AssertionError("Selector should be skipped when FAST_RANKER_V2 is enabled without rerank")
+
+    monkeypatch.setattr(core_agent, "get_settings", lambda: SimpleNamespace(fast_ranker_v2=True, fast_selector_rerank=False))
+    monkeypatch.setattr("app.services.providers.gemini.route_fast_query", fake_route_fast_query)
+    monkeypatch.setattr("app.services.providers.gemini.select_pages_smart", fake_select_pages_smart)
+    monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
+    monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
+    monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
+    monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
+    monkeypatch.setattr(core_agent, "_expand_with_cross_reference_pages", lambda db, project_id, page_ids: page_ids)
+    monkeypatch.setattr(
+        core_agent,
+        "_order_page_ids",
+        lambda db, page_ids, sort_by_sheet_number=True: (
+            page_ids,
+            {pid: SimpleNamespace(page_name={"page-1": "K-101", "page-2": "K-001", "page-3": "K-102"}[pid]) for pid in page_ids},
+        ),
+    )
+
+    events = asyncio.run(
+        _collect_events(
+            core_agent.run_agent_query_fast(
+                db=SimpleNamespace(),
+                project_id="project-1",
+                query="equipment floor plan pages",
+                history_messages=[],
+                viewing_context=None,
+            )
+        )
+    )
+
+    selector_tool_calls = [
+        event
+        for event in events
+        if event.get("type") == "tool_call" and event.get("tool") == "select_pages_smart"
+    ]
+    assert not selector_tool_calls
+
+    select_pages_call = next(
+        event for event in events if event.get("type") == "tool_call" and event.get("tool") == "select_pages"
+    )
+    assert select_pages_call["input"]["page_ids"][0] == "page-1"
+
+    fast_trace_event = next(
+        event for event in events if event.get("type") == "tool_result" and event.get("tool") == "fast_mode_trace"
+    )
+    assert fast_trace_event["result"]["query_plan"]["ranker"] == "v2"
+    assert fast_trace_event["result"]["candidate_sets"]["smart_selector_hits"]["count"] == 0
+
+    done_event = next(event for event in events if event.get("type") == "done")
+    assert done_event["usage"] == {"inputTokens": 5, "outputTokens": 2}

@@ -32,6 +32,7 @@ from app.schemas.tools import (
     PointerSummary,
     ProjectPages,
 )
+from app.services.utils.sheet_cards import build_sheet_card
 from app.services.utils.search import search_pointers  # Re-export existing search
 
 
@@ -206,6 +207,18 @@ async def search_pages(
             if compact_items:
                 compact_master_index["items"] = compact_items
 
+        sheet_card = page.sheet_card if isinstance(page.sheet_card, dict) else None
+        if not sheet_card:
+            sheet_card = build_sheet_card(
+                sheet_number=page.page_name,
+                page_type=page.page_type,
+                discipline_name=page.discipline.display_name if page.discipline else None,
+                sheet_reflection=page.sheet_reflection,
+                master_index=compact_master_index,
+                keywords=keywords,
+                cross_references=page.cross_references,
+            )
+
         results.append({
             "page_id": str(page.id),
             "page_name": page.page_name,
@@ -213,9 +226,11 @@ async def search_pages(
             "content": content,  # Full content for Gemini to read
             "sheet_reflection": page.sheet_reflection,
             "page_type": page.page_type,
+            "cross_references": page.cross_references if isinstance(page.cross_references, list) else [],
             "keywords": keywords,
             "questions_answered": questions_answered,
             "master_index": compact_master_index,
+            "sheet_card": sheet_card,
         })
 
     return results
