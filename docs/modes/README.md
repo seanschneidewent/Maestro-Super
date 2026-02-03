@@ -9,6 +9,7 @@ This folder breaks the implementation plan into phase docs so each stage can be 
 - [Phase 1 - Fast Mode (Reflection-First Routing)](PHASE_1_FAST_MODE_REFLECTION_FIRST_ROUTING.md)
 - [Phase 1 - Implementation Summary](PHASE_1_IMPLEMENTATION_SUMMARY.md)
 - [Phase 2 - Med Mode (Detail-Level From Brain Mode Outputs)](PHASE_2_MED_MODE_DETAIL_LEVEL_NO_VISION.md)
+- [Phase 2 - Implementation Summary](PHASE_2_IMPLEMENTATION_SUMMARY.md)
 - [Phase 3 - Deep Mode Enhancements (Vision + Verified Facts)](PHASE_3_DEEP_MODE_VISION_ENHANCEMENTS.md)
 - [Phase 4 - Evaluation & Rollout](PHASE_4_EVALUATION_AND_ROLLOUT.md)
 
