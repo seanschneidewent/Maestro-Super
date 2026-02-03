@@ -1451,6 +1451,13 @@ def _build_deep_region_prompt_payload(region: dict[str, Any]) -> dict[str, Any]:
             "x1": float(bbox[2]),
             "y1": float(bbox[3]),
         }
+    elif isinstance(bbox, dict) and all(k in bbox for k in ("x0", "y0", "x1", "y1")):
+        bbox_payload = {
+            "x0": float(bbox["x0"]),
+            "y0": float(bbox["y0"]),
+            "x1": float(bbox["x1"]),
+            "y1": float(bbox["y1"]),
+        }
 
     payload = {
         "id": str(region.get("region_id") or ""),
