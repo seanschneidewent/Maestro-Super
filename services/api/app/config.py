@@ -15,6 +15,7 @@ FAST_ROUTER_MODEL = "gemma-3-4b-it"
 FAST_RANKER_V2 = False
 FAST_SELECTOR_RERANK = False
 MED_MODE_REGIONS = False
+DEEP_MODE_VISION_V2 = False
 
 
 class Settings(BaseSettings):
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
     fast_ranker_v2: bool = FAST_RANKER_V2
     fast_selector_rerank: bool = FAST_SELECTOR_RERANK
     med_mode_regions: bool = MED_MODE_REGIONS
+    deep_mode_vision_v2: bool = DEEP_MODE_VISION_V2
 
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production

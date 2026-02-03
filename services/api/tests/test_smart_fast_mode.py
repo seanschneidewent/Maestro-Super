@@ -13,11 +13,16 @@ sys.modules.setdefault("pdf2image", SimpleNamespace(convert_from_bytes=lambda *a
 
 from app.services.core import agent as core_agent
 from app.routers.queries import (
+    extract_deep_mode_trace_payload,
     extract_fast_mode_trace_payload,
     extract_med_mode_trace_payload,
     is_navigation_retry_query,
 )
-from app.services.providers.gemini import route_fast_query, select_pages_smart
+from app.services.providers.gemini import (
+    normalize_vision_findings,
+    route_fast_query,
+    select_pages_smart,
+)
 from app.services.tools import resolve_highlights
 from app.services.utils.sheet_cards import build_sheet_card
 
@@ -850,3 +855,365 @@ def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
 
     done_event = next(e for e in events if e.get("type") == "done")
     assert done_event["usage"] == {"inputTokens": 4, "outputTokens": 2}
+
+
+def test_extract_deep_mode_trace_payload_returns_latest() -> None:
+    trace = [
+        {"type": "tool_result", "tool": "deep_mode_trace", "result": {"query_plan": {"intent": "verification"}}},
+        {"type": "tool_result", "tool": "deep_mode_trace", "result": {"query_plan": {"intent": "qa"}}},
+    ]
+    payload = extract_deep_mode_trace_payload(trace)
+    assert payload is not None
+    assert payload["query_plan"]["intent"] == "qa"
+
+
+def test_normalize_vision_findings_keeps_verification_metadata() -> None:
+    pages = [
+        {
+            "page_id": "page-1",
+            "page_name": "E-3.2",
+            "semantic_index": {
+                "image_width": 1000,
+                "image_height": 1000,
+                "words": [
+                    {"id": 101, "text": "480V", "bbox": {"x0": 100, "y0": 100, "x1": 180, "y1": 140}},
+                ],
+            },
+        }
+    ]
+    findings = [
+        {
+            "category": "electrical",
+            "content": "Panel voltage is 480V",
+            "page_id": "E-3.2",
+            "semantic_refs": [101],
+            "confidence": "verified_via_zoom",
+            "source_text": "480V",
+            "verification_method": "multi pass zoom",
+            "verification_pass": "2",
+            "candidate_region_id": "region_schedule",
+        }
+    ]
+
+    normalized = normalize_vision_findings(findings, pages)
+    assert len(normalized) == 1
+    assert normalized[0]["page_id"] == "page-1"
+    assert normalized[0]["verification_method"] == "multi_pass_zoom"
+    assert normalized[0]["verification_pass"] == 2
+    assert normalized[0]["candidate_region_id"] == "region_schedule"
+
+
+def test_run_agent_query_deep_v2_emits_trace_and_resolved_highlights(monkeypatch) -> None:
+    async def fake_get_project_structure_summary(db, project_id):
+        return {
+            "disciplines": [
+                {
+                    "name": "Electrical",
+                    "pages": [
+                        {"page_id": "page-1", "sheet_number": "E-3.2", "title": "Panel Schedule"},
+                    ],
+                }
+            ],
+            "total_pages": 1,
+        }
+
+    async def fake_search_pages_and_regions(db, query, project_id):
+        return {
+            "page-1": [
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                    "_similarity": 0.92,
+                }
+            ]
+        }
+
+    async def fake_search_pages(db, query, project_id, limit):
+        return []
+
+    async def fake_select_pages(db, page_ids):
+        return {
+            "pages": [
+                {
+                    "page_id": page_id,
+                    "page_name": "E-3.2",
+                    "file_path": f"/tmp/{page_id}.png",
+                    "discipline_id": "disc-1",
+                    "discipline_name": "Electrical",
+                    "semantic_index": {
+                        "image_width": 1000,
+                        "image_height": 1000,
+                        "words": [
+                                {
+                                    "id": 101,
+                                    "text": "480V",
+                                    "bbox": {
+                                        "x0": 120,
+                                        "y0": 240,
+                                        "x1": 180,
+                                        "y1": 270,
+                                        "width": 60,
+                                        "height": 30,
+                                    },
+                                    "role": "cell_value",
+                                    "region_type": "schedule",
+                                }
+                        ],
+                    },
+                }
+                for page_id in page_ids
+            ]
+        }
+
+    async def fake_explore_concept_with_vision_streaming(
+        query,
+        pages,
+        verification_plan=None,
+        history_context="",
+        viewing_context="",
+    ):
+        assert isinstance(verification_plan, dict)
+        budgets = verification_plan.get("budgets", {})
+        assert budgets.get("max_candidate_regions") == core_agent.DEEP_CANDIDATE_REGION_LIMIT
+        yield {"type": "thinking", "content": "zoom pass 1"}
+        yield {
+            "type": "result",
+            "data": {
+                "concept_name": "Panel Schedule",
+                "summary": "Verified panel schedule values.",
+                "findings": [
+                    {
+                        "category": "electrical",
+                        "content": "Panel schedule shows 480V service.",
+                        "page_id": "page-1",
+                        "semantic_refs": [101],
+                        "bbox": [0.12, 0.24, 0.18, 0.27],
+                        "confidence": "verified_via_zoom",
+                        "source_text": "480V",
+                        "verification_method": "multi_pass_zoom",
+                        "verification_pass": 2,
+                        "candidate_region_id": "region_schedule",
+                    }
+                ],
+                "cross_references": [],
+                "gaps": [],
+                "response": "Panel schedule verified at 480V.",
+                "usage": {"input_tokens": 21, "output_tokens": 9},
+            },
+        }
+
+    async def fake_load_page_image_bytes(page):
+        return b"fake_png"
+
+    page_map = {
+        "page-1": SimpleNamespace(
+            id="page-1",
+            page_name="E-3.2",
+            page_type="schedule",
+            regions=[
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                }
+            ],
+            discipline=SimpleNamespace(display_name="Electrical"),
+            sheet_reflection="## Panel Schedule",
+            context_markdown="",
+            full_context="",
+            initial_context="",
+            details=[],
+            semantic_index={
+                "image_width": 1000,
+                "image_height": 1000,
+                "words": [],
+            },
+            master_index={"keywords": ["panel", "schedule"]},
+        )
+    }
+
+    monkeypatch.setattr(
+        core_agent,
+        "get_settings",
+        lambda: SimpleNamespace(deep_mode_vision_v2=True),
+    )
+    monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
+    monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
+    monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
+    monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
+    monkeypatch.setattr("app.services.providers.gemini.explore_concept_with_vision_streaming", fake_explore_concept_with_vision_streaming)
+    monkeypatch.setattr(core_agent, "_expand_with_cross_reference_pages", lambda db, project_id, page_ids: page_ids)
+    monkeypatch.setattr(
+        core_agent,
+        "_order_page_ids",
+        lambda db, page_ids, sort_by_sheet_number=True: (
+            page_ids,
+            {pid: page_map[pid] for pid in page_ids if pid in page_map},
+        ),
+    )
+    monkeypatch.setattr(core_agent, "_load_page_image_bytes", fake_load_page_image_bytes)
+
+    events = asyncio.run(
+        _collect_events(
+            core_agent.run_agent_query_deep(
+                db=SimpleNamespace(),
+                project_id="project-1",
+                query="verify panel schedule voltage",
+                history_messages=[],
+                viewing_context=None,
+            )
+        )
+    )
+
+    deep_trace_event = next(
+        event for event in events if event.get("type") == "tool_result" and event.get("tool") == "deep_mode_trace"
+    )
+    assert deep_trace_event["result"]["execution_summary"]["deep_v2_enabled"] is True
+    assert deep_trace_event["result"]["final_findings"]["verified_via_zoom"] == 1
+
+    resolve_event = next(
+        event for event in events if event.get("type") == "tool_result" and event.get("tool") == "resolve_highlights"
+    )
+    resolved = resolve_event["result"]["highlights"]
+    assert resolved
+    assert resolved[0]["page_id"] == "page-1"
+    assert resolved[0]["words"]
+
+    done_event = next(event for event in events if event.get("type") == "done")
+    assert done_event["usage"] == {"inputTokens": 21, "outputTokens": 9}
+    assert done_event["findings"]
+
+
+def test_run_agent_query_deep_v2_falls_back_when_vision_fails(monkeypatch) -> None:
+    async def fake_get_project_structure_summary(db, project_id):
+        return {
+            "disciplines": [
+                {
+                    "name": "Electrical",
+                    "pages": [
+                        {"page_id": "page-1", "sheet_number": "E-3.2", "title": "Panel Schedule"},
+                    ],
+                }
+            ],
+            "total_pages": 1,
+        }
+
+    async def fake_search_pages_and_regions(db, query, project_id):
+        return {
+            "page-1": [
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                    "_similarity": 0.92,
+                }
+            ]
+        }
+
+    async def fake_search_pages(db, query, project_id, limit):
+        return []
+
+    async def fake_select_pages(db, page_ids):
+        return {
+            "pages": [
+                {
+                    "page_id": page_id,
+                    "page_name": "E-3.2",
+                    "file_path": f"/tmp/{page_id}.png",
+                    "discipline_id": "disc-1",
+                    "discipline_name": "Electrical",
+                    "semantic_index": {
+                        "image_width": 1000,
+                        "image_height": 1000,
+                        "words": [],
+                    },
+                }
+                for page_id in page_ids
+            ]
+        }
+
+    async def fake_explore_concept_with_vision_streaming(
+        query,
+        pages,
+        verification_plan=None,
+        history_context="",
+        viewing_context="",
+    ):
+        if False:
+            yield {"type": "result", "data": {}}
+        raise RuntimeError("vision execution failed")
+
+    async def fake_load_page_image_bytes(page):
+        return b"fake_png"
+
+    page_map = {
+        "page-1": SimpleNamespace(
+            id="page-1",
+            page_name="E-3.2",
+            page_type="schedule",
+            regions=[
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                }
+            ],
+            discipline=SimpleNamespace(display_name="Electrical"),
+            sheet_reflection="## Panel Schedule",
+            context_markdown="",
+            full_context="",
+            initial_context="",
+            details=[],
+            semantic_index={"image_width": 1000, "image_height": 1000, "words": []},
+            master_index={"keywords": ["panel", "schedule"]},
+        )
+    }
+
+    monkeypatch.setattr(
+        core_agent,
+        "get_settings",
+        lambda: SimpleNamespace(deep_mode_vision_v2=True),
+    )
+    monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
+    monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
+    monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
+    monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
+    monkeypatch.setattr("app.services.providers.gemini.explore_concept_with_vision_streaming", fake_explore_concept_with_vision_streaming)
+    monkeypatch.setattr(core_agent, "_expand_with_cross_reference_pages", lambda db, project_id, page_ids: page_ids)
+    monkeypatch.setattr(
+        core_agent,
+        "_order_page_ids",
+        lambda db, page_ids, sort_by_sheet_number=True: (
+            page_ids,
+            {pid: page_map[pid] for pid in page_ids if pid in page_map},
+        ),
+    )
+    monkeypatch.setattr(core_agent, "_load_page_image_bytes", fake_load_page_image_bytes)
+
+    events = asyncio.run(
+        _collect_events(
+            core_agent.run_agent_query_deep(
+                db=SimpleNamespace(),
+                project_id="project-1",
+                query="verify panel schedule voltage",
+                history_messages=[],
+                viewing_context=None,
+            )
+        )
+    )
+
+    assert not any(event.get("type") == "error" for event in events)
+
+    deep_trace_event = next(
+        event for event in events if event.get("type") == "tool_result" and event.get("tool") == "deep_mode_trace"
+    )
+    assert deep_trace_event["result"]["execution_summary"]["fallback_used"] is True
+
+    done_event = next(event for event in events if event.get("type") == "done")
+    assert done_event["usage"] == {"inputTokens": 0, "outputTokens": 0}
+    assert done_event["findings"] == []

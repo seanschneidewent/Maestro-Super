@@ -27,6 +27,9 @@ FAST_PAGE_LIMIT = 8
 DEEP_PAGE_LIMIT = 5
 CROSS_REF_PAGE_LIMIT = 3
 DEEP_CANDIDATE_REGION_LIMIT = 8
+DEEP_EXPANSION_REGION_LIMIT = 4
+DEEP_MICRO_CROP_LIMIT = 12
+DEEP_MAX_FINDINGS = 12
 MED_PAGE_LIMIT = 4
 MED_TOTAL_HIGHLIGHT_LIMIT = 8
 MED_HIGHLIGHTS_PER_PAGE = 3
@@ -1404,6 +1407,452 @@ def _build_med_mode_response_text(
             + "."
         )
     return "I pulled the best sheets and highlighted likely areas to check first."
+
+
+def _infer_deep_evidence_targets(query: str, query_tokens: list[str]) -> list[dict[str, str]]:
+    """Infer likely evidence categories Deep mode should verify from the query."""
+    haystack = _normalize_text(query)
+    targets: list[dict[str, str]] = []
+    seen_categories: set[str] = set()
+
+    def _add_target(category: str, hint: str) -> None:
+        if category in seen_categories:
+            return
+        seen_categories.add(category)
+        targets.append({"category": category, "hint": hint})
+
+    if any(token in haystack for token in ("dimension", "dimensions", "size", "height", "width", "depth", "\"", "ft", "inch")):
+        _add_target("dimensions", "verify exact dimensions and units")
+    if any(token in haystack for token in ("symbol", "legend", "callout", "section", "elevation", "detail")):
+        _add_target("symbol", "verify symbol/callout identity and reference")
+    if any(token in haystack for token in ("tag", "label", "room", "equipment", "panel", "wic", "ahu", "rtu")):
+        _add_target("tag", "verify equipment/room/panel tags")
+    if any(token in haystack for token in ("schedule", "table", "spec", "specification", "notes", "note")):
+        _add_target("schedule_or_note", "verify schedule row or note text")
+
+    focus_tokens = [token for token in query_tokens if len(token) >= 3][:3]
+    if focus_tokens:
+        _add_target("query_anchor", f"verify query anchors: {', '.join(focus_tokens)}")
+
+    if not targets:
+        _add_target("text", "verify exact on-sheet text tied to the query")
+
+    return targets[:5]
+
+
+def _build_deep_region_prompt_payload(region: dict[str, Any]) -> dict[str, Any]:
+    """Compact region payload passed to Deep vision prompts."""
+    bbox = region.get("bbox")
+    bbox_payload: dict[str, float] | None = None
+    if isinstance(bbox, list) and len(bbox) == 4:
+        bbox_payload = {
+            "x0": float(bbox[0]),
+            "y0": float(bbox[1]),
+            "x1": float(bbox[2]),
+            "y1": float(bbox[3]),
+        }
+
+    payload = {
+        "id": str(region.get("region_id") or ""),
+        "type": str(region.get("region_type") or ""),
+        "label": str(region.get("label") or ""),
+        "bbox": bbox_payload,
+        "score": _coerce_float(region.get("score"), 0.0),
+        "reason": str(region.get("reason") or ""),
+    }
+    region_index = region.get("region_index")
+    if region_index is not None:
+        payload["regionIndex"] = region_index
+    detail_number = region.get("detail_number")
+    if detail_number:
+        payload["detailNumber"] = detail_number
+    return payload
+
+
+def _group_deep_regions_by_page(regions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for region in regions:
+        page_id = str(region.get("page_id") or "").strip()
+        if not page_id:
+            continue
+        grouped.setdefault(page_id, []).append(region)
+    return grouped
+
+
+def _build_deep_verification_plan(
+    *,
+    query: str,
+    ordered_page_ids: list[str],
+    page_map: dict[str, Page],
+    region_matches: dict[str, list[dict[str, Any]]],
+    must_terms: list[str] | None = None,
+    preferred_page_types: list[str] | None = None,
+    max_pages: int = DEEP_PAGE_LIMIT,
+    max_candidate_regions: int = DEEP_CANDIDATE_REGION_LIMIT,
+    max_expansion_regions: int = DEEP_EXPANSION_REGION_LIMIT,
+    max_micro_crops: int = DEEP_MICRO_CROP_LIMIT,
+) -> dict[str, Any]:
+    """
+    Build deterministic Deep verification plan from ranked pages/regions.
+
+    This keeps Deep mode bounded and candidate-first before any expensive vision pass.
+    """
+    query_tokens = _extract_query_tokens(query)
+    must_terms = [str(term).strip() for term in (must_terms or []) if str(term).strip()]
+    if not must_terms:
+        must_terms = query_tokens[:4]
+    preferred_page_types = [str(value).strip() for value in (preferred_page_types or []) if str(value).strip()]
+
+    evidence_targets = _infer_deep_evidence_targets(query, query_tokens)
+    entity_terms = _extract_entity_terms(query)
+    region_type_preferences = _infer_region_type_preferences(query, must_terms, preferred_page_types)
+
+    limited_page_ids = ordered_page_ids[:max(1, max_pages)]
+    page_order_lookup = {page_id: index for index, page_id in enumerate(limited_page_ids)}
+
+    all_candidate_scored: list[dict[str, Any]] = []
+    all_expansion_scored: list[dict[str, Any]] = []
+    page_selection: list[dict[str, Any]] = []
+
+    for page_id in limited_page_ids:
+        page_obj = page_map.get(page_id)
+        if not page_obj:
+            continue
+
+        page_name = str(getattr(page_obj, "page_name", "") or "")
+        page_type = str(getattr(page_obj, "page_type", "") or "")
+        discipline_obj = getattr(page_obj, "discipline", None)
+        discipline_name = str(getattr(discipline_obj, "display_name", "") or "") if discipline_obj else ""
+
+        raw_candidate_regions = region_matches.get(page_id) or []
+        raw_page_regions = page_obj.regions if isinstance(page_obj.regions, list) else []
+
+        seen_region_ids: set[str] = set()
+        scored_candidates_for_page = 0
+        scored_expansions_for_page = 0
+
+        for idx, region in enumerate(raw_candidate_regions):
+            if not isinstance(region, dict):
+                continue
+            region_copy = dict(region)
+            region_id = str(region_copy.get("id") or f"candidate_{idx}").strip()
+            if not region_id or region_id in seen_region_ids:
+                continue
+            seen_region_ids.add(region_id)
+
+            scored = _score_med_region(
+                page_id=page_id,
+                page_name=page_name,
+                page_type=page_type,
+                region=region_copy,
+                query=query,
+                must_terms=must_terms,
+                preferred_page_types=preferred_page_types,
+                entity_terms=entity_terms,
+                region_type_preferences=region_type_preferences,
+            )
+            if scored.get("bbox") is None:
+                continue
+            scored["origin"] = "candidate_match"
+            scored["page_order"] = page_order_lookup.get(page_id, 10_000)
+            if region_copy.get("regionIndex") is not None:
+                scored["region_index"] = region_copy.get("regionIndex")
+            detail_number = region_copy.get("detailNumber") or region_copy.get("detail_number")
+            if detail_number is not None:
+                scored["detail_number"] = str(detail_number)
+
+            all_candidate_scored.append(scored)
+            scored_candidates_for_page += 1
+
+        for idx, region in enumerate(raw_page_regions):
+            if not isinstance(region, dict):
+                continue
+            region_copy = dict(region)
+            region_id = str(region_copy.get("id") or f"region_{idx}").strip()
+            if not region_id or region_id in seen_region_ids:
+                continue
+            seen_region_ids.add(region_id)
+
+            scored = _score_med_region(
+                page_id=page_id,
+                page_name=page_name,
+                page_type=page_type,
+                region=region_copy,
+                query=query,
+                must_terms=must_terms,
+                preferred_page_types=preferred_page_types,
+                entity_terms=entity_terms,
+                region_type_preferences=region_type_preferences,
+            )
+            if scored.get("bbox") is None:
+                continue
+            scored["origin"] = "page_region"
+            scored["page_order"] = page_order_lookup.get(page_id, 10_000)
+            if region_copy.get("regionIndex") is not None:
+                scored["region_index"] = region_copy.get("regionIndex")
+            detail_number = region_copy.get("detailNumber") or region_copy.get("detail_number")
+            if detail_number is not None:
+                scored["detail_number"] = str(detail_number)
+
+            all_expansion_scored.append(scored)
+            scored_expansions_for_page += 1
+
+        page_selection.append(
+            {
+                "page_id": page_id,
+                "page_name": page_name or None,
+                "discipline": discipline_name or None,
+                "page_type": page_type or None,
+                "candidate_pool_count": len(raw_candidate_regions),
+                "expansion_pool_count": len(raw_page_regions),
+                "scored_candidate_count": scored_candidates_for_page,
+                "scored_expansion_count": scored_expansions_for_page,
+            }
+        )
+
+    def _sort_regions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            values,
+            key=lambda item: (
+                -_coerce_float(item.get("score"), 0.0),
+                int(item.get("page_order", 10_000)),
+                _page_sort_key(str(item.get("label") or "")),
+                str(item.get("region_id") or ""),
+            ),
+        )
+
+    sorted_candidates = _sort_regions(all_candidate_scored)
+    sorted_expansions = _sort_regions(all_expansion_scored)
+
+    selected_candidates: list[dict[str, Any]] = []
+    selected_keys: set[str] = set()
+    for region in sorted_candidates:
+        page_id = str(region.get("page_id") or "")
+        region_id = str(region.get("region_id") or "")
+        if not page_id or not region_id:
+            continue
+        key = f"{page_id}:{region_id}"
+        if key in selected_keys:
+            continue
+        selected_keys.add(key)
+        selected_candidates.append(region)
+        if len(selected_candidates) >= max(1, max_candidate_regions):
+            break
+
+    selected_expansions: list[dict[str, Any]] = []
+    for region in sorted_expansions:
+        page_id = str(region.get("page_id") or "")
+        region_id = str(region.get("region_id") or "")
+        if not page_id or not region_id:
+            continue
+        key = f"{page_id}:{region_id}"
+        if key in selected_keys:
+            continue
+        selected_keys.add(key)
+        selected_expansions.append(region)
+        if len(selected_expansions) >= max(0, max_expansion_regions):
+            break
+
+    candidate_by_page = _group_deep_regions_by_page(selected_candidates)
+    expansion_by_page = _group_deep_regions_by_page(selected_expansions)
+
+    candidate_region_ids = [
+        str(region.get("region_id"))
+        for region in selected_candidates
+        if region.get("region_id")
+    ]
+    expansion_region_ids = [
+        str(region.get("region_id"))
+        for region in selected_expansions
+        if region.get("region_id")
+    ]
+
+    verification_steps = [
+        {
+            "pass": 1,
+            "name": "candidate_region_crop",
+            "objective": "Start with top candidate regions before expanding search.",
+            "max_regions": len(candidate_region_ids),
+            "region_ids": candidate_region_ids,
+        },
+        {
+            "pass": 2,
+            "name": "cluster_tight_crop",
+            "objective": "Use tighter crops around text/dimension/symbol clusters from pass 1.",
+            "max_regions": len(candidate_region_ids) + len(expansion_region_ids),
+            "region_ids": [*candidate_region_ids, *expansion_region_ids],
+        },
+        {
+            "pass": 3,
+            "name": "micro_crop_disambiguation",
+            "objective": "Use micro-crops only for unresolved or ambiguous reads.",
+            "max_crops": max(0, max_micro_crops),
+        },
+    ]
+
+    return {
+        "query_plan": {
+            "intent": "verification",
+            "query_tokens": query_tokens[:8],
+            "must_terms": must_terms[:4],
+            "preferred_page_types": preferred_page_types[:3],
+            "evidence_targets": evidence_targets,
+        },
+        "budgets": {
+            "max_pages": max(1, max_pages),
+            "max_candidate_regions": max(1, max_candidate_regions),
+            "max_expansion_regions": max(0, max_expansion_regions),
+            "max_micro_crops": max(0, max_micro_crops),
+        },
+        "page_selection": page_selection,
+        "candidate_regions": selected_candidates,
+        "expansion_regions": selected_expansions,
+        "candidate_regions_by_page": {
+            page_id: [_build_deep_region_prompt_payload(region) for region in regions]
+            for page_id, regions in candidate_by_page.items()
+        },
+        "expansion_regions_by_page": {
+            page_id: [_build_deep_region_prompt_payload(region) for region in regions]
+            for page_id, regions in expansion_by_page.items()
+        },
+        "steps": verification_steps,
+    }
+
+
+def _build_deep_highlight_specs_from_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map Deep findings to resolve_highlights-compatible grouped specs."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        page_id = str(finding.get("page_id") or finding.get("pageId") or "").strip()
+        if not page_id:
+            continue
+
+        entry = grouped.setdefault(
+            page_id,
+            {
+                "page_id": page_id,
+                "semantic_refs": [],
+                "bboxes": [],
+                "source": "agent",
+            },
+        )
+
+        refs_raw = finding.get("semantic_refs")
+        if not isinstance(refs_raw, list):
+            refs_raw = finding.get("semanticRefs")
+        if isinstance(refs_raw, list):
+            seen_ref_keys = {str(ref) for ref in entry["semantic_refs"]}
+            for ref in refs_raw:
+                normalized_ref: Any = ref
+                if normalized_ref is None or isinstance(normalized_ref, bool):
+                    continue
+                if isinstance(normalized_ref, float):
+                    if normalized_ref.is_integer():
+                        normalized_ref = int(normalized_ref)
+                    else:
+                        continue
+                elif isinstance(normalized_ref, str):
+                    normalized_ref = normalized_ref.strip()
+                    if not normalized_ref:
+                        continue
+                    if normalized_ref.isdigit():
+                        normalized_ref = int(normalized_ref)
+                elif not isinstance(normalized_ref, int):
+                    continue
+
+                ref_key = str(normalized_ref)
+                if ref_key in seen_ref_keys:
+                    continue
+                entry["semantic_refs"].append(normalized_ref)
+                seen_ref_keys.add(ref_key)
+                if len(entry["semantic_refs"]) >= 64:
+                    break
+
+        bbox = finding.get("bbox")
+        if isinstance(bbox, list) and len(bbox) == 4:
+            entry["bboxes"].append(
+                {
+                    "bbox": bbox,
+                    "category": str(finding.get("category") or "finding"),
+                    "source_text": str(
+                        finding.get("source_text")
+                        or finding.get("sourceText")
+                        or finding.get("content")
+                        or ""
+                    ).strip(),
+                    "confidence": str(finding.get("confidence") or "").strip() or None,
+                }
+            )
+
+    specs: list[dict[str, Any]] = []
+    for spec in grouped.values():
+        if not spec.get("semantic_refs") and not spec.get("bboxes"):
+            continue
+        specs.append(spec)
+    return specs
+
+
+def _deep_finding_has_evidence(finding: dict[str, Any]) -> bool:
+    source_text = str(finding.get("source_text") or finding.get("sourceText") or "").strip()
+    semantic_refs = finding.get("semantic_refs")
+    if not isinstance(semantic_refs, list):
+        semantic_refs = finding.get("semanticRefs")
+    bbox = finding.get("bbox")
+    has_bbox = isinstance(bbox, list) and len(bbox) == 4
+    has_refs = isinstance(semantic_refs, list) and len(semantic_refs) > 0
+    return bool(source_text) and (has_bbox or has_refs)
+
+
+def _normalize_deep_findings_for_contract(
+    findings: list[dict[str, Any]],
+    *,
+    enforce_verified_evidence: bool,
+) -> tuple[list[dict[str, Any]], int]:
+    normalized: list[dict[str, Any]] = []
+    downgraded_verified_count = 0
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        item = dict(finding)
+        confidence = str(item.get("confidence") or "").strip()
+        if (
+            enforce_verified_evidence
+            and confidence == "verified_via_zoom"
+            and not _deep_finding_has_evidence(item)
+        ):
+            item["confidence"] = "medium"
+            downgraded_verified_count += 1
+        normalized.append(item)
+    return normalized, downgraded_verified_count
+
+
+def _summarize_deep_findings(findings: list[dict[str, Any]]) -> dict[str, int]:
+    verified = 0
+    high = 0
+    medium = 0
+    evidence_complete = 0
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        confidence = str(finding.get("confidence") or "").strip()
+        if confidence == "verified_via_zoom":
+            verified += 1
+        elif confidence == "high":
+            high += 1
+        elif confidence == "medium":
+            medium += 1
+        if _deep_finding_has_evidence(finding):
+            evidence_complete += 1
+    return {
+        "total": len(findings),
+        "verified_via_zoom": verified,
+        "high": high,
+        "medium": medium,
+        "evidence_complete": evidence_complete,
+        "evidence_incomplete": max(0, len(findings) - evidence_complete),
+    }
 
 
 def _filter_semantic_index(
@@ -3028,10 +3477,18 @@ async def run_agent_query_deep(
     - Returns structured findings/cross-references/gaps
     """
     from app.services.providers.gemini import explore_concept_with_vision_streaming
-    from app.services.tools import get_project_structure_summary, search_pages, select_pages
+    from app.services.tools import (
+        get_project_structure_summary,
+        resolve_highlights,
+        search_pages,
+        select_pages,
+    )
     from app.services.utils.search import search_pages_and_regions
 
     trace: list[dict] = []
+    settings = get_settings()
+    deep_v2_enabled = bool(getattr(settings, "deep_mode_vision_v2", False))
+    deep_started_at = asyncio.get_running_loop().time()
 
     # 1) Project structure summary
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
@@ -3097,6 +3554,7 @@ async def run_agent_query_deep(
     page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
     ordered_page_ids, page_map = _order_page_ids(db, page_ids)
 
+    selected_pages_payload: list[dict[str, Any]] = []
     # 4) Select pages so frontend and persistence stay consistent
     if ordered_page_ids:
         yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
@@ -3105,6 +3563,12 @@ async def run_agent_query_deep(
             result = await select_pages(db, page_ids=ordered_page_ids)
             if hasattr(result, "model_dump"):
                 result = result.model_dump(by_alias=True, mode="json")
+            if isinstance(result, dict):
+                selected_pages_payload = (
+                    result.get("pages")
+                    if isinstance(result.get("pages"), list)
+                    else []
+                )
             yield {"type": "tool_result", "tool": "select_pages", "result": result}
             trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
         except Exception as e:
@@ -3138,6 +3602,41 @@ async def run_agent_query_deep(
     query_tokens = _extract_query_tokens(query)
     history_context = _build_history_context(history_messages)
     viewing_context_str = _build_viewing_context_str(viewing_context)
+    must_terms = query_tokens[:4]
+    preferred_page_types: list[str] = []
+    query_norm = _normalize_text(query)
+    if "schedule" in query_norm:
+        preferred_page_types.append("schedule")
+    if "detail" in query_norm or "section" in query_norm or "elevation" in query_norm:
+        preferred_page_types.append("detail_sheet")
+    if "note" in query_norm or "legend" in query_norm:
+        preferred_page_types.append("notes")
+
+    verification_plan: dict[str, Any] = {}
+    if deep_v2_enabled:
+        verification_plan = _build_deep_verification_plan(
+            query=query,
+            ordered_page_ids=ordered_page_ids,
+            page_map=page_map,
+            region_matches=region_matches,
+            must_terms=must_terms,
+            preferred_page_types=preferred_page_types,
+            max_pages=DEEP_PAGE_LIMIT,
+            max_candidate_regions=DEEP_CANDIDATE_REGION_LIMIT,
+            max_expansion_regions=DEEP_EXPANSION_REGION_LIMIT,
+            max_micro_crops=DEEP_MICRO_CROP_LIMIT,
+        )
+
+    candidate_regions_by_page = (
+        verification_plan.get("candidate_regions_by_page", {})
+        if isinstance(verification_plan, dict)
+        else {}
+    )
+    expansion_regions_by_page = (
+        verification_plan.get("expansion_regions_by_page", {})
+        if isinstance(verification_plan, dict)
+        else {}
+    )
 
     pages_for_vision: list[dict[str, Any]] = []
     for page_id in ordered_page_ids[:DEEP_PAGE_LIMIT]:
@@ -3168,17 +3667,22 @@ async def run_agent_query_deep(
             regions.append(region)
 
         candidate_regions: list[dict[str, Any]] = []
-        for raw_region in (region_matches.get(str(page.id)) or [])[:DEEP_CANDIDATE_REGION_LIMIT]:
-            if not isinstance(raw_region, dict):
-                continue
-            region = dict(raw_region)
-            region.pop("embedding", None)
-            region_id = region.get("id")
-            if region.get("regionIndex") is None and region_id and str(region_id) in region_index_by_id:
-                region["regionIndex"] = region_index_by_id[str(region_id)]
-            if region.get("detailNumber") is None and region.get("detail_number") is not None:
-                region["detailNumber"] = region.get("detail_number")
-            candidate_regions.append(region)
+        expansion_regions: list[dict[str, Any]] = []
+        if deep_v2_enabled:
+            candidate_regions = list(candidate_regions_by_page.get(str(page.id)) or [])
+            expansion_regions = list(expansion_regions_by_page.get(str(page.id)) or [])
+        else:
+            for raw_region in (region_matches.get(str(page.id)) or [])[:DEEP_CANDIDATE_REGION_LIMIT]:
+                if not isinstance(raw_region, dict):
+                    continue
+                region = dict(raw_region)
+                region.pop("embedding", None)
+                region_id = region.get("id")
+                if region.get("regionIndex") is None and region_id and str(region_id) in region_index_by_id:
+                    region["regionIndex"] = region_index_by_id[str(region_id)]
+                if region.get("detailNumber") is None and region.get("detail_number") is not None:
+                    region["detailNumber"] = region.get("detail_number")
+                candidate_regions.append(region)
 
         context_markdown = (
             page.sheet_reflection
@@ -3200,6 +3704,7 @@ async def run_agent_query_deep(
                 "semantic_index": semantic_index,
                 "regions": regions,
                 "candidate_regions": candidate_regions,
+                "expansion_regions": expansion_regions,
                 "master_index": page.master_index if isinstance(page.master_index, dict) else None,
                 "image_bytes": image_bytes,
             }
@@ -3226,16 +3731,22 @@ async def run_agent_query_deep(
         }
         return
 
+    verification_payload: Any = verification_plan if deep_v2_enabled else []
+
     vision_page_ids = [str(p.get("page_id")) for p in pages_for_vision if p.get("page_id")]
     tool_input = {"query": query, "page_ids": vision_page_ids}
+    if deep_v2_enabled:
+        tool_input["verification_mode"] = "v2"
     yield {"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input}
     trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input})
 
     concept_result: dict[str, Any] = {}
+    exploration_failed = False
     try:
         async for event in explore_concept_with_vision_streaming(
             query=query,
             pages=pages_for_vision,
+            verification_plan=verification_payload,
             history_context=history_context,
             viewing_context=viewing_context_str,
         ):
@@ -3250,9 +3761,65 @@ async def run_agent_query_deep(
                 if isinstance(data, dict):
                     concept_result = data
     except Exception as e:
-        logger.exception("Deep vision exploration failed: %s", e)
-        yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
-        return
+        if not deep_v2_enabled:
+            logger.exception("Deep vision exploration failed: %s", e)
+            yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
+            return
+        logger.exception("Deep V2 vision exploration failed, using bounded fallback: %s", e)
+        exploration_failed = True
+        concept_result = {
+            "concept_name": None,
+            "summary": None,
+            "findings": [],
+            "cross_references": [],
+            "gaps": ["Deep verification was inconclusive due to a vision execution failure."],
+            "response": "I reviewed the top candidate sheets, but deep verification was inconclusive.",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "fallback_used": True,
+        }
+
+    if deep_v2_enabled and not concept_result:
+        exploration_failed = True
+        concept_result = {
+            "concept_name": None,
+            "summary": None,
+            "findings": [],
+            "cross_references": [],
+            "gaps": ["Deep verification returned no structured findings."],
+            "response": "I reviewed the top candidate sheets, but I could not verify a reliable result.",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "fallback_used": True,
+        }
+
+    raw_findings = (
+        concept_result.get("findings")
+        if isinstance(concept_result.get("findings"), list)
+        else []
+    )
+    normalized_findings, downgraded_verified_count = _normalize_deep_findings_for_contract(
+        raw_findings,
+        enforce_verified_evidence=deep_v2_enabled,
+    )
+    truncated_finding_count = max(0, len(normalized_findings) - DEEP_MAX_FINDINGS)
+    if len(normalized_findings) > DEEP_MAX_FINDINGS:
+        normalized_findings = normalized_findings[:DEEP_MAX_FINDINGS]
+    concept_result["findings"] = normalized_findings
+    if downgraded_verified_count > 0:
+        gaps = concept_result.get("gaps")
+        if not isinstance(gaps, list):
+            gaps = []
+        gaps.append(
+            f"Downgraded {downgraded_verified_count} verified claim(s) due to missing evidence artifacts."
+        )
+        concept_result["gaps"] = gaps
+    if truncated_finding_count > 0:
+        gaps = concept_result.get("gaps")
+        if not isinstance(gaps, list):
+            gaps = []
+        gaps.append(
+            f"Trimmed {truncated_finding_count} finding(s) to enforce bounded Deep output size."
+        )
+        concept_result["gaps"] = gaps
 
     yield {
         "type": "tool_result",
@@ -3266,6 +3833,111 @@ async def run_agent_query_deep(
             "result": concept_result,
         }
     )
+
+    # 6) Resolve Deep findings into highlight overlays.
+    highlight_specs = _build_deep_highlight_specs_from_findings(normalized_findings)
+    resolve_input = {
+        "highlight_count": len(highlight_specs),
+        "page_count": len(selected_pages_payload),
+    }
+    yield {"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input}
+    trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input})
+
+    resolved_highlights: list[dict[str, Any]] = []
+    try:
+        if selected_pages_payload and highlight_specs:
+            resolved_highlights = resolve_highlights(
+                selected_pages_payload,
+                highlight_specs,
+                query_tokens=query_tokens,
+            )
+    except Exception as e:
+        logger.warning("resolve_highlights failed in deep mode: %s", e)
+        resolved_highlights = []
+
+    resolve_result = {"highlights": resolved_highlights}
+    yield {"type": "tool_result", "tool": "resolve_highlights", "result": resolve_result}
+    trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": resolve_result})
+
+    usage_raw = concept_result.get("usage") if isinstance(concept_result.get("usage"), dict) else {}
+
+    def _to_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = _to_int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens"))
+    output_tokens = _to_int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens"))
+    token_cost = {
+        "vision": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+        "total": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    }
+
+    page_selection_summary = [
+        {
+            "page_id": str(page.get("page_id") or ""),
+            "page_name": str(page.get("page_name") or "") or None,
+            "candidate_region_count": len(page.get("candidate_regions") or []),
+            "expansion_region_count": len(page.get("expansion_regions") or []),
+        }
+        for page in pages_for_vision
+    ]
+    finding_summary = _summarize_deep_findings(normalized_findings)
+    execution_summary = {
+        "deep_v2_enabled": deep_v2_enabled,
+        "fallback_used": bool(concept_result.get("fallback_used")) or exploration_failed,
+        "inspected_page_count": len(pages_for_vision),
+        "candidate_region_count": sum(len(page.get("candidate_regions") or []) for page in pages_for_vision),
+        "expanded_region_count": sum(len(page.get("expansion_regions") or []) for page in pages_for_vision),
+        "resolved_highlight_pages": len(resolved_highlights),
+        "downgraded_verified_claims": downgraded_verified_count,
+        "latency_ms": int(max(0.0, (asyncio.get_running_loop().time() - deep_started_at) * 1000)),
+    }
+    if isinstance(verification_plan, dict) and isinstance(verification_plan.get("budgets"), dict):
+        execution_summary["budget"] = verification_plan.get("budgets")
+
+    query_plan_payload = (
+        verification_plan.get("query_plan")
+        if isinstance(verification_plan, dict) and isinstance(verification_plan.get("query_plan"), dict)
+        else {
+            "intent": "verification",
+            "query_tokens": query_tokens[:8],
+            "must_terms": must_terms[:4],
+            "preferred_page_types": preferred_page_types[:3],
+            "evidence_targets": _infer_deep_evidence_targets(query, query_tokens),
+        }
+    )
+    verification_trace_payload = (
+        verification_plan
+        if deep_v2_enabled and isinstance(verification_plan, dict)
+        else {
+            "budgets": {
+                "max_pages": DEEP_PAGE_LIMIT,
+                "max_candidate_regions": DEEP_CANDIDATE_REGION_LIMIT,
+                "max_expansion_regions": DEEP_EXPANSION_REGION_LIMIT,
+                "max_micro_crops": DEEP_MICRO_CROP_LIMIT,
+            },
+            "steps": [],
+        }
+    )
+
+    deep_mode_trace_payload = {
+        "query_plan": query_plan_payload,
+        "page_selection": page_selection_summary,
+        "verification_plan": verification_trace_payload,
+        "execution_summary": execution_summary,
+        "final_findings": finding_summary,
+        "token_cost": token_cost,
+    }
+    yield {"type": "tool_result", "tool": "deep_mode_trace", "result": deep_mode_trace_payload}
+    trace.append({"type": "tool_result", "tool": "deep_mode_trace", "result": deep_mode_trace_payload})
 
     response_text = concept_result.get("response")
     if not isinstance(response_text, str) or not response_text.strip():
@@ -3286,24 +3958,13 @@ async def run_agent_query_deep(
     yield {"type": "text", "content": response_text}
     trace.append({"type": "reasoning", "content": response_text})
 
-    usage_raw = concept_result.get("usage") if isinstance(concept_result.get("usage"), dict) else {}
-
-    def _to_int(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    input_tokens = _to_int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens"))
-    output_tokens = _to_int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens"))
-
     concept_name = concept_result.get("concept_name")
     if not isinstance(concept_name, str):
         concept_name = None
     summary = concept_result.get("summary")
     if not isinstance(summary, str):
         summary = None
-    findings = concept_result.get("findings") if isinstance(concept_result.get("findings"), list) else []
+    findings = normalized_findings
     cross_references = concept_result.get("cross_references")
     if not isinstance(cross_references, list):
         cross_references = concept_result.get("crossReferences") if isinstance(concept_result.get("crossReferences"), list) else []

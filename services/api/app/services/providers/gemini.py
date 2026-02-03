@@ -183,12 +183,13 @@ You will be given:
 - Per-page context summaries and extracted details
 - Per-page Brain Mode regions with bounding boxes
 - Per-page candidate_regions ranked by RAG relevance to the user query
-- A verification plan from Phase 1
+- Per-page expansion_regions (secondary fallback regions)
+- A verification plan with pass budgets and target evidence
 
 Your job:
 1. Start with candidate_regions first (these are the best RAG hints).
 2. Decide which regions to inspect in detail and use code execution to zoom/crop.
-3. Expand to other page regions only if candidate_regions are insufficient.
+3. Expand to expansion_regions only if candidate_regions are insufficient.
 4. Return structured findings with precise references.
 
 IMPORTANT:
@@ -197,6 +198,10 @@ IMPORTANT:
 - If you can reference semantic OCR word IDs, use "semantic_refs".
 - If not, provide a normalized "bbox" as [x0, y0, x1, y1] in 0-1 coordinates.
 - Every finding must include page_id, category, content, confidence, and source_text.
+- If confidence is "verified_via_zoom", include verification_method and verification_pass.
+- verification_method must be one of: semantic_ref, region_crop, multi_pass_zoom.
+- verification_pass must be 1, 2, or 3 when verification_method != semantic_ref.
+- candidate_region_id should be set when the finding came from candidate_regions.
 - Return gaps for expected-but-not-found information.
 
 PAGE MANIFEST (images provided in same order):
@@ -221,7 +226,10 @@ Return JSON with this exact structure:
       "semantic_refs": [142, 143, 144],
       "bbox": [0.45, 0.32, 0.52, 0.35],
       "confidence": "high|medium|verified_via_zoom",
-      "source_text": "Actual text read from document"
+      "source_text": "Actual text read from document",
+      "verification_method": "semantic_ref|region_crop|multi_pass_zoom",
+      "verification_pass": 1,
+      "candidate_region_id": "region_001"
     }}
   ],
   "cross_references": [
@@ -671,6 +679,39 @@ def _canonical_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _normalize_verification_method(raw_method: Any) -> str | None:
+    if not isinstance(raw_method, str):
+        return None
+    method = raw_method.strip().lower().replace("-", "_").replace(" ", "_")
+    if not method:
+        return None
+    aliases = {
+        "semantic": "semantic_ref",
+        "semanticrefs": "semantic_ref",
+        "semantic_refs": "semantic_ref",
+        "semantic_reference": "semantic_ref",
+        "region": "region_crop",
+        "crop": "region_crop",
+        "zoom": "multi_pass_zoom",
+        "multipasszoom": "multi_pass_zoom",
+        "multi_zoom": "multi_pass_zoom",
+    }
+    method = aliases.get(method, method)
+    if method in {"semantic_ref", "region_crop", "multi_pass_zoom"}:
+        return method
+    return None
+
+
+def _normalize_verification_pass(raw_pass: Any) -> int | None:
+    try:
+        value = int(raw_pass)
+    except (TypeError, ValueError):
+        return None
+    if value in {1, 2, 3}:
+        return value
+    return None
+
+
 def normalize_vision_findings(
     findings: Any,
     pages: list[dict[str, Any]],
@@ -779,6 +820,20 @@ def normalize_vision_findings(
         confidence_raw = finding.get("confidence")
         source_text_raw = finding.get("source_text", finding.get("sourceText"))
         page_name_raw = finding.get("page_name", finding.get("pageName"))
+        verification_method = _normalize_verification_method(
+            finding.get("verification_method", finding.get("verificationMethod"))
+        )
+        verification_pass = _normalize_verification_pass(
+            finding.get("verification_pass", finding.get("verificationPass"))
+        )
+        candidate_region_id = str(
+            finding.get("candidate_region_id")
+            or finding.get("candidateRegionId")
+            or finding.get("region_id")
+            or ""
+        ).strip()
+        if verification_pass is not None and verification_method is None:
+            verification_method = "multi_pass_zoom"
 
         output: dict[str, Any] = {
             "category": category,
@@ -799,6 +854,12 @@ def normalize_vision_findings(
             output["confidence"] = confidence_raw
         if isinstance(source_text_raw, str) and source_text_raw:
             output["source_text"] = source_text_raw
+        if verification_method:
+            output["verification_method"] = verification_method
+        if verification_pass is not None:
+            output["verification_pass"] = verification_pass
+        if candidate_region_id:
+            output["candidate_region_id"] = candidate_region_id
 
         page_name = str(page_name_raw or "").strip() or page_name_by_id.get(page_id, "")
         if page_name:
@@ -1462,7 +1523,7 @@ async def select_pages_smart(
 async def explore_concept_with_vision(
     query: str,
     pages: list[dict[str, Any]],
-    verification_plan: list[dict[str, Any]] | None = None,
+    verification_plan: dict[str, Any] | list[dict[str, Any]] | None = None,
     history_context: str = "",
     viewing_context: str = "",
 ) -> dict[str, Any]:
@@ -1498,6 +1559,7 @@ async def explore_concept_with_vision(
                 "semantic_index": p.get("semantic_index"),
                 "regions": p.get("regions"),
                 "candidate_regions": p.get("candidate_regions"),
+                "expansion_regions": p.get("expansion_regions"),
                 "master_index": p.get("master_index"),
             }
             for p in pages
@@ -1573,7 +1635,7 @@ async def explore_concept_with_vision(
 async def explore_concept_with_vision_streaming(
     query: str,
     pages: list[dict[str, Any]],
-    verification_plan: list[dict[str, Any]] | None = None,
+    verification_plan: dict[str, Any] | list[dict[str, Any]] | None = None,
     history_context: str = "",
     viewing_context: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
@@ -1608,6 +1670,7 @@ async def explore_concept_with_vision_streaming(
                 "semantic_index": p.get("semantic_index"),
                 "regions": p.get("regions"),
                 "candidate_regions": p.get("candidate_regions"),
+                "expansion_regions": p.get("expansion_regions"),
                 "master_index": p.get("master_index"),
             }
             for p in pages
