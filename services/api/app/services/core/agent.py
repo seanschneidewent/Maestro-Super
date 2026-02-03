@@ -3049,7 +3049,7 @@ async def run_agent_query_med(
     - Deterministically selects likely regions from Brain Mode metadata
     - Resolves region highlights without live vision inference
     """
-    from app.services.providers.gemini import route_fast_query
+    from app.services.providers.gemini import route_fast_query, select_pages_smart
     from app.services.tools import (
         get_project_structure_summary,
         resolve_highlights,
@@ -3179,6 +3179,82 @@ async def run_agent_query_med(
             router_preferred_page_types,
         )
 
+    selection_candidates = page_results
+    if strict_page_matches:
+        selection_candidates = strict_page_matches[: max(3, target_page_limit)]
+
+    selection_input = {
+        "query": query,
+        "routed_query": search_query,
+        "router": {
+            "intent": router_intent or ("page_navigation" if page_navigation_intent else "qa"),
+            "focus": router_focus,
+            "must_terms": router_must_terms,
+            "preferred_disciplines": router_preferred_disciplines,
+            "preferred_page_types": router_preferred_page_types,
+            "area_or_level": router_area_or_level,
+            "strict": router_strict,
+            "k": target_page_limit,
+            "model": router_model,
+        },
+        "candidate_page_ids": [
+            p.get("page_id")
+            for p in selection_candidates
+            if isinstance(p, dict) and p.get("page_id")
+        ],
+        "project_page_count": project_structure.get("total_pages", 0),
+    }
+
+    selection: dict[str, Any] = {}
+    yield {"type": "tool_call", "tool": "select_pages_smart", "input": selection_input}
+    trace.append({"type": "tool_call", "tool": "select_pages_smart", "input": selection_input})
+    try:
+        selection = await select_pages_smart(
+            project_structure=project_structure,
+            page_candidates=selection_candidates,
+            query=query,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        )
+        selection_result: dict[str, Any] = selection
+    except Exception as e:
+        logger.warning("Smart page selection failed in med mode, using deterministic fallback: %s", e)
+        selection_result = {
+            "error": str(e),
+            "selected_pages": [],
+            "chat_title": None,
+            "conversation_title": None,
+            "response": "",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+
+    yield {"type": "tool_result", "tool": "select_pages_smart", "result": selection_result}
+    trace.append({"type": "tool_result", "tool": "select_pages_smart", "result": selection_result})
+
+    selected_page_ids: list[str] = []
+    raw_selected_pages = selection.get("selected_pages")
+    selector_relevance_by_id: dict[str, str] = {}
+    if isinstance(raw_selected_pages, list):
+        for item in raw_selected_pages:
+            if not isinstance(item, dict):
+                continue
+            page_id = str(item.get("page_id") or "").strip()
+            if page_id:
+                selected_page_ids.append(page_id)
+                relevance_text = str(item.get("relevance") or "").strip()
+                if relevance_text and page_id not in selector_relevance_by_id:
+                    selector_relevance_by_id[page_id] = relevance_text
+
+    if not selected_page_ids:
+        raw_page_ids = selection.get("page_ids")
+        if isinstance(raw_page_ids, list):
+            for item in raw_page_ids:
+                page_id = str(item).strip()
+                if page_id:
+                    selected_page_ids.append(page_id)
+
+    selected_page_ids = _dedupe_ids(selected_page_ids, limit=FAST_PAGE_LIMIT)
+
     vector_page_ids = _dedupe_ids([pid for pid in region_matches.keys() if pid], limit=FAST_PAGE_LIMIT)
     region_page_ids = list(vector_page_ids)
     keyword_page_ids = _dedupe_ids(
@@ -3195,6 +3271,7 @@ async def run_agent_query_med(
 
     if router_strict and strict_keyword_page_ids:
         strict_id_set = set(strict_keyword_page_ids)
+        selected_page_ids = [pid for pid in selected_page_ids if pid in strict_id_set]
         region_page_ids = [pid for pid in region_page_ids if pid in strict_id_set]
 
     if page_navigation_intent:
@@ -3228,7 +3305,7 @@ async def run_agent_query_med(
         "region_hits": set(region_page_ids),
         "project_tree_hits": set(tree_page_ids),
         "strict_keyword_hits": set(strict_keyword_page_ids),
-        "smart_selector_hits": set(),
+        "smart_selector_hits": set(selected_page_ids),
     }
 
     candidate_pool = _dedupe_ids(
@@ -3238,6 +3315,7 @@ async def run_agent_query_med(
             *keyword_page_ids,
             *region_page_ids,
             *vector_page_ids,
+            *selected_page_ids,
             *tree_page_ids,
         ]
     )
@@ -3337,7 +3415,7 @@ async def run_agent_query_med(
         "region_hits": _build_candidate_set(region_page_ids),
         "project_tree_hits": _build_candidate_set(tree_page_ids),
         "strict_keyword_hits": _build_candidate_set(strict_keyword_page_ids),
-        "smart_selector_hits": _build_candidate_set([]),
+        "smart_selector_hits": _build_candidate_set(selected_page_ids),
     }
     source_hit_sets = {
         "exact_title_hits": set(candidate_sets["exact_title_hits"]["top_ids"]),
@@ -3346,7 +3424,7 @@ async def run_agent_query_med(
         "region_hits": set(candidate_sets["region_hits"]["top_ids"]),
         "project_tree_hits": set(candidate_sets["project_tree_hits"]["top_ids"]),
         "strict_keyword_hits": set(candidate_sets["strict_keyword_hits"]["top_ids"]),
-        "smart_selector_hits": set(),
+        "smart_selector_hits": set(candidate_sets["smart_selector_hits"]["top_ids"]),
     }
     rank_breakdown = _build_rank_breakdown(
         query=query,
@@ -3367,25 +3445,34 @@ async def run_agent_query_med(
         target_page_limit=target_page_limit,
         page_navigation_intent=page_navigation_intent,
         source_hit_sets=source_hit_sets,
-        selector_relevance_by_id={},
+        selector_relevance_by_id=selector_relevance_by_id,
         cross_reference_page_ids=cross_reference_page_ids,
     )
 
     router_usage_raw = router_result.get("usage") if isinstance(router_result.get("usage"), dict) else {}
+    selector_usage_raw = (
+        selection_result.get("usage")
+        if isinstance(selection_result.get("usage"), dict)
+        else {}
+    )
     router_input_tokens = _coerce_int(router_usage_raw.get("input_tokens") or router_usage_raw.get("inputTokens"))
     router_output_tokens = _coerce_int(router_usage_raw.get("output_tokens") or router_usage_raw.get("outputTokens"))
+    selector_input_tokens = _coerce_int(selector_usage_raw.get("input_tokens") or selector_usage_raw.get("inputTokens"))
+    selector_output_tokens = _coerce_int(
+        selector_usage_raw.get("output_tokens") or selector_usage_raw.get("outputTokens")
+    )
     token_cost = {
         "router": {
             "input_tokens": router_input_tokens,
             "output_tokens": router_output_tokens,
         },
         "selector": {
-            "input_tokens": 0,
-            "output_tokens": 0,
+            "input_tokens": selector_input_tokens,
+            "output_tokens": selector_output_tokens,
         },
         "total": {
-            "input_tokens": router_input_tokens,
-            "output_tokens": router_output_tokens,
+            "input_tokens": router_input_tokens + selector_input_tokens,
+            "output_tokens": router_output_tokens + selector_output_tokens,
         },
     }
 
@@ -3480,7 +3567,7 @@ async def run_agent_query_med(
         "k": target_page_limit,
         "model": router_model,
         "ranker": "v2",
-        "selector_rerank": False,
+        "selector_rerank": True,
     }
     med_mode_trace_payload = {
         "query_plan": query_plan,
@@ -3510,11 +3597,14 @@ async def run_agent_query_med(
     yield {"type": "tool_result", "tool": "med_mode_trace", "result": med_mode_trace_payload}
     trace.append({"type": "tool_result", "tool": "med_mode_trace", "result": med_mode_trace_payload})
 
-    response_text = _build_med_mode_response_text(ordered_page_ids, page_map, selected_regions)
-    if ordered_page_ids and not selected_regions:
-        response_text = (
-            "I pulled the best sheets, but available metadata was limited so highlights are broad."
-        )
+    response_text = selection.get("response") if isinstance(selection.get("response"), str) else ""
+    response_text = response_text.strip()
+    if not response_text:
+        response_text = _build_med_mode_response_text(ordered_page_ids, page_map, selected_regions)
+        if ordered_page_ids and not selected_regions:
+            response_text = (
+                "I pulled the best sheets, but available metadata was limited so highlights are broad."
+            )
 
     if response_text:
         yield {"type": "text", "content": response_text}
@@ -3524,8 +3614,8 @@ async def run_agent_query_med(
     output_tokens = token_cost["total"]["output_tokens"]
     tokens = _extract_query_tokens(query)
     fallback_title = " ".join(tokens[:3]).title() if tokens else "Query"
-    display_title = fallback_title
-    conversation_title = display_title
+    display_title = str(selection.get("chat_title") or "").strip() or fallback_title
+    conversation_title = str(selection.get("conversation_title") or "").strip() or display_title
 
     yield {
         "type": "done",

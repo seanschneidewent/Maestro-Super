@@ -747,6 +747,24 @@ def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
             ],
         }
 
+    async def fake_select_pages_smart(
+        project_structure,
+        page_candidates,
+        query,
+        history_context="",
+        viewing_context="",
+    ):
+        return {
+            "selected_pages": [
+                {"page_id": "page-1", "relevance": "Panel schedule table answers the query directly."}
+            ],
+            "page_ids": ["page-1"],
+            "chat_title": "Panel Schedule",
+            "conversation_title": "Panel Schedule Location",
+            "response": "Check E-3.2 first for the main panel schedule table and feeder circuit data.",
+            "usage": {"input_tokens": 6, "output_tokens": 3},
+        }
+
     async def fake_select_pages(db, page_ids):
         return {
             "pages": [
@@ -813,6 +831,7 @@ def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr("app.services.providers.gemini.route_fast_query", fake_route_fast_query)
+    monkeypatch.setattr("app.services.providers.gemini.select_pages_smart", fake_select_pages_smart)
     monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
     monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
     monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
@@ -844,6 +863,7 @@ def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
     )
     assert med_trace_event["result"]["final_highlights"]["count"] >= 1
     assert med_trace_event["result"]["query_plan"]["ranker"] == "v2"
+    assert med_trace_event["result"]["candidate_sets"]["smart_selector_hits"]["count"] == 1
 
     resolve_event = next(
         e for e in events if e.get("type") == "tool_result" and e.get("tool") == "resolve_highlights"
@@ -854,8 +874,13 @@ def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
     assert resolved_highlights[0]["words"]
     assert resolved_highlights[0]["words"][0]["bbox"]["width"] > 0
 
+    text_event = next(e for e in events if e.get("type") == "text")
+    assert "Check E-3.2 first" in text_event["content"]
+
     done_event = next(e for e in events if e.get("type") == "done")
-    assert done_event["usage"] == {"inputTokens": 4, "outputTokens": 2}
+    assert done_event["usage"] == {"inputTokens": 10, "outputTokens": 5}
+    assert done_event["displayTitle"] == "Panel Schedule"
+    assert done_event["conversationTitle"] == "Panel Schedule Location"
 
 
 def test_extract_deep_mode_trace_payload_returns_latest() -> None:
