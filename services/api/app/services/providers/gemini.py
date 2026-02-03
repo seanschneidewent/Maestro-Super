@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator
 from google import genai
 from google.genai import types
 
-from app.config import AGENT_QUERY_MODEL, get_settings
+from app.config import AGENT_QUERY_MODEL, QUERY_VISION_MODEL, get_settings
 from app.services.prompts import BRAIN_MODE_PROMPT_V4
 from app.services.utils.parsing import extract_json_response
 from app.utils.retry import with_retry
@@ -150,6 +150,31 @@ Return JSON:
   "response": "Brief helpful response (1-2 sentences)"
 }}'''
 
+FAST_QUERY_ROUTER_PROMPT = '''You are a lightweight query router for construction drawing retrieval.
+
+{history_section}
+{viewing_section}
+USER QUERY: {query}
+
+Return JSON only:
+{{
+  "intent": "page_navigation|qa|comparison|coordination|troubleshooting|scope_review",
+  "must_terms": ["up to 4 short terms or phrases required for retrieval"],
+  "preferred_page_types": ["up to 3 page types"],
+  "strict": true,
+  "k": 4
+}}
+
+Rules:
+- This is FAST MODE: support any question type, but keep retrieval at PAGE level only.
+- intent=page_navigation when the user asks to show/open/list sheets/pages/plans.
+- Use qa/comparison/coordination/troubleshooting/scope_review for non-navigation questions.
+- strict=true only when user expects exact sheet type/title matching (usually navigation intent).
+- preferred_page_types values should use: floor_plan, plan, schedule, spec, detail_sheet, notes, rcp, demo, section, elevation, cover.
+- k must be an integer 1-8 (smaller means tighter results).
+- Keep must_terms concise and query-grounded; do not add filler words.
+'''
+
 VISION_EXPLORATION_PROMPT = '''You are a construction plan specialist with visual analysis and code execution.
 
 You will be given:
@@ -232,6 +257,278 @@ def _extract_json_response(text: str) -> dict[str, Any]:
             pass
 
     raise ValueError("Could not extract valid JSON from response")
+
+
+FAST_ROUTER_FALLBACK_MODEL = QUERY_VISION_MODEL
+FAST_ROUTER_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+    "with", "by", "is", "are", "was", "were", "be", "been", "being", "have",
+    "has", "had", "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "must", "shall", "can", "need", "dare", "ought", "used",
+    "it", "its", "this", "that", "these", "those", "i", "you", "he", "she",
+    "we", "they", "what", "which", "who", "whom", "where", "when", "why",
+    "how", "all", "each", "every", "both", "few", "more", "most", "other",
+    "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+    "too", "very", "just", "also", "there", "literally", "please", "pull",
+    "up", "show", "open", "find", "called",
+}
+FAST_ROUTER_NAV_TERMS = {
+    "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings",
+}
+FAST_ROUTER_ALLOWED_INTENTS = {
+    "page_navigation",
+    "qa",
+    "comparison",
+    "coordination",
+    "troubleshooting",
+    "scope_review",
+    # Backward-compatible aliases from earlier revisions.
+    "fact_lookup",
+    "detail_lookup",
+}
+FAST_ROUTER_PAGE_TYPE_MAP = {
+    "floor plan": "floor_plan",
+    "floor_plan": "floor_plan",
+    "plan": "plan",
+    "schedule": "schedule",
+    "spec": "spec",
+    "specs": "spec",
+    "specification": "spec",
+    "detail": "detail_sheet",
+    "detail sheet": "detail_sheet",
+    "detail_sheet": "detail_sheet",
+    "notes": "notes",
+    "note": "notes",
+    "rcp": "rcp",
+    "demo": "demo",
+    "demolition": "demo",
+    "section": "section",
+    "elevation": "elevation",
+    "cover": "cover",
+}
+
+
+def _dedupe_strings(values: list[str], limit: int) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _normalize_router_page_type(value: str) -> str:
+    raw = re.sub(r"[_\-]+", " ", str(value or "").strip().lower())
+    return FAST_ROUTER_PAGE_TYPE_MAP.get(raw, raw.replace(" ", "_"))
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+    return default
+
+
+def _fallback_fast_query_route(query: str) -> dict[str, Any]:
+    query_lower = query.lower()
+    navigation = (
+        any(term in query_lower for term in FAST_ROUTER_NAV_TERMS)
+        or "floor plan" in query_lower
+        or "sheet list" in query_lower
+    )
+    intent = "page_navigation" if navigation else "qa"
+
+    must_terms: list[str] = []
+    if "floor plan" in query_lower:
+        must_terms.append("floor plan")
+
+    tokens = re.findall(r"[a-z0-9][a-z0-9\-/]*", query_lower)
+    for token in tokens:
+        if token in FAST_ROUTER_STOP_WORDS:
+            continue
+        if token in FAST_ROUTER_NAV_TERMS:
+            continue
+        if len(token) <= 1:
+            continue
+        must_terms.append(token)
+
+    preferred_page_types: list[str] = []
+    for raw, canonical in FAST_ROUTER_PAGE_TYPE_MAP.items():
+        if raw in query_lower:
+            preferred_page_types.append(canonical)
+
+    must_terms = _dedupe_strings(must_terms, limit=4)
+    preferred_page_types = _dedupe_strings(preferred_page_types, limit=3)
+
+    strict = intent == "page_navigation" and bool(must_terms or preferred_page_types)
+    k = 4 if navigation else 6
+
+    return {
+        "intent": intent,
+        "must_terms": must_terms,
+        "preferred_page_types": preferred_page_types,
+        "strict": strict,
+        "k": k,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+
+
+def _normalize_fast_query_route_output(
+    result: dict[str, Any],
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    intent_raw = str(result.get("intent") or "").strip().lower()
+    if intent_raw not in FAST_ROUTER_ALLOWED_INTENTS:
+        intent_raw = str(fallback.get("intent") or "qa")
+
+    must_terms_raw = result.get("must_terms")
+    must_terms: list[str] = []
+    if isinstance(must_terms_raw, list):
+        for term in must_terms_raw:
+            text = str(term or "").strip().lower()
+            text = re.sub(r"\s+", " ", text)
+            if not text:
+                continue
+            if text in FAST_ROUTER_NAV_TERMS:
+                continue
+            if text in FAST_ROUTER_STOP_WORDS:
+                continue
+            must_terms.append(text)
+    if not must_terms:
+        must_terms = [str(term) for term in fallback.get("must_terms", [])]
+    must_terms = _dedupe_strings(must_terms, limit=4)
+
+    preferred_raw = result.get("preferred_page_types")
+    preferred_page_types: list[str] = []
+    if isinstance(preferred_raw, list):
+        for value in preferred_raw:
+            normalized = _normalize_router_page_type(str(value or ""))
+            if normalized:
+                preferred_page_types.append(normalized)
+    if not preferred_page_types:
+        preferred_page_types = [str(value) for value in fallback.get("preferred_page_types", [])]
+    preferred_page_types = _dedupe_strings(preferred_page_types, limit=3)
+
+    strict = _to_bool(result.get("strict"), default=False)
+    if intent_raw != "page_navigation":
+        strict = False
+    if not (must_terms or preferred_page_types):
+        strict = False
+
+    k_default = int(fallback.get("k") or 4)
+    try:
+        k = int(result.get("k"))
+    except (TypeError, ValueError):
+        k = k_default
+    k = max(1, min(8, k))
+
+    return {
+        "intent": intent_raw,
+        "must_terms": must_terms,
+        "preferred_page_types": preferred_page_types,
+        "strict": strict,
+        "k": k,
+    }
+
+
+async def route_fast_query(
+    query: str,
+    history_context: str = "",
+    viewing_context: str = "",
+) -> dict[str, Any]:
+    """
+    Lightweight routing pass that shapes fast-mode retrieval before full selection.
+    """
+    fallback = _fallback_fast_query_route(query)
+    try:
+        client = _get_gemini_client()
+    except Exception:
+        return fallback
+
+    try:
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        history_section = ""
+        history_context = (history_context or "").strip()
+        if history_context:
+            truncated = history_context[-500:]
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(truncated)}\n"
+
+        viewing_section = ""
+        viewing_context = (viewing_context or "").strip()
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
+
+        prompt = FAST_QUERY_ROUTER_PROMPT.format(
+            query=escape_braces(query),
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        settings = get_settings()
+        configured_model = str(getattr(settings, "fast_router_model", "") or "").strip()
+        router_models: list[str] = []
+        if configured_model:
+            router_models.append(configured_model)
+        if FAST_ROUTER_FALLBACK_MODEL not in router_models:
+            router_models.append(FAST_ROUTER_FALLBACK_MODEL)
+
+        response = None
+        model_used = ""
+        last_model_error: Exception | None = None
+        for model_name in router_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0,
+                    ),
+                )
+                model_used = model_name
+                break
+            except Exception as model_error:
+                last_model_error = model_error
+                logger.warning("Fast router model %s failed: %s", model_name, model_error)
+
+        if response is None:
+            if last_model_error:
+                raise last_model_error
+            raise RuntimeError("No fast router model available")
+
+        result = _extract_json_response(response.text)
+        normalized = _normalize_fast_query_route_output(result, fallback)
+
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+
+        normalized["usage"] = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+        normalized["model"] = model_used
+        return normalized
+    except Exception as e:
+        logger.warning("Fast query routing failed, using fallback route: %s", e)
+        return fallback
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:

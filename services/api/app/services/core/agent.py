@@ -31,6 +31,35 @@ PAGE_NAVIGATION_TERMS = {
 PAGE_NAVIGATION_STOP_TOKENS = {
     "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings", "floor",
 }
+ROUTER_PAGE_TYPE_ALIASES = {
+    "floor_plan": {"floor_plan", "plan"},
+    "plan": {"plan", "floor_plan"},
+    "detail_sheet": {"detail_sheet", "detail"},
+    "detail": {"detail_sheet", "detail"},
+    "schedule": {"schedule"},
+    "spec": {"spec", "specification"},
+    "notes": {"notes", "note"},
+    "rcp": {"rcp"},
+    "demo": {"demo", "demolition"},
+    "section": {"section"},
+    "elevation": {"elevation"},
+    "cover": {"cover"},
+}
+DISCIPLINE_QUERY_HINTS: dict[str, set[str]] = {
+    "architectural": {"architectural", "arch", "life safety", "egress"},
+    "mechanical": {"mechanical", "hvac", "duct", "rtu", "ahu", "mech"},
+    "electrical": {"electrical", "panel", "circuit", "one line", "lighting", "power"},
+    "plumbing": {"plumbing", "fixture", "sanitary", "water", "valve"},
+    "kitchen": {"kitchen", "food service", "hood", "walk in cooler", "wic"},
+    "structural": {"structural", "beam", "column", "foundation"},
+}
+GENERIC_SHEET_TOKENS = {
+    "cover",
+    "sheet index",
+    "sheet list",
+    "general notes",
+    "legend",
+}
 
 
 def _build_history_context(history_messages: list[dict[str, Any]] | None) -> str:
@@ -82,6 +111,177 @@ def _extract_query_tokens(query: str) -> list[str]:
     }
     tokens = [w for w in query.lower().split() if w and w not in STOP_WORDS]
     return tokens or [w for w in query.lower().split() if w]
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())).strip()
+
+
+def _normalize_router_terms(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        term = _normalize_text(str(value or ""))
+        if not term:
+            continue
+        if term in PAGE_NAVIGATION_STOP_TOKENS:
+            continue
+        if term in seen:
+            continue
+        seen.add(term)
+        result.append(term)
+        if len(result) >= 4:
+            break
+    return result
+
+
+def _normalize_router_page_types(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        page_type = _normalize_text(str(value or "")).replace(" ", "_")
+        if not page_type:
+            continue
+        if page_type in seen:
+            continue
+        seen.add(page_type)
+        result.append(page_type)
+        if len(result) >= 3:
+            break
+    return result
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+    return default
+
+
+def _normalize_page_type(page_type: str) -> str:
+    normalized = _normalize_text(page_type).replace(" ", "_")
+    if normalized in ROUTER_PAGE_TYPE_ALIASES:
+        return normalized
+    if normalized == "detail":
+        return "detail_sheet"
+    if normalized == "specification":
+        return "spec"
+    if normalized == "note":
+        return "notes"
+    return normalized
+
+
+def _page_matches_router_constraints(
+    page: dict[str, Any],
+    must_terms: list[str],
+    preferred_page_types: list[str],
+) -> bool:
+    if not isinstance(page, dict):
+        return False
+
+    parts: list[str] = [
+        str(page.get("page_name") or ""),
+        str(page.get("discipline") or ""),
+        str(page.get("page_type") or ""),
+    ]
+
+    keywords = page.get("keywords")
+    if isinstance(keywords, list):
+        parts.extend(str(value or "") for value in keywords)
+
+    questions = page.get("questions_answered")
+    if isinstance(questions, list):
+        parts.extend(str(value or "") for value in questions)
+
+    master_index = page.get("master_index")
+    if isinstance(master_index, dict):
+        master_keywords = master_index.get("keywords")
+        if isinstance(master_keywords, list):
+            parts.extend(str(value or "") for value in master_keywords)
+        master_items = master_index.get("items")
+        if isinstance(master_items, list):
+            parts.extend(str(value or "") for value in master_items)
+
+    content = str(page.get("content") or "")
+    if content:
+        parts.append(content[:700])
+
+    haystack = _normalize_text(" ".join(parts))
+    if must_terms and any(term not in haystack for term in must_terms):
+        return False
+
+    if preferred_page_types:
+        page_type = _normalize_page_type(str(page.get("page_type") or ""))
+        if page_type:
+            preferred_match = False
+            for preferred in preferred_page_types:
+                aliases = ROUTER_PAGE_TYPE_ALIASES.get(preferred, {preferred})
+                if page_type in aliases:
+                    preferred_match = True
+                    break
+            if not preferred_match:
+                return False
+        else:
+            # If page_type metadata is missing, match on textual hints.
+            page_text = _normalize_text(
+                " ".join(
+                    [
+                        str(page.get("page_name") or ""),
+                        content[:700],
+                    ]
+                )
+            )
+            if not any(
+                _normalize_text(preferred.replace("_", " ")) in page_text
+                for preferred in preferred_page_types
+            ):
+                return False
+
+    return True
+
+
+def _filter_pages_for_router(
+    pages: list[dict[str, Any]],
+    must_terms: list[str],
+    preferred_page_types: list[str],
+) -> list[dict[str, Any]]:
+    return [
+        page
+        for page in pages
+        if _page_matches_router_constraints(page, must_terms, preferred_page_types)
+    ]
+
+
+def _build_routed_search_query(query: str, must_terms: list[str], preferred_page_types: list[str]) -> str:
+    extras: list[str] = []
+    for term in must_terms:
+        if term:
+            extras.append(term)
+    for page_type in preferred_page_types:
+        if page_type:
+            extras.append(page_type.replace("_", " "))
+
+    if not extras:
+        return query
+
+    merged = [query]
+    seen: set[str] = {_normalize_text(query)}
+    for extra in extras:
+        key = _normalize_text(extra)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(extra)
+    return " ".join(merged)
 
 
 def _is_page_navigation_query(query: str) -> bool:
@@ -169,6 +369,352 @@ def _select_project_tree_page_ids(
         return ranked_page_ids
 
     return fallback_page_ids[:limit]
+
+
+def _dedupe_ids(values: list[str], limit: int | None = None) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        page_id = str(value or "").strip()
+        if not page_id or page_id in seen:
+            continue
+        seen.add(page_id)
+        deduped.append(page_id)
+        if limit is not None and len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _infer_focus(query: str, must_terms: list[str]) -> str:
+    if must_terms:
+        return must_terms[0]
+    tokens = [
+        token
+        for token in _extract_query_tokens(query)
+        if token and token not in PAGE_NAVIGATION_STOP_TOKENS
+    ]
+    if not tokens:
+        return _normalize_text(query)[:80]
+    return " ".join(tokens[:4])
+
+
+def _infer_preferred_disciplines(query: str, must_terms: list[str]) -> list[str]:
+    haystack = _normalize_text(f"{query} {' '.join(must_terms)}")
+    matches: list[str] = []
+    for discipline, hints in DISCIPLINE_QUERY_HINTS.items():
+        if any(_normalize_text(hint) and _normalize_text(hint) in haystack for hint in hints):
+            matches.append(discipline)
+    return matches[:3]
+
+
+def _infer_area_or_level(query: str) -> str | None:
+    query_lower = str(query or "").lower()
+    level_match = re.search(r"\b(level|lvl|floor)\s*([0-9]+)\b", query_lower)
+    if level_match:
+        return f"{level_match.group(1)} {level_match.group(2)}"
+    for token in ("roof", "basement", "mezzanine", "kitchen", "dining", "lobby", "north", "south", "east", "west"):
+        if token in query_lower:
+            return token
+    return None
+
+
+def _extract_entity_terms(query: str) -> list[str]:
+    raw_entities = re.findall(r"\b[a-z]{1,6}-\d+[a-z0-9\-]*\b|\b[a-z]{2,8}\d+[a-z0-9\-]*\b", query.lower())
+    normalized = [_normalize_text(entity) for entity in raw_entities if entity]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entity in normalized:
+        if not entity or entity in seen:
+            continue
+        seen.add(entity)
+        deduped.append(entity)
+        if len(deduped) >= 6:
+            break
+    return deduped
+
+
+def _select_exact_title_hits(
+    query: str,
+    must_terms: list[str],
+    page_results: list[dict[str, Any]],
+    limit: int = FAST_PAGE_LIMIT,
+) -> list[str]:
+    phrases: list[str] = []
+    normalized_query = _normalize_text(query)
+    if normalized_query and len(normalized_query) >= 4:
+        phrases.append(normalized_query)
+    for term in must_terms:
+        normalized_term = _normalize_text(term)
+        if normalized_term and len(normalized_term) >= 4 and normalized_term not in phrases:
+            phrases.append(normalized_term)
+
+    focus_phrase = _infer_focus(query, must_terms)
+    normalized_focus = _normalize_text(focus_phrase)
+    if normalized_focus and len(normalized_focus) >= 4 and normalized_focus not in phrases:
+        phrases.append(normalized_focus)
+
+    hits: list[str] = []
+    for page in page_results:
+        if not isinstance(page, dict):
+            continue
+        page_id = str(page.get("page_id") or "").strip()
+        if not page_id:
+            continue
+
+        page_name = _normalize_text(str(page.get("page_name") or ""))
+        reflection_headline = ""
+        reflection = str(page.get("sheet_reflection") or "")
+        if reflection:
+            reflection_headline = _normalize_text(reflection.splitlines()[0])
+
+        if not (page_name or reflection_headline):
+            continue
+
+        for phrase in phrases:
+            if not phrase:
+                continue
+            if page_name == phrase or phrase in page_name:
+                hits.append(page_id)
+                break
+            if reflection_headline and (reflection_headline == phrase or phrase in reflection_headline):
+                hits.append(page_id)
+                break
+
+    return _dedupe_ids(hits, limit=limit)
+
+
+def _build_project_structure_page_lookup(project_structure: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    disciplines = project_structure.get("disciplines")
+    if not isinstance(disciplines, list):
+        return lookup
+
+    for discipline in disciplines:
+        if not isinstance(discipline, dict):
+            continue
+        discipline_name = str(
+            discipline.get("name")
+            or discipline.get("display_name")
+            or discipline.get("code")
+            or ""
+        ).strip()
+        pages = discipline.get("pages")
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_id = str(page.get("page_id") or "").strip()
+            if not page_id:
+                continue
+            lookup[page_id] = {
+                "page_name": str(
+                    page.get("sheet_number")
+                    or page.get("page_name")
+                    or page.get("title")
+                    or ""
+                ).strip(),
+                "discipline": discipline_name,
+                "page_type": str(page.get("page_type") or "").strip(),
+                "content": str(page.get("title") or "").strip(),
+            }
+    return lookup
+
+
+def _page_type_matches_preference(page_type: str, preferred_page_types: list[str]) -> bool:
+    normalized_page_type = _normalize_page_type(page_type)
+    if not normalized_page_type or not preferred_page_types:
+        return False
+    for preferred in preferred_page_types:
+        aliases = ROUTER_PAGE_TYPE_ALIASES.get(preferred, {preferred})
+        if normalized_page_type in aliases:
+            return True
+    return False
+
+
+def _build_candidate_set(ids: list[str], limit: int = FAST_PAGE_LIMIT) -> dict[str, Any]:
+    deduped = _dedupe_ids(ids, limit=limit)
+    return {"count": len(deduped), "top_ids": deduped}
+
+
+def _build_rank_breakdown(
+    query: str,
+    ordered_page_ids: list[str],
+    page_lookup: dict[str, dict[str, Any]],
+    *,
+    must_terms: list[str],
+    preferred_page_types: list[str],
+    preferred_disciplines: list[str],
+    entity_terms: list[str],
+    vector_hits: list[str],
+    source_hit_sets: dict[str, set[str]],
+    top_n: int = FAST_PAGE_LIMIT,
+) -> list[dict[str, Any]]:
+    if not ordered_page_ids:
+        return []
+
+    query_norm = _normalize_text(query)
+    phrase_terms = [_normalize_text(term) for term in must_terms if term]
+    if query_norm and len(query_norm) >= 4:
+        phrase_terms = [query_norm, *phrase_terms]
+    phrase_terms = [phrase for phrase in phrase_terms if phrase]
+
+    vector_rank_lookup = {page_id: index for index, page_id in enumerate(vector_hits)}
+    query_allows_generic = any(
+        token in query_norm
+        for token in ("cover", "index", "legend", "sheet list", "notes", "schedule")
+    )
+
+    ranked: list[dict[str, Any]] = []
+    for selection_rank, page_id in enumerate(ordered_page_ids[:top_n], start=1):
+        page = page_lookup.get(page_id, {})
+        page_name = str(page.get("page_name") or "")
+        discipline = str(page.get("discipline") or "")
+        page_type = str(page.get("page_type") or "")
+        content = str(page.get("content") or "")[:1200]
+
+        title_norm = _normalize_text(page_name)
+        discipline_norm = _normalize_text(discipline)
+        content_norm = _normalize_text(content)
+        page_text_norm = _normalize_text(" ".join((page_name, discipline, page_type, content)))
+
+        title_match = 0.0
+        for phrase in phrase_terms:
+            if not phrase:
+                continue
+            if title_norm == phrase:
+                title_match = 1.0
+                break
+            if phrase in title_norm:
+                title_match = max(title_match, 0.85)
+            elif phrase in content_norm:
+                title_match = max(title_match, 0.55)
+
+        page_type_match = 1.0 if _page_type_matches_preference(page_type, preferred_page_types) else 0.0
+        discipline_match = 0.0
+        if preferred_disciplines and discipline_norm:
+            if any(_normalize_text(pref) in discipline_norm for pref in preferred_disciplines):
+                discipline_match = 1.0
+
+        entity_match = 0.0
+        if entity_terms:
+            hit_count = sum(1 for term in entity_terms if term and term in page_text_norm)
+            entity_match = min(1.0, hit_count / float(len(entity_terms)))
+
+        vector_rank_score = 0.0
+        if page_id in vector_rank_lookup:
+            vector_rank_score = 1.0 / float(vector_rank_lookup[page_id] + 1)
+
+        penalties = 0.0
+        if not query_allows_generic:
+            if any(token in title_norm for token in GENERIC_SHEET_TOKENS):
+                penalties += 0.45
+            if _normalize_page_type(page_type) in {"cover", "notes"}:
+                penalties += 0.25
+
+        total = (
+            (title_match * 4.0)
+            + (page_type_match * 2.0)
+            + (discipline_match * 1.5)
+            + (entity_match * 1.5)
+            + (vector_rank_score * 1.0)
+            - penalties
+        )
+
+        ranked.append(
+            {
+                "selection_rank": selection_rank,
+                "page_id": page_id,
+                "page_name": page_name or None,
+                "score_components": {
+                    "title_match": round(title_match, 4),
+                    "page_type_match": round(page_type_match, 4),
+                    "discipline_match": round(discipline_match, 4),
+                    "entity_match": round(entity_match, 4),
+                    "vector_rank": round(vector_rank_score, 4),
+                    "penalties": round(penalties, 4),
+                    "total": round(total, 4),
+                },
+                "source_hits": {
+                    key: page_id in value
+                    for key, value in source_hit_sets.items()
+                },
+            }
+        )
+
+    return ranked
+
+
+def _build_final_selection_trace(
+    ordered_page_ids: list[str],
+    page_lookup: dict[str, dict[str, Any]],
+    *,
+    target_page_limit: int,
+    page_navigation_intent: bool,
+    source_hit_sets: dict[str, set[str]],
+    selector_relevance_by_id: dict[str, str],
+    cross_reference_page_ids: set[str],
+) -> dict[str, Any]:
+    if not ordered_page_ids:
+        return {
+            "primary": [],
+            "supporting": [],
+            "target_page_limit": target_page_limit,
+        }
+
+    if page_navigation_intent:
+        primary_limit = min(len(ordered_page_ids), max(1, min(4, target_page_limit)))
+    else:
+        primary_limit = min(len(ordered_page_ids), max(1, min(2, target_page_limit)))
+
+    primary_ids = ordered_page_ids[:primary_limit]
+    supporting_ids = ordered_page_ids[primary_limit:]
+
+    def _reason_codes(page_id: str) -> list[str]:
+        codes: list[str] = []
+        if page_id in source_hit_sets.get("exact_title_hits", set()):
+            codes.append("exact_title_match")
+        if page_id in source_hit_sets.get("strict_keyword_hits", set()):
+            codes.append("strict_keyword_match")
+        elif page_id in source_hit_sets.get("reflection_keyword_hits", set()):
+            codes.append("reflection_keyword_hit")
+        if page_id in source_hit_sets.get("vector_hits", set()):
+            codes.append("vector_hit")
+        if page_id in source_hit_sets.get("region_hits", set()):
+            codes.append("region_hit")
+        if page_id in source_hit_sets.get("project_tree_hits", set()):
+            codes.append("project_tree_hit")
+        if page_id in source_hit_sets.get("smart_selector_hits", set()):
+            codes.append("smart_selector_hit")
+        if page_id in cross_reference_page_ids:
+            codes.append("cross_reference")
+        if not codes:
+            codes.append("fallback")
+        return codes
+
+    def _entry(page_id: str) -> dict[str, Any]:
+        page = page_lookup.get(page_id, {})
+        selector_reason = selector_relevance_by_id.get(page_id)
+        reason_codes = _reason_codes(page_id)
+        return {
+            "page_id": page_id,
+            "page_name": page.get("page_name") or None,
+            "reason_codes": reason_codes,
+            "reason": selector_reason or ", ".join(reason_codes),
+        }
+
+    return {
+        "primary": [_entry(page_id) for page_id in primary_ids],
+        "supporting": [_entry(page_id) for page_id in supporting_ids],
+        "target_page_limit": target_page_limit,
+    }
 
 
 def _filter_semantic_index(
@@ -702,7 +1248,7 @@ async def run_agent_query_fast(
     - Let Gemini Flash select the most relevant pages with concise reasoning
     - Route user to those pages without running vision inference
     """
-    from app.services.providers.gemini import select_pages_smart
+    from app.services.providers.gemini import route_fast_query, select_pages_smart
     from app.services.tools import get_project_structure_summary, search_pages, select_pages
     from app.services.utils.search import search_pages_and_regions
 
@@ -710,6 +1256,49 @@ async def run_agent_query_fast(
     history_context = _build_history_context(history_messages)
     viewing_context_str = _build_viewing_context_str(viewing_context)
     page_navigation_intent = _is_page_navigation_query(query)
+
+    # 0) Lightweight query router to steer retrieval before smart selection.
+    yield {"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}})
+    router: dict[str, Any] = {
+        "intent": "page_navigation" if page_navigation_intent else "qa",
+        "must_terms": [],
+        "preferred_page_types": [],
+        "strict": False,
+        "k": FAST_PAGE_LIMIT,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    try:
+        router = await route_fast_query(
+            query=query,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        )
+    except Exception as e:
+        logger.warning("route_fast_query failed, continuing with defaults: %s", e)
+
+    router_result = router if isinstance(router, dict) else {}
+    yield {"type": "tool_result", "tool": "route_fast_query", "result": router_result}
+    trace.append({"type": "tool_result", "tool": "route_fast_query", "result": router_result})
+
+    router_intent = str(router_result.get("intent") or "").strip().lower()
+    if router_intent == "page_navigation":
+        page_navigation_intent = True
+    router_must_terms = _normalize_router_terms(router_result.get("must_terms"))
+    router_preferred_page_types = _normalize_router_page_types(router_result.get("preferred_page_types"))
+    router_preferred_disciplines = _infer_preferred_disciplines(query, router_must_terms)
+    router_area_or_level = _infer_area_or_level(query)
+    router_focus = _infer_focus(query, router_must_terms)
+    router_model = str(router_result.get("model") or "").strip() or "fallback"
+    router_strict = _to_bool(router_result.get("strict"), default=False) and page_navigation_intent
+    router_k = FAST_PAGE_LIMIT
+    try:
+        router_k = int(router_result.get("k"))
+    except (TypeError, ValueError):
+        router_k = FAST_PAGE_LIMIT
+    router_k = max(1, min(FAST_PAGE_LIMIT, router_k))
+    target_page_limit = router_k
+    search_query = _build_routed_search_query(query, router_must_terms, router_preferred_page_types)
 
     # 1) Load project structure summary for context
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
@@ -727,11 +1316,21 @@ async def run_agent_query_fast(
     trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
 
     # 2) RAG search by regions
-    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
-    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
+    yield {
+        "type": "tool_call",
+        "tool": "search_pages_and_regions",
+        "input": {"query": search_query, "source_query": query},
+    }
+    trace.append(
+        {
+            "type": "tool_call",
+            "tool": "search_pages_and_regions",
+            "input": {"query": search_query, "source_query": query},
+        }
+    )
 
     try:
-        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
+        region_matches = await search_pages_and_regions(db, query=search_query, project_id=project_id)
     except Exception as e:
         logger.exception("Region search failed: %s", e)
         yield {"type": "error", "message": f"Search failed: {str(e)}"}
@@ -741,16 +1340,55 @@ async def run_agent_query_fast(
     trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
 
     # 3) Secondary keyword search to improve routing confidence
-    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
-    trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
-    page_results = await search_pages(db, query=query, project_id=project_id, limit=FAST_PAGE_LIMIT)
+    yield {
+        "type": "tool_call",
+        "tool": "search_pages",
+        "input": {"query": search_query, "source_query": query},
+    }
+    trace.append(
+        {
+            "type": "tool_call",
+            "tool": "search_pages",
+            "input": {"query": search_query, "source_query": query},
+        }
+    )
+    page_results = await search_pages(db, query=search_query, project_id=project_id, limit=FAST_PAGE_LIMIT)
     yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
     trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+    exact_title_page_ids = _select_exact_title_hits(query, router_must_terms, page_results)
+
+    strict_page_matches: list[dict[str, Any]] = []
+    if router_strict:
+        strict_page_matches = _filter_pages_for_router(
+            page_results,
+            router_must_terms,
+            router_preferred_page_types,
+        )
+
+    selection_candidates = page_results
+    if strict_page_matches:
+        selection_candidates = strict_page_matches[: max(3, target_page_limit)]
 
     # 4) Smart LLM page selection over candidates
     selection_input = {
         "query": query,
-        "candidate_page_ids": [p.get("page_id") for p in page_results if isinstance(p, dict) and p.get("page_id")],
+        "routed_query": search_query,
+        "router": {
+            "intent": router_intent or ("page_navigation" if page_navigation_intent else "qa"),
+            "focus": router_focus,
+            "must_terms": router_must_terms,
+            "preferred_disciplines": router_preferred_disciplines,
+            "preferred_page_types": router_preferred_page_types,
+            "area_or_level": router_area_or_level,
+            "strict": router_strict,
+            "k": target_page_limit,
+            "model": router_model,
+        },
+        "candidate_page_ids": [
+            p.get("page_id")
+            for p in selection_candidates
+            if isinstance(p, dict) and p.get("page_id")
+        ],
         "project_page_count": project_structure.get("total_pages", 0),
     }
     yield {"type": "tool_call", "tool": "select_pages_smart", "input": selection_input}
@@ -760,7 +1398,7 @@ async def run_agent_query_fast(
     try:
         selection = await select_pages_smart(
             project_structure=project_structure,
-            page_candidates=page_results,
+            page_candidates=selection_candidates,
             query=query,
             history_context=history_context,
             viewing_context=viewing_context_str,
@@ -782,6 +1420,7 @@ async def run_agent_query_fast(
 
     selected_page_ids: list[str] = []
     raw_selected_pages = selection.get("selected_pages")
+    selector_relevance_by_id: dict[str, str] = {}
     if isinstance(raw_selected_pages, list):
         for item in raw_selected_pages:
             if not isinstance(item, dict):
@@ -789,6 +1428,9 @@ async def run_agent_query_fast(
             page_id = str(item.get("page_id") or "").strip()
             if page_id:
                 selected_page_ids.append(page_id)
+                relevance_text = str(item.get("relevance") or "").strip()
+                if relevance_text and page_id not in selector_relevance_by_id:
+                    selector_relevance_by_id[page_id] = relevance_text
 
     if not selected_page_ids:
         raw_page_ids = selection.get("page_ids")
@@ -798,12 +1440,41 @@ async def run_agent_query_fast(
                 if page_id:
                     selected_page_ids.append(page_id)
 
-    region_page_ids = [pid for pid in region_matches.keys() if pid]
-    keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+    vector_page_ids = _dedupe_ids([pid for pid in region_matches.keys() if pid], limit=FAST_PAGE_LIMIT)
+    region_page_ids = list(vector_page_ids)
+    keyword_page_ids = _dedupe_ids(
+        [str(p.get("page_id")) for p in page_results if isinstance(p, dict) and p.get("page_id")],
+        limit=FAST_PAGE_LIMIT,
+    )
+    selected_page_ids = _dedupe_ids(selected_page_ids, limit=FAST_PAGE_LIMIT)
+    strict_keyword_page_ids = [
+        p.get("page_id")
+        for p in strict_page_matches
+        if isinstance(p, dict) and p.get("page_id")
+    ]
+    strict_keyword_page_ids = _dedupe_ids([str(pid) for pid in strict_keyword_page_ids], limit=FAST_PAGE_LIMIT)
+    tree_page_ids: list[str] = []
+
+    if router_strict and strict_keyword_page_ids:
+        strict_id_set = set(strict_keyword_page_ids)
+        selected_page_ids = [pid for pid in selected_page_ids if pid in strict_id_set]
+        region_page_ids = [pid for pid in region_page_ids if pid in strict_id_set]
 
     if page_navigation_intent:
-        tree_page_ids = _select_project_tree_page_ids(project_structure, query, FAST_PAGE_LIMIT)
-        page_ids = list(dict.fromkeys([*keyword_page_ids, *region_page_ids, *selected_page_ids, *tree_page_ids]))
+        tree_page_ids = _select_project_tree_page_ids(project_structure, query, target_page_limit)
+        if router_strict and strict_keyword_page_ids:
+            primary_ids = list(
+                dict.fromkeys([*strict_keyword_page_ids, *region_page_ids, *selected_page_ids])
+            )
+            fallback_pool = [
+                pid
+                for pid in [*tree_page_ids, *keyword_page_ids]
+                if pid and pid not in primary_ids
+            ]
+            fallback_budget = max(0, min(2, target_page_limit - len(primary_ids)))
+            page_ids = primary_ids + fallback_pool[:fallback_budget]
+        else:
+            page_ids = list(dict.fromkeys([*keyword_page_ids, *region_page_ids, *selected_page_ids, *tree_page_ids]))
     elif selected_page_ids:
         page_ids = list(dict.fromkeys(selected_page_ids))
     else:
@@ -823,16 +1494,130 @@ async def run_agent_query_fast(
                     page_id = page.get("page_id")
                     if page_id and page_id not in page_ids:
                         page_ids.append(page_id)
-                    if len(page_ids) >= FAST_PAGE_LIMIT:
+                    if len(page_ids) >= target_page_limit:
                         break
-                if len(page_ids) >= FAST_PAGE_LIMIT:
+                if len(page_ids) >= target_page_limit:
                     break
 
+    page_ids_before_cross_refs = list(dict.fromkeys(page_ids))
+    cross_reference_page_ids: set[str] = set()
     if page_ids:
         page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+        cross_reference_page_ids = set(page_ids) - set(page_ids_before_cross_refs)
 
-    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:FAST_PAGE_LIMIT]
+    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:target_page_limit]
     ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+
+    query_plan = {
+        "intent": router_intent or ("page_navigation" if page_navigation_intent else "qa"),
+        "focus": router_focus or None,
+        "must_terms": router_must_terms,
+        "preferred_disciplines": router_preferred_disciplines,
+        "preferred_page_types": router_preferred_page_types,
+        "area_or_level": router_area_or_level,
+        "strict": router_strict,
+        "k": target_page_limit,
+        "model": router_model,
+    }
+    candidate_sets = {
+        "exact_title_hits": _build_candidate_set(exact_title_page_ids),
+        "reflection_keyword_hits": _build_candidate_set(keyword_page_ids),
+        "vector_hits": _build_candidate_set(vector_page_ids),
+        "region_hits": _build_candidate_set(region_page_ids),
+        "project_tree_hits": _build_candidate_set(tree_page_ids),
+        "strict_keyword_hits": _build_candidate_set(strict_keyword_page_ids),
+        "smart_selector_hits": _build_candidate_set(selected_page_ids),
+    }
+
+    page_lookup = _build_project_structure_page_lookup(project_structure)
+    for page_result in page_results:
+        if not isinstance(page_result, dict):
+            continue
+        page_id = str(page_result.get("page_id") or "").strip()
+        if not page_id:
+            continue
+        entry = page_lookup.setdefault(page_id, {})
+        entry.update(
+            {
+                "page_name": str(page_result.get("page_name") or entry.get("page_name") or "").strip(),
+                "discipline": str(page_result.get("discipline") or entry.get("discipline") or "").strip(),
+                "page_type": str(page_result.get("page_type") or entry.get("page_type") or "").strip(),
+                "content": str(page_result.get("content") or entry.get("content") or "").strip(),
+            }
+        )
+    for page_id, page_obj in page_map.items():
+        entry = page_lookup.setdefault(page_id, {})
+        page_name = getattr(page_obj, "page_name", None)
+        if page_name:
+            entry["page_name"] = page_name
+        page_type = getattr(page_obj, "page_type", None)
+        if page_type and not entry.get("page_type"):
+            entry["page_type"] = page_type
+        discipline_obj = getattr(page_obj, "discipline", None)
+        discipline_name = getattr(discipline_obj, "display_name", None) if discipline_obj else None
+        if discipline_name and not entry.get("discipline"):
+            entry["discipline"] = discipline_name
+
+    source_hit_sets = {
+        "exact_title_hits": set(candidate_sets["exact_title_hits"]["top_ids"]),
+        "reflection_keyword_hits": set(candidate_sets["reflection_keyword_hits"]["top_ids"]),
+        "vector_hits": set(candidate_sets["vector_hits"]["top_ids"]),
+        "region_hits": set(candidate_sets["region_hits"]["top_ids"]),
+        "project_tree_hits": set(candidate_sets["project_tree_hits"]["top_ids"]),
+        "strict_keyword_hits": set(candidate_sets["strict_keyword_hits"]["top_ids"]),
+        "smart_selector_hits": set(candidate_sets["smart_selector_hits"]["top_ids"]),
+    }
+    rank_breakdown = _build_rank_breakdown(
+        query=query,
+        ordered_page_ids=ordered_page_ids,
+        page_lookup=page_lookup,
+        must_terms=router_must_terms,
+        preferred_page_types=router_preferred_page_types,
+        preferred_disciplines=router_preferred_disciplines,
+        entity_terms=_extract_entity_terms(query),
+        vector_hits=vector_page_ids,
+        source_hit_sets=source_hit_sets,
+    )
+    final_selection = _build_final_selection_trace(
+        ordered_page_ids=ordered_page_ids,
+        page_lookup=page_lookup,
+        target_page_limit=target_page_limit,
+        page_navigation_intent=page_navigation_intent,
+        source_hit_sets=source_hit_sets,
+        selector_relevance_by_id=selector_relevance_by_id,
+        cross_reference_page_ids=cross_reference_page_ids,
+    )
+
+    router_usage_raw = router_result.get("usage") if isinstance(router_result.get("usage"), dict) else {}
+    selector_usage_raw = selection.get("usage") if isinstance(selection.get("usage"), dict) else {}
+    router_input_tokens = _coerce_int(router_usage_raw.get("input_tokens") or router_usage_raw.get("inputTokens"))
+    router_output_tokens = _coerce_int(router_usage_raw.get("output_tokens") or router_usage_raw.get("outputTokens"))
+    selector_input_tokens = _coerce_int(selector_usage_raw.get("input_tokens") or selector_usage_raw.get("inputTokens"))
+    selector_output_tokens = _coerce_int(selector_usage_raw.get("output_tokens") or selector_usage_raw.get("outputTokens"))
+    token_cost = {
+        "router": {
+            "input_tokens": router_input_tokens,
+            "output_tokens": router_output_tokens,
+        },
+        "selector": {
+            "input_tokens": selector_input_tokens,
+            "output_tokens": selector_output_tokens,
+        },
+        "total": {
+            "input_tokens": router_input_tokens + selector_input_tokens,
+            "output_tokens": router_output_tokens + selector_output_tokens,
+        },
+    }
+
+    fast_mode_trace_payload = {
+        "query_plan": query_plan,
+        "candidate_sets": candidate_sets,
+        "rank_breakdown": rank_breakdown,
+        "final_selection": final_selection,
+        "token_cost": token_cost,
+    }
+    yield {"type": "tool_result", "tool": "fast_mode_trace", "result": fast_mode_trace_payload}
+    trace.append({"type": "tool_result", "tool": "fast_mode_trace", "result": fast_mode_trace_payload})
 
     # 5) Select pages for frontend display
     if ordered_page_ids:
@@ -887,15 +1672,8 @@ async def run_agent_query_fast(
         yield {"type": "text", "content": response_text}
         trace.append({"type": "reasoning", "content": response_text})
 
-    def _to_int(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    usage_raw = selection.get("usage") if isinstance(selection.get("usage"), dict) else {}
-    input_tokens = _to_int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens"))
-    output_tokens = _to_int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens"))
+    input_tokens = token_cost["total"]["input_tokens"]
+    output_tokens = token_cost["total"]["output_tokens"]
 
     tokens = _extract_query_tokens(query)
     fallback_title = " ".join(tokens[:3]).title() if tokens else "Query"

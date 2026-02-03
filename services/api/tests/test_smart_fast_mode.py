@@ -12,7 +12,8 @@ sys.modules.setdefault("supabase", SimpleNamespace(create_client=lambda *args, *
 sys.modules.setdefault("pdf2image", SimpleNamespace(convert_from_bytes=lambda *args, **kwargs: []))
 
 from app.services.core import agent as core_agent
-from app.services.providers.gemini import select_pages_smart
+from app.routers.queries import extract_fast_mode_trace_payload, is_navigation_retry_query
+from app.services.providers.gemini import route_fast_query, select_pages_smart
 
 
 def test_select_pages_smart_filters_invalid_and_deduplicates(monkeypatch) -> None:
@@ -120,6 +121,37 @@ def test_select_pages_smart_falls_back_to_candidates_when_model_returns_none(mon
     assert result["chat_title"] == "Query"
     assert result["conversation_title"] == "Query"
     assert result["response"] == "I found the most relevant sheets and pulled them up for review."
+
+
+def test_route_fast_query_normalizes_response(monkeypatch) -> None:
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.text = """{
+  "intent": "PAGE_NAVIGATION",
+  "must_terms": ["equipment floor plan", "pages"],
+  "preferred_page_types": ["Floor Plan", "plan"],
+  "strict": "true",
+  "k": "3"
+}"""
+            self.usage_metadata = SimpleNamespace(
+                prompt_token_count=21,
+                candidates_token_count=6,
+            )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.models = SimpleNamespace(generate_content=lambda **kwargs: FakeResponse())
+
+    monkeypatch.setattr("app.services.providers.gemini._get_gemini_client", lambda: FakeClient())
+
+    result = asyncio.run(route_fast_query(query="equipment floor plan pages"))
+
+    assert result["intent"] == "page_navigation"
+    assert result["must_terms"] == ["equipment floor plan"]
+    assert result["preferred_page_types"] == ["floor_plan", "plan"]
+    assert result["strict"] is True
+    assert result["k"] == 3
+    assert result["usage"] == {"input_tokens": 21, "output_tokens": 6}
 
 
 async def _collect_events(stream) -> list[dict]:
@@ -288,3 +320,150 @@ def test_run_agent_query_fast_page_navigation_uses_sheet_list_response(monkeypat
     text_events = [e for e in events if e.get("type") == "text"]
     assert text_events[-1]["content"].startswith("Showing likely sheets:")
     assert "K-101" in text_events[-1]["content"]
+
+
+def test_run_agent_query_fast_router_strict_filters_noise(monkeypatch) -> None:
+    async def fake_route_fast_query(query, history_context="", viewing_context=""):
+        return {
+            "intent": "page_navigation",
+            "must_terms": ["equipment floor plan"],
+            "preferred_page_types": ["floor_plan"],
+            "strict": True,
+            "k": 2,
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        }
+
+    async def fake_get_project_structure_summary(db, project_id):
+        return {
+            "disciplines": [
+                {
+                    "name": "Kitchen",
+                    "pages": [
+                        {"page_id": "page-1", "sheet_number": "K-101", "title": "Equipment Floor Plan"},
+                        {"page_id": "page-2", "sheet_number": "K-102", "title": "Equipment Notes"},
+                        {"page_id": "page-3", "sheet_number": "A-101", "title": "Roof Plan"},
+                    ],
+                }
+            ],
+            "total_pages": 3,
+        }
+
+    async def fake_search_pages(db, query, project_id, limit):
+        return [
+            {
+                "page_id": "page-1",
+                "page_name": "K-101",
+                "discipline": "Kitchen",
+                "page_type": "floor_plan",
+                "content": "equipment floor plan for kitchen",
+                "keywords": ["equipment", "floor plan"],
+            },
+            {
+                "page_id": "page-2",
+                "page_name": "K-102",
+                "discipline": "Kitchen",
+                "page_type": "notes",
+                "content": "equipment notes and legends",
+                "keywords": ["equipment", "notes"],
+            },
+            {
+                "page_id": "page-3",
+                "page_name": "A-101",
+                "discipline": "Architectural",
+                "page_type": "plan",
+                "content": "roof plan overview",
+                "keywords": ["roof", "plan"],
+            },
+        ]
+
+    async def fake_search_pages_and_regions(db, query, project_id):
+        return {"page-3": [{"id": "region-1"}]}
+
+    captured = {"candidate_ids": []}
+
+    async def fake_select_pages_smart(project_structure, page_candidates, query, history_context="", viewing_context=""):
+        captured["candidate_ids"] = [p.get("page_id") for p in page_candidates]
+        return {
+            "selected_pages": [{"page_id": "page-3", "relevance": "Noisy match"}],
+            "page_ids": ["page-3"],
+            "chat_title": "Equipment Plans",
+            "conversation_title": "Kitchen Equipment Plans",
+            "response": "Routing to likely sheets.",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+        }
+
+    async def fake_select_pages(db, page_ids):
+        return {
+            "pages": [
+                {
+                    "page_id": page_id,
+                    "page_name": {"page-1": "K-101", "page-2": "K-102", "page-3": "A-101"}.get(page_id, ""),
+                    "file_path": f"/tmp/{page_id}.png",
+                    "discipline_id": "disc-1",
+                    "discipline_name": "Kitchen",
+                    "semantic_index": None,
+                }
+                for page_id in page_ids
+            ]
+        }
+
+    monkeypatch.setattr("app.services.providers.gemini.route_fast_query", fake_route_fast_query)
+    monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
+    monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
+    monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
+    monkeypatch.setattr("app.services.providers.gemini.select_pages_smart", fake_select_pages_smart)
+    monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
+    monkeypatch.setattr(core_agent, "_expand_with_cross_reference_pages", lambda db, project_id, page_ids: page_ids)
+    monkeypatch.setattr(
+        core_agent,
+        "_order_page_ids",
+        lambda db, page_ids: (
+            page_ids,
+            {pid: SimpleNamespace(page_name={"page-1": "K-101", "page-2": "K-102", "page-3": "A-101"}[pid]) for pid in page_ids},
+        ),
+    )
+
+    events = asyncio.run(
+        _collect_events(
+            core_agent.run_agent_query_fast(
+                db=SimpleNamespace(),
+                project_id="project-1",
+                query="equipment floor plan pages",
+                history_messages=[],
+                viewing_context=None,
+            )
+        )
+    )
+
+    assert captured["candidate_ids"] == ["page-1"]
+    select_pages_call = next(
+        e for e in events if e.get("type") == "tool_call" and e.get("tool") == "select_pages"
+    )
+    assert select_pages_call["input"]["page_ids"] == ["page-1", "page-2"]
+
+    fast_trace_event = next(
+        e for e in events if e.get("type") == "tool_result" and e.get("tool") == "fast_mode_trace"
+    )
+    fast_trace = fast_trace_event["result"]
+    assert fast_trace["query_plan"]["intent"] == "page_navigation"
+    assert fast_trace["candidate_sets"]["strict_keyword_hits"]["top_ids"] == ["page-1"]
+    assert fast_trace["final_selection"]["primary"][0]["page_id"] == "page-1"
+    assert fast_trace["token_cost"]["total"] == {"input_tokens": 9, "output_tokens": 4}
+
+    done_event = next(e for e in events if e.get("type") == "done")
+    assert done_event["usage"] == {"inputTokens": 9, "outputTokens": 4}
+
+
+def test_extract_fast_mode_trace_payload_returns_latest() -> None:
+    trace = [
+        {"type": "tool_result", "tool": "fast_mode_trace", "result": {"query_plan": {"intent": "qa"}}},
+        {"type": "tool_result", "tool": "fast_mode_trace", "result": {"query_plan": {"intent": "page_navigation"}}},
+    ]
+    payload = extract_fast_mode_trace_payload(trace)
+    assert payload is not None
+    assert payload["query_plan"]["intent"] == "page_navigation"
+
+
+def test_is_navigation_retry_query_heuristic() -> None:
+    assert is_navigation_retry_query("can you pull up those pages again?")
+    assert not is_navigation_retry_query("where is the walk-in cooler")
