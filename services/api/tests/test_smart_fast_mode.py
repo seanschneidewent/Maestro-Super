@@ -19,6 +19,7 @@ from app.routers.queries import (
     is_navigation_retry_query,
 )
 from app.services.providers.gemini import (
+    normalize_vision_execution_summary,
     normalize_vision_findings,
     route_fast_query,
     select_pages_smart,
@@ -867,6 +868,16 @@ def test_extract_deep_mode_trace_payload_returns_latest() -> None:
     assert payload["query_plan"]["intent"] == "qa"
 
 
+def test_normalize_vision_execution_summary_maps_pass_aliases() -> None:
+    summary = normalize_vision_execution_summary(
+        {
+            "pass_counts": {"1": "3", "2": 2},
+            "micro_crop_count": "1",
+        }
+    )
+    assert summary == {"pass_1": 3, "pass_2": 2, "pass_3": 1}
+
+
 def test_normalize_vision_findings_keeps_verification_metadata() -> None:
     pages = [
         {
@@ -998,6 +1009,11 @@ def test_run_agent_query_deep_v2_emits_trace_and_resolved_highlights(monkeypatch
                     }
                 ],
                 "cross_references": [],
+                "execution_summary": {
+                    "pass_1_crop_count": 3,
+                    "pass_2_crop_count": 1,
+                    "pass_3_crop_count": 0,
+                },
                 "gaps": [],
                 "response": "Panel schedule verified at 480V.",
                 "usage": {"input_tokens": 21, "output_tokens": 9},
@@ -1073,6 +1089,10 @@ def test_run_agent_query_deep_v2_emits_trace_and_resolved_highlights(monkeypatch
     )
     assert deep_trace_event["result"]["execution_summary"]["deep_v2_enabled"] is True
     assert deep_trace_event["result"]["final_findings"]["verified_via_zoom"] == 1
+    assert deep_trace_event["result"]["execution_summary"]["pass_1"] == 3
+    assert deep_trace_event["result"]["execution_summary"]["pass_2"] == 1
+    assert deep_trace_event["result"]["execution_summary"]["pass_3"] == 0
+    assert deep_trace_event["result"]["execution_summary"]["pass_total"] == 4
 
     resolve_event = next(
         event for event in events if event.get("type") == "tool_result" and event.get("tool") == "resolve_highlights"
@@ -1213,6 +1233,7 @@ def test_run_agent_query_deep_v2_falls_back_when_vision_fails(monkeypatch) -> No
         event for event in events if event.get("type") == "tool_result" and event.get("tool") == "deep_mode_trace"
     )
     assert deep_trace_event["result"]["execution_summary"]["fallback_used"] is True
+    assert deep_trace_event["result"]["execution_summary"]["pass_total"] == 0
 
     done_event = next(event for event in events if event.get("type") == "done")
     assert done_event["usage"] == {"inputTokens": 0, "outputTokens": 0}

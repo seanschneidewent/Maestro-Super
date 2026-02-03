@@ -7,6 +7,7 @@ Phase 3 is implemented for Deep mode verification planning, evidence-first traci
 - Deep mode now supports a V2 verification pipeline behind a feature flag.
 - Deep execution is candidate-first and budgeted (pages, regions, micro-crops).
 - Deep now emits dedicated trace + structured metrics payloads for observability.
+- Deep execution summaries now include pass-level crop telemetry (`pass_1`, `pass_2`, `pass_3`).
 - Deep findings are resolved through existing highlight plumbing for UI overlays.
 
 Implementation landed in commit `f7a5ffa` on branch `smart-fast-mode`.
@@ -124,6 +125,20 @@ File:
 File:
 - `docs/modes/PHASE_3_DEEP_MODE_VISION_ENHANCEMENTS.md`
 
+### 8) Deep pass-level execution telemetry
+
+Extended Deep telemetry propagation from provider output through trace and structured logs:
+
+- Vision provider prompt now requests `execution_summary` pass counts.
+- Provider responses normalize pass counter aliases into canonical fields (`pass_1`, `pass_2`, `pass_3`).
+- Core Deep pipeline emits pass counters (and `pass_total`) in `deep_mode_trace.execution_summary`.
+- Query router logs pass counters in `deep_mode.metrics`.
+
+Files:
+- `services/api/app/services/providers/gemini.py`
+- `services/api/app/services/core/agent.py`
+- `services/api/app/routers/queries.py`
+
 ## Tests and Validation
 
 Added/updated tests:
@@ -138,6 +153,8 @@ Added/updated tests:
   - no terminal `error` event,
   - fallback recorded in Deep trace,
   - bounded empty findings output.
+- Added execution-summary normalization test for pass counter aliasing.
+- Extended Deep V2 integration assertions to verify pass-level telemetry in `deep_mode_trace`.
 
 File:
 - `services/api/tests/test_smart_fast_mode.py`
@@ -146,7 +163,7 @@ Validation runs:
 
 - `python -m py_compile` passed for all changed Python files.
 - Targeted tests passed:
-  - `DATABASE_URL=sqlite:///./tmp_test.db pytest --noconftest services/api/tests/test_smart_fast_mode.py -q` (`17 passed`)
+  - `DATABASE_URL=sqlite:///./tmp_test.db pytest --noconftest services/api/tests/test_smart_fast_mode.py -q` (`18 passed`)
 - Frontend production build passed:
   - `npm -C apps/web run build`
 
@@ -164,7 +181,6 @@ Recommended enablement sequence:
 
 ## Known Gaps / Next Steps
 
-- Add explicit pass-level crop telemetry (`pass_1`, `pass_2`, `pass_3`) to `execution_summary` when model output supports it.
 - Add replay/eval harness coverage specific to Deep verification quality and evidence completeness.
 - Tune Deep confidence and fallback phrasing from production traces.
 - Consider optional UI legend for verified/high/medium Deep overlays if user testing indicates ambiguity.

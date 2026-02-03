@@ -202,6 +202,10 @@ IMPORTANT:
 - verification_method must be one of: semantic_ref, region_crop, multi_pass_zoom.
 - verification_pass must be 1, 2, or 3 when verification_method != semantic_ref.
 - candidate_region_id should be set when the finding came from candidate_regions.
+- Include execution_summary pass counts when available:
+  - pass_1: candidate-region crop inspections
+  - pass_2: tighter cluster crop inspections
+  - pass_3: micro-crop disambiguation inspections
 - Return gaps for expected-but-not-found information.
 
 PAGE MANIFEST (images provided in same order):
@@ -235,6 +239,11 @@ Return JSON with this exact structure:
   "cross_references": [
     {{"from_page": "A2.3", "to_page": "E2.1", "relationship": "electrical connection"}}
   ],
+  "execution_summary": {{
+    "pass_1": 0,
+    "pass_2": 0,
+    "pass_3": 0
+  }},
   "gaps": [
     "Could not locate refrigerant line routing on mechanical sheets"
   ],
@@ -710,6 +719,74 @@ def _normalize_verification_pass(raw_pass: Any) -> int | None:
     if value in {1, 2, 3}:
         return value
     return None
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_vision_execution_summary(raw_summary: Any) -> dict[str, int]:
+    """
+    Normalize optional model-reported Deep pass counters.
+
+    Expected canonical output:
+      {"pass_1": int, "pass_2": int, "pass_3": int}
+    """
+    summary = raw_summary if isinstance(raw_summary, dict) else {}
+    output: dict[str, int] = {"pass_1": 0, "pass_2": 0, "pass_3": 0}
+
+    alias_map = {
+        "pass_1": (
+            "pass_1",
+            "pass1",
+            "pass_1_count",
+            "pass1_count",
+            "pass_1_crop_count",
+            "pass_1_crops",
+            "candidate_crop_count",
+            "1",
+        ),
+        "pass_2": (
+            "pass_2",
+            "pass2",
+            "pass_2_count",
+            "pass2_count",
+            "pass_2_crop_count",
+            "pass_2_crops",
+            "cluster_crop_count",
+            "2",
+        ),
+        "pass_3": (
+            "pass_3",
+            "pass3",
+            "pass_3_count",
+            "pass3_count",
+            "pass_3_crop_count",
+            "pass_3_crops",
+            "micro_crop_count",
+            "3",
+        ),
+    }
+
+    def _consume(container: Any) -> None:
+        if not isinstance(container, dict):
+            return
+        for canonical, keys in alias_map.items():
+            for key in keys:
+                if key not in container:
+                    continue
+                value = _coerce_int(container.get(key), default=-1)
+                if value >= 0:
+                    output[canonical] = value
+                    break
+
+    _consume(summary)
+    _consume(summary.get("pass_counts"))
+    _consume(summary.get("passes"))
+    return output
 
 
 def normalize_vision_findings(
@@ -1608,6 +1685,7 @@ async def explore_concept_with_vision(
 
         result = extract_json_response(response.text)
         normalized_findings = normalize_vision_findings(result.get("findings"), pages)
+        execution_summary = normalize_vision_execution_summary(result.get("execution_summary"))
 
         input_tokens = 0
         output_tokens = 0
@@ -1620,6 +1698,7 @@ async def explore_concept_with_vision(
             "summary": result.get("summary") or None,
             "findings": normalized_findings,
             "cross_references": result.get("cross_references") or [],
+            "execution_summary": execution_summary,
             "gaps": result.get("gaps") or [],
             "response": result.get("response") or "",
             "usage": {
@@ -1749,6 +1828,7 @@ async def explore_concept_with_vision_streaming(
 
         result = extract_json_response(accumulated_text)
         normalized_findings = normalize_vision_findings(result.get("findings"), pages)
+        execution_summary = normalize_vision_execution_summary(result.get("execution_summary"))
 
         input_tokens = 0
         output_tokens = 0
@@ -1763,6 +1843,7 @@ async def explore_concept_with_vision_streaming(
                 "summary": result.get("summary") or None,
                 "findings": normalized_findings,
                 "cross_references": result.get("cross_references") or [],
+                "execution_summary": execution_summary,
                 "gaps": result.get("gaps") or [],
                 "response": result.get("response") or "",
                 "usage": {

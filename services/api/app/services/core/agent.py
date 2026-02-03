@@ -1855,6 +1855,85 @@ def _summarize_deep_findings(findings: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _extract_deep_pass_counts(
+    findings: list[dict[str, Any]],
+    provider_execution_summary: Any,
+) -> dict[str, int]:
+    """Normalize Deep pass counters from provider summary, then fallback to finding-level inference."""
+    counts: dict[str, int] = {"pass_1": 0, "pass_2": 0, "pass_3": 0}
+    alias_map = {
+        "pass_1": (
+            "pass_1",
+            "pass1",
+            "pass_1_count",
+            "pass1_count",
+            "pass_1_crop_count",
+            "pass_1_crops",
+            "candidate_crop_count",
+            "1",
+        ),
+        "pass_2": (
+            "pass_2",
+            "pass2",
+            "pass_2_count",
+            "pass2_count",
+            "pass_2_crop_count",
+            "pass_2_crops",
+            "cluster_crop_count",
+            "2",
+        ),
+        "pass_3": (
+            "pass_3",
+            "pass3",
+            "pass_3_count",
+            "pass3_count",
+            "pass_3_crop_count",
+            "pass_3_crops",
+            "micro_crop_count",
+            "3",
+        ),
+    }
+
+    def _consume(container: Any) -> None:
+        if not isinstance(container, dict):
+            return
+        for canonical, keys in alias_map.items():
+            for key in keys:
+                if key not in container:
+                    continue
+                value = container.get(key)
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if parsed >= 0:
+                    counts[canonical] = parsed
+                    break
+
+    _consume(provider_execution_summary)
+    if isinstance(provider_execution_summary, dict):
+        _consume(provider_execution_summary.get("pass_counts"))
+        _consume(provider_execution_summary.get("passes"))
+
+    derived = {"pass_1": 0, "pass_2": 0, "pass_3": 0}
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        try:
+            pass_index = int(finding.get("verification_pass"))
+        except (TypeError, ValueError):
+            pass_index = 0
+        if pass_index in (1, 2, 3):
+            derived[f"pass_{pass_index}"] += 1
+
+    for key in ("pass_1", "pass_2", "pass_3"):
+        if counts[key] <= 0 and derived[key] > 0:
+            counts[key] = derived[key]
+
+    counts["pass_total"] = counts["pass_1"] + counts["pass_2"] + counts["pass_3"]
+    return counts
+
+
 def _filter_semantic_index(
     semantic_index: dict | None,
     query_tokens: list[str],
@@ -3890,6 +3969,10 @@ async def run_agent_query_deep(
         for page in pages_for_vision
     ]
     finding_summary = _summarize_deep_findings(normalized_findings)
+    pass_counts = _extract_deep_pass_counts(
+        normalized_findings,
+        concept_result.get("execution_summary"),
+    )
     execution_summary = {
         "deep_v2_enabled": deep_v2_enabled,
         "fallback_used": bool(concept_result.get("fallback_used")) or exploration_failed,
@@ -3899,6 +3982,10 @@ async def run_agent_query_deep(
         "resolved_highlight_pages": len(resolved_highlights),
         "downgraded_verified_claims": downgraded_verified_count,
         "latency_ms": int(max(0.0, (asyncio.get_running_loop().time() - deep_started_at) * 1000)),
+        "pass_1": pass_counts["pass_1"],
+        "pass_2": pass_counts["pass_2"],
+        "pass_3": pass_counts["pass_3"],
+        "pass_total": pass_counts["pass_total"],
     }
     if isinstance(verification_plan, dict) and isinstance(verification_plan.get("budgets"), dict):
         execution_summary["budget"] = verification_plan.get("budgets")
