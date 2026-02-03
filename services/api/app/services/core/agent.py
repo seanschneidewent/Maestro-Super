@@ -3508,49 +3508,49 @@ async def run_agent_query_med(
         per_page_limit=MED_HIGHLIGHTS_PER_PAGE,
     )
 
-    # 6) Resolve highlights into frontend overlay format.
-    grouped_highlights: dict[str, dict[str, Any]] = {}
-    for region in selected_regions:
-        page_id = str(region.get("page_id") or "")
-        bbox = region.get("bbox")
-        if not page_id or not isinstance(bbox, list) or len(bbox) != 4:
+    # 6) Format Brain Mode regions directly for frontend (skip resolve_highlights).
+    # Brain Mode regions already have normalized bboxes (0-1) and region IDs.
+    # resolve_highlights() would convert to pixels and lose IDs.
+    resolved_highlights: list[dict[str, Any]] = []
+    for page_id in ordered_page_ids:
+        page_regions = [r for r in selected_regions if r.get("page_id") == page_id]
+        if not page_regions:
             continue
-        entry = grouped_highlights.setdefault(
-            page_id,
-            {
-                "page_id": page_id,
-                "bboxes": [],
-                "source": "search",
-            },
-        )
-        entry["bboxes"].append(
-            {
-                "bbox": bbox,
-                "category": str(region.get("region_type") or "region"),
-                "source_text": str(region.get("label") or ""),
-                "confidence": "medium",
-            }
-        )
 
-    highlight_specs = list(grouped_highlights.values())
+        words = []
+        for region in page_regions:
+            bbox = region.get("bbox")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            words.append({
+                "id": region.get("region_id"),
+                "text": region.get("label") or "",
+                "bbox": {
+                    "x0": bbox[0],
+                    "y0": bbox[1],
+                    "x1": bbox[2],
+                    "y1": bbox[3],
+                },
+                "role": region.get("region_type"),
+                "region_type": region.get("region_type"),
+                "source": "brain_mode",
+                "confidence": "medium",
+            })
+
+        if words:
+            resolved_highlights.append({
+                "page_id": page_id,
+                "words": words,
+            })
+
+    # Emit trace events for debugging (same structure as before)
     resolve_input = {
-        "highlight_count": len(highlight_specs),
+        "highlight_count": len(selected_regions),
         "page_count": len(selected_pages_payload),
+        "method": "brain_mode_direct",
     }
     yield {"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input}
     trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input})
-
-    resolved_highlights: list[dict[str, Any]] = []
-    try:
-        if selected_pages_payload and highlight_specs:
-            resolved_highlights = resolve_highlights(
-                selected_pages_payload,
-                highlight_specs,
-                query_tokens=_extract_query_tokens(query),
-            )
-    except Exception as e:
-        logger.warning("resolve_highlights failed in med mode: %s", e)
-        resolved_highlights = []
 
     resolve_result = {"highlights": resolved_highlights}
     yield {"type": "tool_result", "tool": "resolve_highlights", "result": resolve_result}
