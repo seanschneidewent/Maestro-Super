@@ -13,6 +13,7 @@ This folder breaks the implementation plan into phase docs so each stage can be 
 - [Phase 3 - Deep Mode Enhancements (Vision + Verified Facts)](PHASE_3_DEEP_MODE_VISION_ENHANCEMENTS.md)
 - [Phase 3 - Implementation Summary](PHASE_3_IMPLEMENTATION_SUMMARY.md)
 - [Phase 4 - Evaluation & Rollout](PHASE_4_EVALUATION_AND_ROLLOUT.md)
+- [Phase 4 - Implementation Summary](PHASE_4_IMPLEMENTATION_SUMMARY.md)
 
 ## Contracts
 
