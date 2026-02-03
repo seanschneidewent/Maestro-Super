@@ -99,8 +99,11 @@ def extract_pages_from_trace(trace: list[dict]) -> list[dict]:
     ]
 
 
-def extract_fast_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Extract the latest fast-mode instrumentation payload from trace."""
+def extract_mode_trace_payload(
+    trace: list[dict[str, Any]] | None,
+    tool_name: str,
+) -> dict[str, Any] | None:
+    """Extract the latest mode instrumentation payload from trace by tool name."""
     if not trace:
         return None
     for step in reversed(trace):
@@ -108,12 +111,22 @@ def extract_fast_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[
             continue
         if step.get("type") != "tool_result":
             continue
-        if step.get("tool") != "fast_mode_trace":
+        if step.get("tool") != tool_name:
             continue
         result = step.get("result")
         if isinstance(result, dict):
             return result
     return None
+
+
+def extract_fast_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Extract the latest fast-mode instrumentation payload from trace."""
+    return extract_mode_trace_payload(trace, "fast_mode_trace")
+
+
+def extract_med_mode_trace_payload(trace: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Extract the latest med-mode instrumentation payload from trace."""
+    return extract_mode_trace_payload(trace, "med_mode_trace")
 
 
 def is_navigation_retry_query(query_text: str) -> bool:
@@ -504,6 +517,73 @@ async def stream_query(
                     logger.info("fast_mode.metrics %s", json.dumps(structured_log, default=str))
                 except Exception as e:
                     logger.warning("Failed to emit fast-mode structured metrics log: %s", e)
+            elif data.mode == "med":
+                try:
+                    med_trace_payload = extract_med_mode_trace_payload(stored_trace)
+                    token_cost = (
+                        med_trace_payload.get("token_cost", {})
+                        if isinstance(med_trace_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(token_cost, dict):
+                        token_cost = {}
+                    if "total" not in token_cost:
+                        token_cost["total"] = {
+                            "input_tokens": usage_input_tokens,
+                            "output_tokens": usage_output_tokens,
+                        }
+
+                    final_highlights = (
+                        med_trace_payload.get("final_highlights", {})
+                        if isinstance(med_trace_payload, dict)
+                        else {}
+                    )
+                    highlight_count = _to_int(final_highlights.get("count", 0))
+                    resolved_page_count = _to_int(final_highlights.get("resolved_page_count", 0))
+
+                    structured_log = {
+                        "event": "med_mode_query_metrics",
+                        "query_id": query_id,
+                        "project_id": str(project_id),
+                        "conversation_id": str(conversation_id) if conversation_id else None,
+                        "user_id": str(user.id),
+                        "mode": data.mode,
+                        "query_text": data.query,
+                        "metrics": {
+                            "med_mode.token_cost": token_cost,
+                            "med_mode.pages_selected_count": len(pages_data),
+                            "med_mode.highlighted_regions_count": highlight_count,
+                            "med_mode.highlighted_pages_count": resolved_page_count,
+                        },
+                        "query_plan": (
+                            med_trace_payload.get("query_plan", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "candidate_sets": (
+                            med_trace_payload.get("candidate_sets", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "rank_breakdown": (
+                            med_trace_payload.get("rank_breakdown", [])
+                            if isinstance(med_trace_payload, dict)
+                            else []
+                        ),
+                        "page_selection": (
+                            med_trace_payload.get("page_selection", {})
+                            if isinstance(med_trace_payload, dict)
+                            else {}
+                        ),
+                        "region_candidates": (
+                            med_trace_payload.get("region_candidates", [])
+                            if isinstance(med_trace_payload, dict)
+                            else []
+                        ),
+                    }
+                    logger.info("med_mode.metrics %s", json.dumps(structured_log, default=str))
+                except Exception as e:
+                    logger.warning("Failed to emit med-mode structured metrics log: %s", e)
 
             # Update conversation title
             if conversation_id and conversation_title_from_agent:

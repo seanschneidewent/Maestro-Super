@@ -23,9 +23,9 @@ class AgentQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="User's question")
     conversation_id: str | None = Field(default=None, alias="conversationId", description="Optional conversation ID to group queries")
     viewing_page_id: str | None = Field(default=None, alias="viewingPageId", description="Page ID user is currently viewing in the file tree")
-    mode: Literal["fast", "deep"] = Field(
+    mode: Literal["fast", "med", "deep"] = Field(
         default="fast",
-        description="Query mode: fast routes to likely sheets, deep performs agentic vision analysis",
+        description="Query mode: fast routes sheets, med highlights likely regions from precomputed metadata, deep performs agentic vision analysis",
     )
 
     model_config = ConfigDict(populate_by_name=True)

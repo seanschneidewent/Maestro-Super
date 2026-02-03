@@ -12,8 +12,13 @@ sys.modules.setdefault("supabase", SimpleNamespace(create_client=lambda *args, *
 sys.modules.setdefault("pdf2image", SimpleNamespace(convert_from_bytes=lambda *args, **kwargs: []))
 
 from app.services.core import agent as core_agent
-from app.routers.queries import extract_fast_mode_trace_payload, is_navigation_retry_query
+from app.routers.queries import (
+    extract_fast_mode_trace_payload,
+    extract_med_mode_trace_payload,
+    is_navigation_retry_query,
+)
 from app.services.providers.gemini import route_fast_query, select_pages_smart
+from app.services.tools import resolve_highlights
 from app.services.utils.sheet_cards import build_sheet_card
 
 
@@ -628,3 +633,220 @@ def test_run_agent_query_fast_v2_skips_selector_and_ranks_deterministically(monk
 
     done_event = next(event for event in events if event.get("type") == "done")
     assert done_event["usage"] == {"inputTokens": 5, "outputTokens": 2}
+
+
+def test_extract_med_mode_trace_payload_returns_latest() -> None:
+    trace = [
+        {"type": "tool_result", "tool": "med_mode_trace", "result": {"query_plan": {"intent": "qa"}}},
+        {"type": "tool_result", "tool": "med_mode_trace", "result": {"query_plan": {"intent": "page_navigation"}}},
+    ]
+    payload = extract_med_mode_trace_payload(trace)
+    assert payload is not None
+    assert payload["query_plan"]["intent"] == "page_navigation"
+
+
+def test_resolve_highlights_supports_bboxes_without_ocr_words() -> None:
+    pages_data = [
+        {
+            "page_id": "page-1",
+            "semantic_index": {
+                "image_width": 1000,
+                "image_height": 500,
+                "words": [],
+            },
+        }
+    ]
+    highlights = [
+        {
+            "page_id": "page-1",
+            "bboxes": [
+                {
+                    "bbox": [0.1, 0.2, 0.3, 0.4],
+                    "category": "detail",
+                    "source_text": "Hood detail",
+                    "confidence": "medium",
+                }
+            ],
+            "source": "search",
+        }
+    ]
+
+    resolved = resolve_highlights(pages_data, highlights)
+    assert resolved
+    assert resolved[0]["page_id"] == "page-1"
+    assert resolved[0]["words"][0]["bbox"]["x0"] == 100.0
+    assert resolved[0]["words"][0]["bbox"]["y0"] == 100.0
+
+
+def test_run_agent_query_med_emits_trace_and_highlights(monkeypatch) -> None:
+    async def fake_route_fast_query(query, history_context="", viewing_context=""):
+        return {
+            "intent": "qa",
+            "must_terms": ["panel schedule"],
+            "preferred_page_types": ["schedule"],
+            "strict": False,
+            "k": 3,
+            "usage": {"input_tokens": 4, "output_tokens": 2},
+            "model": "fake-router",
+        }
+
+    async def fake_get_project_structure_summary(db, project_id):
+        return {
+            "disciplines": [
+                {
+                    "name": "Electrical",
+                    "pages": [
+                        {"page_id": "page-1", "sheet_number": "E-3.2", "title": "Panel Schedule"},
+                        {"page_id": "page-2", "sheet_number": "E-3.1", "title": "One-Line"},
+                    ],
+                }
+            ],
+            "total_pages": 2,
+        }
+
+    async def fake_search_pages(db, query, project_id, limit):
+        return [
+            {
+                "page_id": "page-1",
+                "page_name": "E-3.2",
+                "discipline": "Electrical",
+                "page_type": "schedule",
+                "content": "Panel schedule table with circuit data",
+                "sheet_reflection": "## Panel Schedule",
+                "keywords": ["panel", "schedule"],
+                "master_index": {"keywords": ["panel", "schedule"]},
+            },
+            {
+                "page_id": "page-2",
+                "page_name": "E-3.1",
+                "discipline": "Electrical",
+                "page_type": "plan",
+                "content": "One-line diagram and feeder notes",
+                "sheet_reflection": "## One-Line Diagram",
+                "keywords": ["one-line", "feeder"],
+                "master_index": {"keywords": ["one-line", "feeder"]},
+            },
+        ]
+
+    async def fake_search_pages_and_regions(db, query, project_id, limit=5, similarity_threshold=0.7):
+        return {
+            "page-1": [
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                    "_similarity": 0.93,
+                }
+            ],
+        }
+
+    async def fake_select_pages(db, page_ids):
+        return {
+            "pages": [
+                {
+                    "page_id": page_id,
+                    "page_name": "E-3.2" if page_id == "page-1" else "E-3.1",
+                    "file_path": f"/tmp/{page_id}.png",
+                    "discipline_id": "disc-1",
+                    "discipline_name": "Electrical",
+                    "semantic_index": {
+                        "image_width": 1200,
+                        "image_height": 900,
+                        "words": [],
+                    },
+                }
+                for page_id in page_ids
+            ]
+        }
+
+    page_map = {
+        "page-1": SimpleNamespace(
+            page_name="E-3.2",
+            page_type="schedule",
+            regions=[
+                {
+                    "id": "region_schedule",
+                    "type": "schedule",
+                    "label": "PANEL SCHEDULE",
+                    "bbox": {"x0": 0.1, "y0": 0.2, "x1": 0.6, "y1": 0.7},
+                }
+            ],
+            discipline=SimpleNamespace(display_name="Electrical"),
+            sheet_card={},
+            sheet_reflection="## Panel Schedule",
+            master_index={"keywords": ["panel", "schedule"]},
+            cross_references=[],
+        ),
+        "page-2": SimpleNamespace(
+            page_name="E-3.1",
+            page_type="plan",
+            regions=[
+                {
+                    "id": "region_plan",
+                    "type": "plan",
+                    "label": "ONE-LINE AREA",
+                    "bbox": {"x0": 0.2, "y0": 0.2, "x1": 0.8, "y1": 0.6},
+                }
+            ],
+            discipline=SimpleNamespace(display_name="Electrical"),
+            sheet_card={},
+            sheet_reflection="## One-Line",
+            master_index={"keywords": ["one-line"]},
+            cross_references=[],
+        ),
+    }
+
+    monkeypatch.setattr(
+        core_agent,
+        "get_settings",
+        lambda: SimpleNamespace(
+            fast_ranker_v2=True,
+            fast_selector_rerank=False,
+            med_mode_regions=True,
+        ),
+    )
+    monkeypatch.setattr("app.services.providers.gemini.route_fast_query", fake_route_fast_query)
+    monkeypatch.setattr("app.services.tools.get_project_structure_summary", fake_get_project_structure_summary)
+    monkeypatch.setattr("app.services.tools.search_pages", fake_search_pages)
+    monkeypatch.setattr("app.services.utils.search.search_pages_and_regions", fake_search_pages_and_regions)
+    monkeypatch.setattr("app.services.tools.select_pages", fake_select_pages)
+    monkeypatch.setattr(core_agent, "_expand_with_cross_reference_pages", lambda db, project_id, page_ids: page_ids)
+    monkeypatch.setattr(
+        core_agent,
+        "_order_page_ids",
+        lambda db, page_ids, sort_by_sheet_number=True: (
+            page_ids,
+            {pid: page_map[pid] for pid in page_ids if pid in page_map},
+        ),
+    )
+
+    events = asyncio.run(
+        _collect_events(
+            core_agent.run_agent_query_med(
+                db=SimpleNamespace(),
+                project_id="project-1",
+                query="where is the panel schedule",
+                history_messages=[],
+                viewing_context=None,
+            )
+        )
+    )
+
+    med_trace_event = next(
+        e for e in events if e.get("type") == "tool_result" and e.get("tool") == "med_mode_trace"
+    )
+    assert med_trace_event["result"]["final_highlights"]["count"] >= 1
+    assert med_trace_event["result"]["query_plan"]["ranker"] == "v2"
+
+    resolve_event = next(
+        e for e in events if e.get("type") == "tool_result" and e.get("tool") == "resolve_highlights"
+    )
+    resolved_highlights = resolve_event["result"]["highlights"]
+    assert resolved_highlights
+    assert resolved_highlights[0]["page_id"] == "page-1"
+    assert resolved_highlights[0]["words"]
+    assert resolved_highlights[0]["words"][0]["bbox"]["width"] > 0
+
+    done_event = next(e for e in events if e.get("type") == "done")
+    assert done_event["usage"] == {"inputTokens": 4, "outputTokens": 2}

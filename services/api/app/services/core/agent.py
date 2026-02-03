@@ -1,6 +1,7 @@
 """Query agent for navigating construction plan graph.
 
 Fast mode routes users to likely pages using RAG + project structure context.
+Med mode adds deterministic region highlighting from precomputed Brain Mode metadata.
 Deep mode adds streamed Gemini agentic vision exploration on top of the same RAG seed.
 Grok via OpenRouter remains available for legacy fast-mode behavior.
 """
@@ -26,6 +27,9 @@ FAST_PAGE_LIMIT = 8
 DEEP_PAGE_LIMIT = 5
 CROSS_REF_PAGE_LIMIT = 3
 DEEP_CANDIDATE_REGION_LIMIT = 8
+MED_PAGE_LIMIT = 4
+MED_TOTAL_HIGHLIGHT_LIMIT = 8
+MED_HIGHLIGHTS_PER_PAGE = 3
 PAGE_NAVIGATION_TERMS = {
     "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings",
 }
@@ -439,6 +443,13 @@ def _coerce_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _infer_focus(query: str, must_terms: list[str]) -> str:
@@ -966,6 +977,435 @@ def _build_final_selection_trace(
     }
 
 
+def _normalize_region_bbox(region: dict[str, Any]) -> list[float] | None:
+    if not isinstance(region, dict):
+        return None
+
+    bbox = region.get("bbox")
+    raw_x0: Any = 0.0
+    raw_y0: Any = 0.0
+    raw_x1: Any = 0.0
+    raw_y1: Any = 0.0
+
+    if isinstance(bbox, dict):
+        raw_x0 = bbox.get("x0", bbox.get("x", 0.0))
+        raw_y0 = bbox.get("y0", bbox.get("y", 0.0))
+        raw_x1 = bbox.get("x1")
+        raw_y1 = bbox.get("y1")
+        if raw_x1 is None and bbox.get("width") is not None:
+            raw_x1 = _coerce_float(raw_x0) + _coerce_float(bbox.get("width"))
+        if raw_y1 is None and bbox.get("height") is not None:
+            raw_y1 = _coerce_float(raw_y0) + _coerce_float(bbox.get("height"))
+    elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        raw_x0, raw_y0, raw_x1, raw_y1 = bbox
+    else:
+        return None
+
+    x0 = _coerce_float(raw_x0)
+    y0 = _coerce_float(raw_y0)
+    x1 = _coerce_float(raw_x1)
+    y1 = _coerce_float(raw_y1)
+
+    def _to_unit(value: float) -> float:
+        abs_value = abs(value)
+        if abs_value <= 1.0:
+            return value
+        if abs_value <= 1000.0:
+            return value / 1000.0
+        return value
+
+    x0 = _to_unit(x0)
+    y0 = _to_unit(y0)
+    x1 = _to_unit(x1)
+    y1 = _to_unit(y1)
+
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+
+    if max(abs(x0), abs(y0), abs(x1), abs(y1)) > 1.0:
+        return None
+
+    x0 = max(0.0, min(1.0, x0))
+    y0 = max(0.0, min(1.0, y0))
+    x1 = max(0.0, min(1.0, x1))
+    y1 = max(0.0, min(1.0, y1))
+
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return [round(x0, 6), round(y0, 6), round(x1, 6), round(y1, 6)]
+
+
+def _append_region_index_text(value: Any, output: list[str], *, limit: int = 64) -> None:
+    if len(output) >= limit:
+        return
+
+    if isinstance(value, dict):
+        for nested in value.values():
+            _append_region_index_text(nested, output, limit=limit)
+            if len(output) >= limit:
+                break
+        return
+
+    if isinstance(value, list):
+        for nested in value:
+            _append_region_index_text(nested, output, limit=limit)
+            if len(output) >= limit:
+                break
+        return
+
+    text = str(value or "").strip()
+    if text:
+        output.append(text)
+
+
+def _build_region_text_blob(region: dict[str, Any]) -> tuple[str, str]:
+    region_type = str(region.get("type") or "")
+    label = str(region.get("label") or region.get("name") or "")
+    detail_number = str(region.get("detail_number") or region.get("detailNumber") or "")
+    shows = str(region.get("shows") or "")
+
+    region_index = region.get("region_index")
+    if not isinstance(region_index, dict):
+        region_index = {}
+
+    region_index_parts: list[str] = []
+    _append_region_index_text(region_index, region_index_parts)
+    region_index_text = " ".join(region_index_parts)
+
+    title_blob = " ".join(part for part in (label, detail_number) if part)
+    text_blob = " ".join(part for part in (region_type, label, detail_number, shows, region_index_text) if part)
+    return _normalize_text(title_blob), _normalize_text(text_blob)
+
+
+def _infer_region_type_preferences(
+    query: str,
+    must_terms: list[str],
+    preferred_page_types: list[str],
+) -> dict[str, float]:
+    haystack = _normalize_text(f"{query} {' '.join(must_terms)} {' '.join(preferred_page_types)}")
+    if not haystack:
+        return {}
+
+    prefs: dict[str, float] = {}
+
+    def _boost(values: list[str], amount: float) -> None:
+        for value in values:
+            current = prefs.get(value, 0.0)
+            prefs[value] = max(current, amount)
+
+    if any(token in haystack for token in ("schedule", "panel", "tabulation", "table")):
+        _boost(["schedule"], 1.0)
+    if any(token in haystack for token in ("detail", "section", "elevation", "callout", "curb", "hood")):
+        _boost(["detail"], 1.0)
+    if any(token in haystack for token in ("note", "notes", "general note", "keynote")):
+        _boost(["notes", "legend"], 0.85)
+    if any(token in haystack for token in ("legend", "symbol")):
+        _boost(["legend"], 1.0)
+    if any(token in haystack for token in ("title block", "sheet number", "revision block")):
+        _boost(["title_block"], 1.0)
+    if any(token in haystack for token in ("where", "location", "locate", "plan", "floor plan", "area", "room")):
+        _boost(["plan", "floor_plan", "detail"], 0.65)
+
+    return prefs
+
+
+def _normalize_region_type(region: dict[str, Any]) -> str:
+    region_type = _normalize_text(str(region.get("type") or "")).replace(" ", "_")
+    if not region_type:
+        return "unknown"
+    if region_type == "floorplan":
+        return "floor_plan"
+    return region_type
+
+
+def _build_med_region_reason(
+    region_type: str,
+    label_match: float,
+    type_match: float,
+    similarity: float,
+    entity_match: float,
+) -> str:
+    reasons: list[str] = []
+    if label_match >= 0.8:
+        reasons.append("strong label match")
+    elif label_match >= 0.4:
+        reasons.append("label keyword match")
+    if type_match >= 0.9:
+        reasons.append(f"{region_type} type match")
+    elif type_match >= 0.5:
+        reasons.append("type hint match")
+    if similarity >= 0.8:
+        reasons.append("high semantic similarity")
+    elif similarity >= 0.55:
+        reasons.append("semantic similarity")
+    if entity_match >= 0.8:
+        reasons.append("entity/tag match")
+    if not reasons:
+        reasons.append("best available region candidate")
+    return ", ".join(reasons[:2])
+
+
+def _score_med_region(
+    *,
+    page_id: str,
+    page_name: str,
+    page_type: str,
+    region: dict[str, Any],
+    query: str,
+    must_terms: list[str],
+    preferred_page_types: list[str],
+    entity_terms: list[str],
+    region_type_preferences: dict[str, float],
+) -> dict[str, Any]:
+    region_type = _normalize_region_type(region)
+    title_norm, text_norm = _build_region_text_blob(region)
+    query_norm = _normalize_text(query)
+
+    phrase_terms = [_normalize_text(term) for term in must_terms if term]
+    if query_norm and len(query_norm) >= 4:
+        phrase_terms = [query_norm, *phrase_terms]
+    phrase_terms = [term for term in phrase_terms if term]
+
+    label_match = 0.0
+    for term in phrase_terms:
+        if not term:
+            continue
+        if term == title_norm:
+            label_match = 1.0
+            break
+        if term in title_norm:
+            label_match = max(label_match, 0.9)
+        elif term in text_norm:
+            label_match = max(label_match, 0.5)
+
+    similarity = _coerce_float(region.get("_similarity"), 0.0)
+    if similarity < 0:
+        similarity = 0.0
+    if similarity > 1.0:
+        similarity = min(1.0, similarity)
+
+    type_match = region_type_preferences.get(region_type, 0.0)
+    if type_match <= 0 and not region_type_preferences:
+        if region_type in {"schedule", "detail", "notes", "plan", "floor_plan"}:
+            type_match = 0.25
+    if type_match <= 0 and region_type in {"legend", "title_block"}:
+        type_match = 0.1
+
+    entity_match = 0.0
+    if entity_terms and text_norm:
+        hit_count = sum(1 for term in entity_terms if term and term in text_norm)
+        entity_match = min(1.0, hit_count / float(len(entity_terms)))
+
+    page_type_match = 1.0 if _page_type_matches_preference(page_type, preferred_page_types) else 0.0
+
+    penalties = 0.0
+    if region_type in {"title_block", "legend"} and type_match < 0.5:
+        penalties += 0.35
+    if not title_norm:
+        penalties += 0.08
+
+    bbox = _normalize_region_bbox(region)
+    if bbox is None:
+        penalties += 0.45
+
+    total = (
+        (similarity * 3.1)
+        + (label_match * 2.3)
+        + (type_match * 1.8)
+        + (entity_match * 1.2)
+        + (page_type_match * 0.5)
+        - penalties
+    )
+
+    reason = _build_med_region_reason(region_type, label_match, type_match, similarity, entity_match)
+    region_id = str(region.get("id") or "").strip()
+    if not region_id:
+        detail_number = str(region.get("detail_number") or region.get("detailNumber") or "").strip()
+        region_id = f"{region_type}:{detail_number}" if detail_number else f"{region_type}:unnamed"
+
+    return {
+        "page_id": page_id,
+        "page_name": page_name,
+        "page_type": page_type,
+        "region_id": region_id,
+        "label": str(region.get("label") or region.get("name") or region_type).strip() or region_type,
+        "region_type": region_type,
+        "bbox": bbox,
+        "score": round(total, 4),
+        "reason": reason,
+        "score_components": {
+            "semantic_similarity": round(similarity, 4),
+            "label_match": round(label_match, 4),
+            "type_match": round(type_match, 4),
+            "entity_match": round(entity_match, 4),
+            "page_type_match": round(page_type_match, 4),
+            "penalties": round(penalties, 4),
+            "total": round(total, 4),
+        },
+    }
+
+
+def _select_med_region_candidates(
+    *,
+    ordered_page_ids: list[str],
+    page_map: dict[str, Page],
+    region_matches: dict[str, list[dict[str, Any]]],
+    query: str,
+    must_terms: list[str],
+    preferred_page_types: list[str],
+    entity_terms: list[str],
+    total_limit: int = MED_TOTAL_HIGHLIGHT_LIMIT,
+    per_page_limit: int = MED_HIGHLIGHTS_PER_PAGE,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    region_type_preferences = _infer_region_type_preferences(query, must_terms, preferred_page_types)
+    page_order_lookup = {page_id: idx for idx, page_id in enumerate(ordered_page_ids)}
+
+    per_page_ranked: list[dict[str, Any]] = []
+    aggregate_candidates: list[dict[str, Any]] = []
+
+    for page_id in ordered_page_ids:
+        page_obj = page_map.get(page_id)
+        if not page_obj:
+            continue
+
+        page_name = str(getattr(page_obj, "page_name", "") or "")
+        page_type = str(getattr(page_obj, "page_type", "") or "")
+
+        candidate_regions: list[dict[str, Any]] = []
+        seen_region_keys: set[str] = set()
+
+        matched_regions = region_matches.get(page_id) or []
+        for idx, region in enumerate(matched_regions):
+            if not isinstance(region, dict):
+                continue
+            copied = dict(region)
+            region_id = str(copied.get("id") or f"matched_{idx}").strip()
+            if region_id in seen_region_keys:
+                continue
+            seen_region_keys.add(region_id)
+            candidate_regions.append(copied)
+
+        page_regions = getattr(page_obj, "regions", None)
+        if isinstance(page_regions, list):
+            for idx, region in enumerate(page_regions):
+                if not isinstance(region, dict):
+                    continue
+                copied = dict(region)
+                region_id = str(copied.get("id") or f"page_{idx}").strip()
+                if region_id in seen_region_keys:
+                    continue
+                seen_region_keys.add(region_id)
+                candidate_regions.append(copied)
+
+        scored_regions: list[dict[str, Any]] = []
+        for region in candidate_regions:
+            scored = _score_med_region(
+                page_id=page_id,
+                page_name=page_name,
+                page_type=page_type,
+                region=region,
+                query=query,
+                must_terms=must_terms,
+                preferred_page_types=preferred_page_types,
+                entity_terms=entity_terms,
+                region_type_preferences=region_type_preferences,
+            )
+            if scored.get("bbox") is None:
+                continue
+            scored_regions.append(scored)
+
+        scored_regions.sort(
+            key=lambda item: (
+                -float(item.get("score") or 0.0),
+                _page_sort_key(str(item.get("label") or "")),
+                str(item.get("region_id") or ""),
+            )
+        )
+
+        top_for_page = scored_regions[:max(1, per_page_limit)]
+        per_page_ranked.append(
+            {
+                "page_id": page_id,
+                "page_name": page_name or None,
+                "regions": top_for_page,
+            }
+        )
+        aggregate_candidates.extend(top_for_page)
+
+    aggregate_candidates.sort(
+        key=lambda item: (
+            -float(item.get("score") or 0.0),
+            page_order_lookup.get(str(item.get("page_id")), 10_000),
+            _page_sort_key(str(item.get("label") or "")),
+            str(item.get("region_id") or ""),
+        )
+    )
+
+    selected: list[dict[str, Any]] = []
+    page_counts: dict[str, int] = {}
+    seen_keys: set[str] = set()
+    for candidate in aggregate_candidates:
+        page_id = str(candidate.get("page_id") or "")
+        region_id = str(candidate.get("region_id") or "")
+        if not page_id:
+            continue
+        key = f"{page_id}:{region_id}"
+        if key in seen_keys:
+            continue
+        if page_counts.get(page_id, 0) >= per_page_limit:
+            continue
+        selected.append(candidate)
+        seen_keys.add(key)
+        page_counts[page_id] = page_counts.get(page_id, 0) + 1
+        if len(selected) >= max(1, total_limit):
+            break
+
+    return selected, per_page_ranked
+
+
+def _build_med_mode_response_text(
+    ordered_page_ids: list[str],
+    page_map: dict[str, Page],
+    selected_regions: list[dict[str, Any]],
+) -> str:
+    if not ordered_page_ids:
+        return "I couldn't find strong sheets for this request yet."
+
+    regions_by_page: dict[str, list[str]] = {}
+    for region in selected_regions:
+        page_id = str(region.get("page_id") or "")
+        label = str(region.get("label") or "").strip()
+        if not page_id:
+            continue
+        bucket = regions_by_page.setdefault(page_id, [])
+        if label and label not in bucket:
+            bucket.append(label)
+
+    page_notes: list[str] = []
+    for page_id in ordered_page_ids[:MED_PAGE_LIMIT]:
+        page = page_map.get(page_id)
+        if not page:
+            continue
+        page_name = str(getattr(page, "page_name", "") or page_id)
+        labels = regions_by_page.get(page_id) or []
+        if labels:
+            page_notes.append(f"{page_name} ({', '.join(labels[:2])})")
+        else:
+            page_notes.append(f"{page_name} (best available region)")
+        if len(page_notes) >= 3:
+            break
+
+    if page_notes:
+        return (
+            "I pulled the best sheets and highlighted the areas to check first: "
+            + "; ".join(page_notes)
+            + "."
+        )
+    return "I pulled the best sheets and highlighted likely areas to check first."
+
+
 def _filter_semantic_index(
     semantic_index: dict | None,
     query_tokens: list[str],
@@ -1445,13 +1885,14 @@ async def run_agent_query(
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
     viewing_context: dict[str, Any] | None = None,
-    mode: Literal["fast", "deep"] = "fast",
+    mode: Literal["fast", "med", "deep"] = "fast",
 ) -> AsyncIterator[dict]:
     """
     Execute agent query with streaming events.
 
     Modes:
     - fast (default): RAG + project structure routing (no vision calls)
+    - med: fast-style page routing + deterministic region highlights (no vision calls)
     - deep: RAG + agentic vision exploration with streamed thinking
 
     Backend selection:
@@ -1470,13 +1911,22 @@ async def run_agent_query(
         query: User's question
         history_messages: Optional list of previous messages in conversation
         viewing_context: Optional dict with page_id, page_name, discipline_name if user is viewing a page
-        mode: "fast" or "deep"
+        mode: "fast", "med", or "deep"
     """
-    mode = "deep" if mode == "deep" else "fast"
+    settings = get_settings()
+    mode = "deep" if mode == "deep" else "med" if mode == "med" else "fast"
+    if mode == "med" and not bool(getattr(settings, "med_mode_regions", False)):
+        logger.info("Med mode requested but MED_MODE_REGIONS is disabled; falling back to fast mode.")
+        mode = "fast"
     backend = os.environ.get("AGENT_BACKEND", "gemini").lower()
 
     if mode == "deep":
         async for event in run_agent_query_deep(
+            db, project_id, query, history_messages, viewing_context
+        ):
+            yield event
+    elif mode == "med":
+        async for event in run_agent_query_med(
             db, project_id, query, history_messages, viewing_context
         ):
             yield event
@@ -2042,6 +2492,512 @@ async def run_agent_query_fast(
     fallback_title = " ".join(tokens[:3]).title() if tokens else "Query"
     display_title = str(selection.get("chat_title") or "").strip() or fallback_title
     conversation_title = str(selection.get("conversation_title") or "").strip() or display_title
+
+    yield {
+        "type": "done",
+        "trace": trace,
+        "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
+        "displayTitle": display_title,
+        "conversationTitle": conversation_title,
+        "highlights": [],
+        "conceptName": None,
+        "summary": None,
+        "findings": [],
+        "crossReferences": [],
+        "gaps": [],
+    }
+
+
+async def run_agent_query_med(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+) -> AsyncIterator[dict]:
+    """
+    Med mode:
+    - Reuses fast-style page retrieval/ranking
+    - Deterministically selects likely regions from Brain Mode metadata
+    - Resolves region highlights without live vision inference
+    """
+    from app.services.providers.gemini import route_fast_query
+    from app.services.tools import (
+        get_project_structure_summary,
+        resolve_highlights,
+        search_pages,
+        select_pages,
+    )
+    from app.services.utils.search import search_pages_and_regions
+
+    trace: list[dict] = []
+    history_context = _build_history_context(history_messages)
+    viewing_context_str = _build_viewing_context_str(viewing_context)
+    page_navigation_intent = _is_page_navigation_query(query)
+
+    # 0) Query routing (same lightweight router used by fast mode).
+    yield {"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}})
+    router: dict[str, Any] = {
+        "intent": "page_navigation" if page_navigation_intent else "qa",
+        "must_terms": [],
+        "preferred_page_types": [],
+        "strict": False,
+        "k": MED_PAGE_LIMIT,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    try:
+        router = await route_fast_query(
+            query=query,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        )
+    except Exception as e:
+        logger.warning("route_fast_query failed for med mode, continuing with defaults: %s", e)
+
+    router_result = router if isinstance(router, dict) else {}
+    yield {"type": "tool_result", "tool": "route_fast_query", "result": router_result}
+    trace.append({"type": "tool_result", "tool": "route_fast_query", "result": router_result})
+
+    router_intent = str(router_result.get("intent") or "").strip().lower()
+    if router_intent == "page_navigation":
+        page_navigation_intent = True
+    router_must_terms = _normalize_router_terms(router_result.get("must_terms"))
+    router_preferred_page_types = _normalize_router_page_types(router_result.get("preferred_page_types"))
+    router_preferred_disciplines = _infer_preferred_disciplines(query, router_must_terms)
+    router_area_or_level = _infer_area_or_level(query)
+    router_focus = _infer_focus(query, router_must_terms)
+    router_model = str(router_result.get("model") or "").strip() or "fallback"
+    router_strict = _to_bool(router_result.get("strict"), default=False) and page_navigation_intent
+
+    router_k = MED_PAGE_LIMIT
+    try:
+        router_k = int(router_result.get("k"))
+    except (TypeError, ValueError):
+        router_k = MED_PAGE_LIMIT
+    target_page_limit = max(1, min(MED_PAGE_LIMIT, router_k))
+    search_query = _build_routed_search_query(query, router_must_terms, router_preferred_page_types)
+
+    # 1) Load project structure summary.
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
+    trace.append({"type": "tool_call", "tool": "list_project_pages", "input": {}})
+
+    project_structure: dict[str, Any] = {"disciplines": [], "total_pages": 0}
+    try:
+        structure_result = await get_project_structure_summary(db, project_id=project_id)
+        if isinstance(structure_result, dict):
+            project_structure = structure_result
+    except Exception as e:
+        logger.warning("Project structure summary failed in med mode: %s", e)
+
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure}
+    trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
+
+    # 2) Region retrieval lane.
+    yield {
+        "type": "tool_call",
+        "tool": "search_pages_and_regions",
+        "input": {"query": search_query, "source_query": query},
+    }
+    trace.append(
+        {
+            "type": "tool_call",
+            "tool": "search_pages_and_regions",
+            "input": {"query": search_query, "source_query": query},
+        }
+    )
+    try:
+        region_matches = await search_pages_and_regions(
+            db,
+            query=search_query,
+            project_id=project_id,
+            limit=FAST_PAGE_LIMIT,
+        )
+    except Exception as e:
+        logger.exception("Region search failed in med mode: %s", e)
+        yield {"type": "error", "message": f"Search failed: {str(e)}"}
+        return
+
+    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+    # 3) Secondary page retrieval lane.
+    yield {
+        "type": "tool_call",
+        "tool": "search_pages",
+        "input": {"query": search_query, "source_query": query},
+    }
+    trace.append(
+        {
+            "type": "tool_call",
+            "tool": "search_pages",
+            "input": {"query": search_query, "source_query": query},
+        }
+    )
+    page_results = await search_pages(db, query=search_query, project_id=project_id, limit=FAST_PAGE_LIMIT)
+    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+    trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+    for page_result in page_results:
+        if isinstance(page_result, dict):
+            _hydrate_sheet_card(page_result)
+
+    exact_title_page_ids = _select_exact_title_hits(query, router_must_terms, page_results)
+
+    strict_page_matches: list[dict[str, Any]] = []
+    if router_strict:
+        strict_page_matches = _filter_pages_for_router(
+            page_results,
+            router_must_terms,
+            router_preferred_page_types,
+        )
+
+    vector_page_ids = _dedupe_ids([pid for pid in region_matches.keys() if pid], limit=FAST_PAGE_LIMIT)
+    region_page_ids = list(vector_page_ids)
+    keyword_page_ids = _dedupe_ids(
+        [str(p.get("page_id")) for p in page_results if isinstance(p, dict) and p.get("page_id")],
+        limit=FAST_PAGE_LIMIT,
+    )
+    strict_keyword_page_ids = [
+        p.get("page_id")
+        for p in strict_page_matches
+        if isinstance(p, dict) and p.get("page_id")
+    ]
+    strict_keyword_page_ids = _dedupe_ids([str(pid) for pid in strict_keyword_page_ids], limit=FAST_PAGE_LIMIT)
+    tree_page_ids: list[str] = []
+
+    if router_strict and strict_keyword_page_ids:
+        strict_id_set = set(strict_keyword_page_ids)
+        region_page_ids = [pid for pid in region_page_ids if pid in strict_id_set]
+
+    if page_navigation_intent:
+        tree_page_ids = _select_project_tree_page_ids(project_structure, query, max(target_page_limit, 6))
+
+    page_lookup = _build_project_structure_page_lookup(project_structure)
+    for page_result in page_results:
+        if not isinstance(page_result, dict):
+            continue
+        page_id = str(page_result.get("page_id") or "").strip()
+        if not page_id:
+            continue
+        entry = page_lookup.setdefault(page_id, {})
+        sheet_card = page_result.get("sheet_card")
+        if not isinstance(sheet_card, dict):
+            sheet_card = _hydrate_sheet_card(page_result)
+        entry.update(
+            {
+                "page_name": str(page_result.get("page_name") or entry.get("page_name") or "").strip(),
+                "discipline": str(page_result.get("discipline") or entry.get("discipline") or "").strip(),
+                "page_type": str(page_result.get("page_type") or entry.get("page_type") or "").strip(),
+                "content": str(page_result.get("content") or entry.get("content") or "").strip(),
+                "sheet_card": sheet_card,
+            }
+        )
+
+    source_hit_sets = {
+        "exact_title_hits": set(exact_title_page_ids),
+        "reflection_keyword_hits": set(keyword_page_ids),
+        "vector_hits": set(vector_page_ids),
+        "region_hits": set(region_page_ids),
+        "project_tree_hits": set(tree_page_ids),
+        "strict_keyword_hits": set(strict_keyword_page_ids),
+        "smart_selector_hits": set(),
+    }
+
+    candidate_pool = _dedupe_ids(
+        [
+            *exact_title_page_ids,
+            *strict_keyword_page_ids,
+            *keyword_page_ids,
+            *region_page_ids,
+            *vector_page_ids,
+            *tree_page_ids,
+        ]
+    )
+    if router_strict and strict_keyword_page_ids:
+        strict_set = set(strict_keyword_page_ids)
+        exact_set = set(exact_title_page_ids)
+        candidate_pool = [pid for pid in candidate_pool if pid in strict_set or pid in exact_set]
+        if not candidate_pool:
+            candidate_pool = _dedupe_ids([*strict_keyword_page_ids, *exact_title_page_ids])
+
+    if not candidate_pool:
+        candidate_pool = _select_cover_index_fallback_page_ids(
+            project_structure,
+            max(target_page_limit, 6),
+        )
+
+    page_ids = _rank_candidate_page_ids_v2(
+        candidate_pool,
+        page_lookup=page_lookup,
+        query=query,
+        must_terms=router_must_terms,
+        preferred_page_types=router_preferred_page_types,
+        preferred_disciplines=router_preferred_disciplines,
+        area_or_level=router_area_or_level,
+        entity_terms=_extract_entity_terms(query),
+        vector_hits=vector_page_ids,
+        source_hit_sets=source_hit_sets,
+        limit=max(target_page_limit, 6),
+    )
+
+    if not page_ids:
+        page_ids = _select_cover_index_fallback_page_ids(project_structure, target_page_limit)
+
+    if not page_ids:
+        disciplines = project_structure.get("disciplines", [])
+        if isinstance(disciplines, list):
+            for discipline in disciplines:
+                pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                if not isinstance(pages, list):
+                    continue
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    page_id = page.get("page_id")
+                    if page_id and page_id not in page_ids:
+                        page_ids.append(page_id)
+                    if len(page_ids) >= target_page_limit:
+                        break
+                if len(page_ids) >= target_page_limit:
+                    break
+
+    page_ids_before_cross_refs = list(dict.fromkeys(page_ids))
+    cross_reference_page_ids: set[str] = set()
+    if page_ids:
+        page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+        cross_reference_page_ids = set(page_ids) - set(page_ids_before_cross_refs)
+
+    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:target_page_limit]
+    ordered_page_ids, page_map = _order_page_ids(db, page_ids, sort_by_sheet_number=True)
+
+    for page_id, page_obj in page_map.items():
+        entry = page_lookup.setdefault(page_id, {})
+        page_name = getattr(page_obj, "page_name", None)
+        if page_name:
+            entry["page_name"] = page_name
+        page_type = getattr(page_obj, "page_type", None)
+        if page_type and not entry.get("page_type"):
+            entry["page_type"] = page_type
+        discipline_obj = getattr(page_obj, "discipline", None)
+        discipline_name = getattr(discipline_obj, "display_name", None) if discipline_obj else None
+        if discipline_name and not entry.get("discipline"):
+            entry["discipline"] = discipline_name
+        existing_sheet_card = entry.get("sheet_card")
+        if not isinstance(existing_sheet_card, dict) or not existing_sheet_card:
+            stored_sheet_card = getattr(page_obj, "sheet_card", None)
+            if isinstance(stored_sheet_card, dict) and stored_sheet_card:
+                entry["sheet_card"] = stored_sheet_card
+            else:
+                entry["sheet_card"] = build_sheet_card(
+                    sheet_number=getattr(page_obj, "page_name", None),
+                    page_type=getattr(page_obj, "page_type", None),
+                    discipline_name=discipline_name,
+                    sheet_reflection=getattr(page_obj, "sheet_reflection", None),
+                    master_index=(
+                        page_obj.master_index
+                        if isinstance(getattr(page_obj, "master_index", None), dict)
+                        else None
+                    ),
+                    keywords=None,
+                    cross_references=getattr(page_obj, "cross_references", None),
+                )
+
+    candidate_sets = {
+        "exact_title_hits": _build_candidate_set(exact_title_page_ids),
+        "reflection_keyword_hits": _build_candidate_set(keyword_page_ids),
+        "vector_hits": _build_candidate_set(vector_page_ids),
+        "region_hits": _build_candidate_set(region_page_ids),
+        "project_tree_hits": _build_candidate_set(tree_page_ids),
+        "strict_keyword_hits": _build_candidate_set(strict_keyword_page_ids),
+        "smart_selector_hits": _build_candidate_set([]),
+    }
+    source_hit_sets = {
+        "exact_title_hits": set(candidate_sets["exact_title_hits"]["top_ids"]),
+        "reflection_keyword_hits": set(candidate_sets["reflection_keyword_hits"]["top_ids"]),
+        "vector_hits": set(candidate_sets["vector_hits"]["top_ids"]),
+        "region_hits": set(candidate_sets["region_hits"]["top_ids"]),
+        "project_tree_hits": set(candidate_sets["project_tree_hits"]["top_ids"]),
+        "strict_keyword_hits": set(candidate_sets["strict_keyword_hits"]["top_ids"]),
+        "smart_selector_hits": set(),
+    }
+    rank_breakdown = _build_rank_breakdown(
+        query=query,
+        ordered_page_ids=ordered_page_ids,
+        page_lookup=page_lookup,
+        must_terms=router_must_terms,
+        preferred_page_types=router_preferred_page_types,
+        preferred_disciplines=router_preferred_disciplines,
+        area_or_level=router_area_or_level,
+        entity_terms=_extract_entity_terms(query),
+        vector_hits=vector_page_ids,
+        source_hit_sets=source_hit_sets,
+        top_n=target_page_limit,
+    )
+    final_selection = _build_final_selection_trace(
+        ordered_page_ids=ordered_page_ids,
+        page_lookup=page_lookup,
+        target_page_limit=target_page_limit,
+        page_navigation_intent=page_navigation_intent,
+        source_hit_sets=source_hit_sets,
+        selector_relevance_by_id={},
+        cross_reference_page_ids=cross_reference_page_ids,
+    )
+
+    router_usage_raw = router_result.get("usage") if isinstance(router_result.get("usage"), dict) else {}
+    router_input_tokens = _coerce_int(router_usage_raw.get("input_tokens") or router_usage_raw.get("inputTokens"))
+    router_output_tokens = _coerce_int(router_usage_raw.get("output_tokens") or router_usage_raw.get("outputTokens"))
+    token_cost = {
+        "router": {
+            "input_tokens": router_input_tokens,
+            "output_tokens": router_output_tokens,
+        },
+        "selector": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+        },
+        "total": {
+            "input_tokens": router_input_tokens,
+            "output_tokens": router_output_tokens,
+        },
+    }
+
+    # 4) Select pages for frontend.
+    selected_pages_payload: list[dict[str, Any]] = []
+    if ordered_page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
+        try:
+            result = await select_pages(db, page_ids=ordered_page_ids)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            if isinstance(result, dict):
+                selected_pages_payload = result.get("pages") if isinstance(result.get("pages"), list) else []
+            yield {"type": "tool_result", "tool": "select_pages", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
+        except Exception as e:
+            logger.error("select_pages failed in med mode: %s", e)
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
+
+    # 5) Deterministic region selection.
+    selected_regions, region_candidates_by_page = _select_med_region_candidates(
+        ordered_page_ids=ordered_page_ids,
+        page_map=page_map,
+        region_matches=region_matches,
+        query=query,
+        must_terms=router_must_terms,
+        preferred_page_types=router_preferred_page_types,
+        entity_terms=_extract_entity_terms(query),
+        total_limit=MED_TOTAL_HIGHLIGHT_LIMIT,
+        per_page_limit=MED_HIGHLIGHTS_PER_PAGE,
+    )
+
+    # 6) Resolve highlights into frontend overlay format.
+    grouped_highlights: dict[str, dict[str, Any]] = {}
+    for region in selected_regions:
+        page_id = str(region.get("page_id") or "")
+        bbox = region.get("bbox")
+        if not page_id or not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        entry = grouped_highlights.setdefault(
+            page_id,
+            {
+                "page_id": page_id,
+                "bboxes": [],
+                "source": "search",
+            },
+        )
+        entry["bboxes"].append(
+            {
+                "bbox": bbox,
+                "category": str(region.get("region_type") or "region"),
+                "source_text": str(region.get("label") or ""),
+                "confidence": "medium",
+            }
+        )
+
+    highlight_specs = list(grouped_highlights.values())
+    resolve_input = {
+        "highlight_count": len(highlight_specs),
+        "page_count": len(selected_pages_payload),
+    }
+    yield {"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input}
+    trace.append({"type": "tool_call", "tool": "resolve_highlights", "input": resolve_input})
+
+    resolved_highlights: list[dict[str, Any]] = []
+    try:
+        if selected_pages_payload and highlight_specs:
+            resolved_highlights = resolve_highlights(
+                selected_pages_payload,
+                highlight_specs,
+                query_tokens=_extract_query_tokens(query),
+            )
+    except Exception as e:
+        logger.warning("resolve_highlights failed in med mode: %s", e)
+        resolved_highlights = []
+
+    resolve_result = {"highlights": resolved_highlights}
+    yield {"type": "tool_result", "tool": "resolve_highlights", "result": resolve_result}
+    trace.append({"type": "tool_result", "tool": "resolve_highlights", "result": resolve_result})
+
+    query_plan = {
+        "intent": router_intent or ("page_navigation" if page_navigation_intent else "qa"),
+        "focus": router_focus or None,
+        "must_terms": router_must_terms,
+        "preferred_disciplines": router_preferred_disciplines,
+        "preferred_page_types": router_preferred_page_types,
+        "area_or_level": router_area_or_level,
+        "strict": router_strict,
+        "k": target_page_limit,
+        "model": router_model,
+        "ranker": "v2",
+        "selector_rerank": False,
+    }
+    med_mode_trace_payload = {
+        "query_plan": query_plan,
+        "candidate_sets": candidate_sets,
+        "rank_breakdown": rank_breakdown,
+        "page_selection": final_selection,
+        "region_candidates": region_candidates_by_page,
+        "final_highlights": {
+            "count": len(selected_regions),
+            "resolved_page_count": len(resolved_highlights),
+            "regions": [
+                {
+                    "page_id": region.get("page_id"),
+                    "page_name": region.get("page_name"),
+                    "region_id": region.get("region_id"),
+                    "label": region.get("label"),
+                    "region_type": region.get("region_type"),
+                    "score": region.get("score"),
+                    "reason": region.get("reason"),
+                    "bbox": region.get("bbox"),
+                }
+                for region in selected_regions
+            ],
+        },
+        "token_cost": token_cost,
+    }
+    yield {"type": "tool_result", "tool": "med_mode_trace", "result": med_mode_trace_payload}
+    trace.append({"type": "tool_result", "tool": "med_mode_trace", "result": med_mode_trace_payload})
+
+    response_text = _build_med_mode_response_text(ordered_page_ids, page_map, selected_regions)
+    if ordered_page_ids and not selected_regions:
+        response_text = (
+            "I pulled the best sheets, but available metadata was limited so highlights are broad."
+        )
+
+    if response_text:
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+
+    input_tokens = token_cost["total"]["input_tokens"]
+    output_tokens = token_cost["total"]["output_tokens"]
+    tokens = _extract_query_tokens(query)
+    fallback_title = " ".join(tokens[:3]).title() if tokens else "Query"
+    display_title = fallback_title
+    conversation_title = display_title
 
     yield {
         "type": "done",
