@@ -995,6 +995,13 @@ def normalize_vision_findings(
         if verification_pass is not None and verification_method is None:
             verification_method = "multi_pass_zoom"
 
+        # Derive bbox from candidate_region_id when no explicit bbox or semantic_refs
+        if normalized_bbox is None and candidate_region_id:
+            region_bbox_map = region_bbox_by_page.get(page_id, {})
+            region_bbox = region_bbox_map.get(candidate_region_id)
+            if region_bbox:
+                normalized_bbox = dict(region_bbox)
+
         if normalized_bbox is not None:
             region_bbox_map = region_bbox_by_page.get(page_id, {})
             region_bbox_list = region_order_by_page.get(page_id, [])
