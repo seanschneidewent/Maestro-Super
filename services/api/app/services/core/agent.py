@@ -25,6 +25,12 @@ FAST_PAGE_LIMIT = 8
 DEEP_PAGE_LIMIT = 5
 CROSS_REF_PAGE_LIMIT = 3
 DEEP_CANDIDATE_REGION_LIMIT = 8
+PAGE_NAVIGATION_TERMS = {
+    "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings",
+}
+PAGE_NAVIGATION_STOP_TOKENS = {
+    "page", "pages", "sheet", "sheets", "plan", "plans", "drawing", "drawings", "floor",
+}
 
 
 def _build_history_context(history_messages: list[dict[str, Any]] | None) -> str:
@@ -76,6 +82,93 @@ def _extract_query_tokens(query: str) -> list[str]:
     }
     tokens = [w for w in query.lower().split() if w and w not in STOP_WORDS]
     return tokens or [w for w in query.lower().split() if w]
+
+
+def _is_page_navigation_query(query: str) -> bool:
+    query_tokens = _extract_query_tokens(query)
+    if any(token in PAGE_NAVIGATION_TERMS for token in query_tokens):
+        return True
+
+    query_lower = query.lower()
+    if "floor plan" in query_lower or "sheet list" in query_lower:
+        return True
+    return False
+
+
+def _select_project_tree_page_ids(
+    project_structure: dict[str, Any] | None,
+    query: str,
+    limit: int,
+) -> list[str]:
+    if not isinstance(project_structure, dict):
+        return []
+
+    disciplines = project_structure.get("disciplines")
+    if not isinstance(disciplines, list):
+        return []
+
+    raw_tokens = _extract_query_tokens(query)
+    query_tokens = [token for token in raw_tokens if token not in PAGE_NAVIGATION_STOP_TOKENS]
+
+    scored_entries: list[tuple[int, str, str]] = []
+    fallback_page_ids: list[str] = []
+
+    for discipline in disciplines:
+        if not isinstance(discipline, dict):
+            continue
+
+        discipline_name = str(
+            discipline.get("name")
+            or discipline.get("display_name")
+            or discipline.get("code")
+            or ""
+        ).lower()
+        pages = discipline.get("pages")
+        if not isinstance(pages, list):
+            continue
+
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_id = str(page.get("page_id") or "").strip()
+            if not page_id:
+                continue
+
+            page_name = str(
+                page.get("sheet_number")
+                or page.get("page_name")
+                or page.get("title")
+                or ""
+            ).strip()
+            title = str(page.get("title") or "").strip()
+
+            if page_id not in fallback_page_ids:
+                fallback_page_ids.append(page_id)
+
+            if not query_tokens:
+                continue
+
+            haystack = f"{discipline_name} {page_name.lower()} {title.lower()}"
+            score = 0
+            for token in query_tokens:
+                if token in haystack:
+                    score += 2
+                elif token.endswith("s") and len(token) > 2 and token[:-1] in haystack:
+                    score += 1
+            if score > 0:
+                scored_entries.append((score, page_id, page_name))
+
+    if scored_entries:
+        scored_entries.sort(key=lambda item: (-item[0], _page_sort_key(item[2] or "")))
+        ranked_page_ids: list[str] = []
+        for _, page_id, _ in scored_entries:
+            if page_id not in ranked_page_ids:
+                ranked_page_ids.append(page_id)
+            if len(ranked_page_ids) >= limit:
+                break
+        return ranked_page_ids
+
+    return fallback_page_ids[:limit]
 
 
 def _filter_semantic_index(
@@ -616,6 +709,7 @@ async def run_agent_query_fast(
     trace: list[dict] = []
     history_context = _build_history_context(history_messages)
     viewing_context_str = _build_viewing_context_str(viewing_context)
+    page_navigation_intent = _is_page_navigation_query(query)
 
     # 1) Load project structure summary for context
     yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
@@ -657,6 +751,7 @@ async def run_agent_query_fast(
     selection_input = {
         "query": query,
         "candidate_page_ids": [p.get("page_id") for p in page_results if isinstance(p, dict) and p.get("page_id")],
+        "project_page_count": project_structure.get("total_pages", 0),
     }
     yield {"type": "tool_call", "tool": "select_pages_smart", "input": selection_input}
     trace.append({"type": "tool_call", "tool": "select_pages_smart", "input": selection_input})
@@ -664,6 +759,7 @@ async def run_agent_query_fast(
     selection: dict[str, Any] = {}
     try:
         selection = await select_pages_smart(
+            project_structure=project_structure,
             page_candidates=page_results,
             query=query,
             history_context=history_context,
@@ -702,11 +798,15 @@ async def run_agent_query_fast(
                 if page_id:
                     selected_page_ids.append(page_id)
 
-    if selected_page_ids:
+    region_page_ids = [pid for pid in region_matches.keys() if pid]
+    keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+
+    if page_navigation_intent:
+        tree_page_ids = _select_project_tree_page_ids(project_structure, query, FAST_PAGE_LIMIT)
+        page_ids = list(dict.fromkeys([*keyword_page_ids, *region_page_ids, *selected_page_ids, *tree_page_ids]))
+    elif selected_page_ids:
         page_ids = list(dict.fromkeys(selected_page_ids))
     else:
-        region_page_ids = [pid for pid in region_matches.keys() if pid]
-        keyword_page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
         page_ids = list(dict.fromkeys([*region_page_ids, *keyword_page_ids]))
 
     if not page_ids:
@@ -751,8 +851,22 @@ async def run_agent_query_fast(
             trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
 
     # 6) Compose response text
-    response_text = selection.get("response") if isinstance(selection.get("response"), str) else ""
-    response_text = response_text.strip()
+    response_text = ""
+    if page_navigation_intent and ordered_page_ids:
+        top_names = [
+            page_map[pid].page_name
+            for pid in ordered_page_ids[:4]
+            if pid in page_map and page_map[pid].page_name
+        ]
+        if top_names:
+            response_text = f"Showing likely sheets: {', '.join(top_names)}."
+            if len(ordered_page_ids) > len(top_names):
+                response_text += f" I also pulled {len(ordered_page_ids) - len(top_names)} related sheets."
+        else:
+            response_text = f"Pulled {len(ordered_page_ids)} relevant sheets for review."
+    else:
+        response_text = selection.get("response") if isinstance(selection.get("response"), str) else ""
+        response_text = response_text.strip()
 
     if not response_text and ordered_page_ids:
         top_names = [

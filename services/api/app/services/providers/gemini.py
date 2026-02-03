@@ -117,7 +117,10 @@ Return JSON with this exact structure:
   "conversation_title": "2-6 word title"
 }}'''
 
-SMART_PAGE_SELECTION_PROMPT = '''You are a construction plan assistant. Select the most relevant pages for the user's query.
+SMART_PAGE_SELECTION_PROMPT = '''You are a construction plan assistant focused on navigation. Your main job is to route the user to the right sheets quickly.
+
+PROJECT STRUCTURE (disciplines and pages):
+{project_structure}
 
 CANDIDATE PAGES (from RAG search):
 {page_candidates}
@@ -129,10 +132,12 @@ USER QUERY: {query}
 Select 1-6 pages that best answer the query. For each selected page, explain WHY it's relevant in one sentence.
 
 GUIDELINES:
+- This is FAST MODE routing. Prefer showing actual sheet/page matches over narrative explanation.
+- If the user asks for pages/sheets/plans, return sheet choices and keep response page-focused.
 - Prioritize pages that directly answer the question
 - Include related spec/schedule pages if they contain supporting data
 - Order by relevance (most relevant first)
-- Only use page_id values that appear in CANDIDATE PAGES
+- Only use page_id values that appear in PROJECT STRUCTURE or CANDIDATE PAGES
 
 Return JSON:
 {{
@@ -865,6 +870,7 @@ async def select_pages_for_verification(
 
 
 async def select_pages_smart(
+    project_structure: dict[str, Any] | None,
     page_candidates: list[dict[str, Any]],
     query: str,
     history_context: str = "",
@@ -930,6 +936,66 @@ async def select_pages_smart(
         candidate_ids: list[str] = []
         candidate_id_set: set[str] = set()
         condensed_candidates: list[dict[str, Any]] = []
+        project_structure_page_ids: list[str] = []
+        project_structure_page_id_set: set[str] = set()
+
+        compact_project_structure = {"disciplines": [], "total_pages": 0}
+        disciplines_raw = (
+            project_structure.get("disciplines")
+            if isinstance(project_structure, dict)
+            else []
+        )
+        if isinstance(disciplines_raw, list):
+            compact_disciplines: list[dict[str, Any]] = []
+            total_pages = 0
+            for discipline in disciplines_raw:
+                if not isinstance(discipline, dict):
+                    continue
+                discipline_name = (
+                    discipline.get("name")
+                    or discipline.get("display_name")
+                    or discipline.get("code")
+                    or "Unknown"
+                )
+                pages_raw = discipline.get("pages")
+                pages_out: list[dict[str, Any]] = []
+                if isinstance(pages_raw, list):
+                    for page in pages_raw:
+                        if not isinstance(page, dict):
+                            continue
+                        page_id = str(page.get("page_id") or "").strip()
+                        if not page_id:
+                            continue
+                        if page_id not in project_structure_page_id_set:
+                            project_structure_page_id_set.add(page_id)
+                            project_structure_page_ids.append(page_id)
+
+                        sheet_number = (
+                            page.get("sheet_number")
+                            or page.get("page_name")
+                            or page.get("title")
+                            or ""
+                        )
+                        title = page.get("title")
+                        pages_out.append(
+                            {
+                                "page_id": page_id,
+                                "sheet_number": sheet_number,
+                                "title": title,
+                            }
+                        )
+                total_pages += len(pages_out)
+                compact_disciplines.append(
+                    {
+                        "discipline": discipline_name,
+                        "pages": pages_out,
+                    }
+                )
+
+            compact_project_structure = {
+                "disciplines": compact_disciplines,
+                "total_pages": total_pages,
+            }
 
         for candidate in page_candidates:
             if not isinstance(candidate, dict):
@@ -972,6 +1038,9 @@ async def select_pages_smart(
                 }
             )
 
+        allowed_page_ids = set(candidate_id_set)
+        allowed_page_ids.update(project_structure_page_id_set)
+
         history_section = ""
         if history_context:
             history_section = f"CONVERSATION HISTORY:\n{escape_braces(history_context)}\n"
@@ -981,6 +1050,7 @@ async def select_pages_smart(
             viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
 
         prompt = SMART_PAGE_SELECTION_PROMPT.format(
+            project_structure=json.dumps(compact_project_structure, indent=2),
             page_candidates=json.dumps(condensed_candidates, indent=2),
             query=escape_braces(query),
             history_section=history_section,
@@ -1010,7 +1080,7 @@ async def select_pages_smart(
         def add_selected(page_id: str, relevance: str) -> None:
             if page_id in selected_seen:
                 return
-            if page_id not in candidate_id_set:
+            if page_id not in allowed_page_ids:
                 return
             selected_seen.add(page_id)
             selected_pages.append(
@@ -1044,6 +1114,10 @@ async def select_pages_smart(
         if not selected_pages and candidate_ids:
             for page_id in candidate_ids[:3]:
                 add_selected(page_id, "Strong match from search results.")
+
+        if not selected_pages and project_structure_page_ids:
+            for page_id in project_structure_page_ids[:3]:
+                add_selected(page_id, "Likely match from project structure.")
 
         selected_pages = selected_pages[:6]
         selected_page_ids = [item["page_id"] for item in selected_pages]
