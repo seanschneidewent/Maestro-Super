@@ -7,5 +7,6 @@ from app.services.providers.gemini import (
     explore_concept_with_vision,
     explore_concept_with_vision_streaming,
     run_agent_query,
+    select_pages_smart,
     select_pages_for_verification,
 )
