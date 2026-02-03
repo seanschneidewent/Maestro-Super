@@ -202,6 +202,12 @@ IMPORTANT:
 - verification_method must be one of: semantic_ref, region_crop, multi_pass_zoom.
 - verification_pass must be 1, 2, or 3 when verification_method != semantic_ref.
 - candidate_region_id should be set when the finding came from candidate_regions.
+- CRITICAL BBOX CONSTRAINT:
+  - Your findings MUST use bboxes that stay inside existing Brain Mode regions (candidate_regions, expansion_regions, or regions).
+  - Do NOT generate arbitrary bboxes outside region boundaries.
+  - Every finding with a bbox MUST include candidate_region_id (or region_id alias) to anchor it to Brain Mode structure.
+  - If content spans multiple regions, anchor the finding to the primary region that contains key evidence.
+  - If you cannot anchor a finding to an existing region, omit bbox and use semantic_refs only.
 - Include execution_summary pass counts when available:
   - pass_1: candidate-region crop inspections
   - pass_2: tighter cluster crop inspections
@@ -688,6 +694,40 @@ def _canonical_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _bbox_is_within(
+    inner: dict[str, float],
+    outer: dict[str, float],
+    *,
+    tolerance: float = 0.01,
+) -> bool:
+    return (
+        inner["x0"] >= (outer["x0"] - tolerance)
+        and inner["y0"] >= (outer["y0"] - tolerance)
+        and inner["x1"] <= (outer["x1"] + tolerance)
+        and inner["y1"] <= (outer["y1"] + tolerance)
+    )
+
+
+def _select_region_anchor(
+    bbox: dict[str, float],
+    regions: list[tuple[str, dict[str, float]]],
+) -> str | None:
+    containing: list[tuple[float, str]] = []
+    for region_id, region_bbox in regions:
+        if not _bbox_is_within(bbox, region_bbox):
+            continue
+        area = max(0.0, region_bbox["x1"] - region_bbox["x0"]) * max(
+            0.0,
+            region_bbox["y1"] - region_bbox["y0"],
+        )
+        containing.append((area, region_id))
+
+    if not containing:
+        return None
+    containing.sort(key=lambda item: (item[0], item[1]))
+    return containing[0][1]
+
+
 def _normalize_verification_method(raw_method: Any) -> str | None:
     if not isinstance(raw_method, str):
         return None
@@ -799,6 +839,7 @@ def normalize_vision_findings(
     - Ensures `page_id` maps to known selected pages (id or page-name aliases).
     - Normalizes bbox units to 0-1 (supports normalized, 0-1000, or pixel-ish coords).
     - Derives bbox from `semantic_refs` when explicit bbox is missing.
+    - Drops bbox overlays that cannot be anchored inside known Brain Mode regions.
     """
     if not isinstance(findings, list):
         return []
@@ -807,6 +848,8 @@ def normalize_vision_findings(
     page_name_by_id: dict[str, str] = {}
     page_size_by_id: dict[str, tuple[int, int]] = {}
     word_bbox_by_page: dict[str, dict[str, dict[str, float]]] = {}
+    region_bbox_by_page: dict[str, dict[str, dict[str, float]]] = {}
+    region_order_by_page: dict[str, list[tuple[str, dict[str, float]]]] = {}
 
     for page in pages:
         if not isinstance(page, dict):
@@ -834,6 +877,46 @@ def normalize_vision_findings(
         words = semantic_index.get("words")
         if not isinstance(words, list):
             words = []
+
+        region_bbox_map: dict[str, dict[str, float]] = {}
+        region_bbox_list: list[tuple[str, dict[str, float]]] = []
+        for source_key in ("candidate_regions", "expansion_regions", "regions"):
+            raw_regions = page.get(source_key)
+            if not isinstance(raw_regions, list):
+                continue
+
+            for idx, region in enumerate(raw_regions):
+                if not isinstance(region, dict):
+                    continue
+
+                bbox_corners = _to_bbox_corners(region.get("bbox"))
+                if not bbox_corners:
+                    continue
+
+                region_bbox = normalize_bbox(bbox_corners, width=width, height=height)
+                if region_bbox["x1"] <= region_bbox["x0"] or region_bbox["y1"] <= region_bbox["y0"]:
+                    continue
+
+                region_id = str(
+                    region.get("id")
+                    or region.get("region_id")
+                    or region.get("candidate_region_id")
+                    or region.get("regionId")
+                    or ""
+                ).strip()
+                if not region_id:
+                    region_index = region.get("regionIndex")
+                    fallback_suffix = region_index if region_index is not None else idx
+                    region_id = f"{source_key}:{fallback_suffix}"
+
+                if region_id in region_bbox_map:
+                    continue
+
+                region_bbox_map[region_id] = region_bbox
+                region_bbox_list.append((region_id, region_bbox))
+
+        region_bbox_by_page[page_id] = region_bbox_map
+        region_order_by_page[page_id] = region_bbox_list
 
         word_bbox_map: dict[str, dict[str, float]] = {}
         for word in words:
@@ -911,6 +994,36 @@ def normalize_vision_findings(
         ).strip()
         if verification_pass is not None and verification_method is None:
             verification_method = "multi_pass_zoom"
+
+        if normalized_bbox is not None:
+            region_bbox_map = region_bbox_by_page.get(page_id, {})
+            region_bbox_list = region_order_by_page.get(page_id, [])
+            if region_bbox_list:
+                anchor_id = candidate_region_id
+                anchor_bbox = region_bbox_map.get(anchor_id) if anchor_id else None
+                anchor_is_valid = anchor_bbox is not None and _bbox_is_within(normalized_bbox, anchor_bbox)
+
+                if not anchor_is_valid:
+                    inferred_anchor = _select_region_anchor(normalized_bbox, region_bbox_list)
+                    if inferred_anchor:
+                        if anchor_id and anchor_id != inferred_anchor:
+                            logger.warning(
+                                "Re-anchoring finding bbox to in-bounds region (page_id=%s, from=%s, to=%s).",
+                                page_id,
+                                anchor_id,
+                                inferred_anchor,
+                            )
+                        candidate_region_id = inferred_anchor
+                        anchor_is_valid = True
+                    else:
+                        logger.warning(
+                            "Dropping finding bbox outside all known region bounds (page_id=%s, requested_region=%s).",
+                            page_id,
+                            anchor_id or "none",
+                        )
+
+                if not anchor_is_valid:
+                    normalized_bbox = None
 
         output: dict[str, Any] = {
             "category": category,

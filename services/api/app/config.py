@@ -14,8 +14,8 @@ AGENT_QUERY_MODEL = "gemini-3-flash-preview"
 FAST_ROUTER_MODEL = "gemma-3-4b-it"
 FAST_RANKER_V2 = False
 FAST_SELECTOR_RERANK = False
-MED_MODE_REGIONS = False
-DEEP_MODE_VISION_V2 = False
+MED_MODE_REGIONS = True
+DEEP_MODE_VISION_V2 = True
 
 
 class Settings(BaseSettings):

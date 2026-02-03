@@ -95,3 +95,69 @@ def test_normalize_vision_findings_supports_xywh_bbox_dict() -> None:
     normalized = normalize_vision_findings(findings, pages)
     assert len(normalized) == 1
     assert normalized[0]["bbox"] == [0.1, 0.2, 0.4, 0.6]
+
+
+def test_normalize_vision_findings_drops_bbox_outside_known_regions() -> None:
+    pages = [
+        {
+            "page_id": "page-1",
+            "page_name": "A2.3",
+            "semantic_index": {
+                "image_width": 1000,
+                "image_height": 1000,
+                "words": [],
+            },
+            "candidate_regions": [
+                {
+                    "id": "region_001",
+                    "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.3, "y1": 0.3},
+                }
+            ],
+        }
+    ]
+    findings = [
+        {
+            "category": "detail",
+            "content": "Off-region callout",
+            "page_id": "page-1",
+            "bbox": [0.6, 0.6, 0.7, 0.7],
+            "candidate_region_id": "region_001",
+        }
+    ]
+
+    normalized = normalize_vision_findings(findings, pages)
+    assert len(normalized) == 1
+    assert "bbox" not in normalized[0]
+
+
+def test_normalize_vision_findings_infers_region_anchor_for_bbox() -> None:
+    pages = [
+        {
+            "page_id": "page-1",
+            "page_name": "A2.3",
+            "semantic_index": {
+                "image_width": 1000,
+                "image_height": 1000,
+                "words": [],
+            },
+            "candidate_regions": [
+                {
+                    "id": "region_001",
+                    "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.5, "y1": 0.5},
+                }
+            ],
+        }
+    ]
+    findings = [
+        {
+            "category": "detail",
+            "content": "Anchored inside candidate region",
+            "page_id": "page-1",
+            "bbox": [0.2, 0.2, 0.3, 0.3],
+        }
+    ]
+
+    normalized = normalize_vision_findings(findings, pages)
+    assert len(normalized) == 1
+    assert normalized[0]["bbox"] == [0.2, 0.2, 0.3, 0.3]
+    assert normalized[0]["candidate_region_id"] == "region_001"
