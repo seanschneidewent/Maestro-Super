@@ -1172,15 +1172,18 @@ def _score_med_region(
     phrase_terms = [term for term in phrase_terms if term]
 
     label_match = 0.0
+    # Use word-boundary matching to avoid "walk" matching "sidewalk"
+    title_words = set(title_norm.replace('-', ' ').replace('_', ' ').split()) if title_norm else set()
+    text_words = set(text_norm.replace('-', ' ').replace('_', ' ').split()) if text_norm else set()
     for term in phrase_terms:
         if not term:
             continue
         if term == title_norm:
             label_match = 1.0
             break
-        if term in title_norm:
+        if term in title_words:
             label_match = max(label_match, 0.9)
-        elif term in text_norm:
+        elif term in text_words:
             label_match = max(label_match, 0.5)
 
     similarity = _coerce_float(region.get("_similarity"), 0.0)
