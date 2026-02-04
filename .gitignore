@@ -41,6 +41,9 @@ uploads/
 # Supabase
 .supabase/
 
+# Debug traces (local dev)
+services/api/debug/
+
 # Claude Memory
 claude-memory/.env
 claude-memory/CONTEXT.md

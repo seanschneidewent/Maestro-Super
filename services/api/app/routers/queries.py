@@ -24,6 +24,7 @@ from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, Que
 from app.services.agent import run_agent_query
 from app.services.conversation_memory import fetch_conversation_history
 from app.services.usage import UsageService
+from app.services.debug_trace import write_debug_trace
 from app.services.search import search_pointers
 from app.services.tools import search_pages, list_project_pages
 
@@ -459,6 +460,27 @@ async def stream_query(
                     logger.info(f"Created {len(pages_data)} QueryPage records for query {query_id}")
             except Exception as e:
                 logger.warning(f"Failed to create QueryPage records: {e}")
+
+            # Write debug trace for local development
+            if settings.is_dev_mode:
+                try:
+                    write_debug_trace(
+                        query_text=data.query,
+                        mode=data.mode,
+                        trace=stored_trace,
+                        usage={
+                            "inputTokens": usage_input_tokens,
+                            "outputTokens": usage_output_tokens,
+                            "totalTokens": total_tokens,
+                        },
+                        response_text=response_text,
+                        display_title=display_title,
+                        pages_data=pages_data,
+                        query_id=query_id,
+                        project_id=str(project_id),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to write debug trace: {e}")
 
             # Track token usage
             if total_tokens > 0:
