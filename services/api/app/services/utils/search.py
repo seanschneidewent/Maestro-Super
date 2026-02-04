@@ -283,8 +283,10 @@ async def search_pages_and_regions(
 
             if similarity < similarity_threshold:
                 # Fallback: keyword match on label/type when embedding similarity is weak
+                # Use word-boundary matching to avoid "walk" matching "sidewalk"
                 haystack = f"{region.get('type', '')} {region.get('label', '')} {region.get('detail_number', '')}".lower()
-                if query_tokens and any(t in haystack for t in query_tokens):
+                haystack_words = set(haystack.replace('-', ' ').replace('_', ' ').split())
+                if query_tokens and any(t in haystack_words for t in query_tokens):
                     similarity = max(similarity, similarity_threshold)
 
             adjusted_similarity = similarity * page_boost
