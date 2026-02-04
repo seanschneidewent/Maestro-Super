@@ -52,6 +52,14 @@ const App: React.FC = () => {
   // Initialize auth - check session or sign in anonymously
   useEffect(() => {
     async function initAuth() {
+      // Dev mode bypass - skip Supabase auth entirely
+      if (import.meta.env.VITE_DEV_MODE === 'true') {
+        console.log('[DEV] Auth bypassed - going straight to USE mode');
+        setMode(AppMode.USE);
+        setCheckingAuth(false);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session) {
