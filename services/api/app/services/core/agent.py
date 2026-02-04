@@ -3667,6 +3667,7 @@ async def run_agent_query_deep(
     trace: list[dict] = []
     settings = get_settings()
     deep_v2_enabled = bool(getattr(settings, "deep_mode_vision_v2", False))
+    v3_agentic = bool(getattr(settings, "deep_mode_v3_agentic", False))
     deep_started_at = asyncio.get_running_loop().time()
 
     # 1) Project structure summary
@@ -3791,8 +3792,21 @@ async def run_agent_query_deep(
     if "note" in query_norm or "legend" in query_norm:
         preferred_page_types.append("notes")
 
+    # V3: Build search missions for Agentic Vision
+    search_mission: dict[str, Any] = {}
+    if v3_agentic:
+        from app.services.core.search_missions import build_search_missions
+
+        search_mission = build_search_missions(
+            query=query,
+            ordered_page_ids=ordered_page_ids,
+            page_map=page_map,
+            region_matches=region_matches,
+        )
+
+    # V2: Build verification plan with regions/budgets (skipped when V3 active)
     verification_plan: dict[str, Any] = {}
-    if deep_v2_enabled:
+    if deep_v2_enabled and not v3_agentic:
         verification_plan = _build_deep_verification_plan(
             query=query,
             ordered_page_ids=ordered_page_ids,
@@ -3827,6 +3841,18 @@ async def run_agent_query_deep(
         if not image_bytes:
             continue
 
+        if v3_agentic:
+            # V3: Just images + IDs — search mission carries the context
+            pages_for_vision.append(
+                {
+                    "page_id": str(page.id),
+                    "page_name": page.page_name,
+                    "image_bytes": image_bytes,
+                }
+            )
+            continue
+
+        # V2: Full payload with regions, semantic index, etc.
         raw_regions = page.regions if isinstance(page.regions, list) else []
         regions: list[dict[str, Any]] = []
         region_index_by_id: dict[str, int] = {}
@@ -3914,7 +3940,9 @@ async def run_agent_query_deep(
 
     vision_page_ids = [str(p.get("page_id")) for p in pages_for_vision if p.get("page_id")]
     tool_input = {"query": query, "page_ids": vision_page_ids}
-    if deep_v2_enabled:
+    if v3_agentic:
+        tool_input["mode"] = "v3_agentic"
+    elif deep_v2_enabled:
         tool_input["verification_mode"] = "v2"
     yield {"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input}
     trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input})
@@ -3922,24 +3950,61 @@ async def run_agent_query_deep(
     concept_result: dict[str, Any] = {}
     exploration_failed = False
     try:
-        async for event in explore_concept_with_vision_streaming(
-            query=query,
-            pages=pages_for_vision,
-            verification_plan=verification_payload,
-            history_context=history_context,
-            viewing_context=viewing_context_str,
-        ):
-            event_type = event.get("type")
-            if event_type == "thinking":
-                content = event.get("content")
-                if isinstance(content, str) and content:
-                    yield {"type": "thinking", "content": content}
-                    trace.append({"type": "thinking", "content": content})
-            elif event_type == "result":
-                data = event.get("data")
-                if isinstance(data, dict):
-                    concept_result = data
+        if v3_agentic:
+            # V3: Agentic Vision — model zooms/crops freely via code execution
+            from app.services.providers.gemini import explore_with_agentic_vision_streaming
+
+            async for event in explore_with_agentic_vision_streaming(
+                query=query,
+                pages=pages_for_vision,
+                search_mission=search_mission,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            ):
+                event_type = event.get("type")
+                if event_type == "thinking":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "thinking", "content": content}
+                        trace.append({"type": "thinking", "content": content})
+                elif event_type == "code":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "code_execution", "content": content}
+                        trace.append({"type": "code_execution", "content": content})
+                elif event_type == "code_result":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "code_result", "content": content}
+                        trace.append({"type": "code_result", "content": content})
+                elif event_type == "result":
+                    data = event.get("data")
+                    if isinstance(data, dict):
+                        concept_result = data
+        else:
+            # V2/V1: Existing vision exploration with verification plan
+            async for event in explore_concept_with_vision_streaming(
+                query=query,
+                pages=pages_for_vision,
+                verification_plan=verification_payload,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            ):
+                event_type = event.get("type")
+                if event_type == "thinking":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "thinking", "content": content}
+                        trace.append({"type": "thinking", "content": content})
+                elif event_type == "result":
+                    data = event.get("data")
+                    if isinstance(data, dict):
+                        concept_result = data
     except Exception as e:
+        if v3_agentic:
+            logger.exception("Deep V3 Agentic Vision failed: %s", e)
+            yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
+            return
         if not deep_v2_enabled:
             logger.exception("Deep vision exploration failed: %s", e)
             yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
@@ -3975,10 +4040,15 @@ async def run_agent_query_deep(
         if isinstance(concept_result.get("findings"), list)
         else []
     )
-    normalized_findings, downgraded_verified_count = _normalize_deep_findings_for_contract(
-        raw_findings,
-        enforce_verified_evidence=deep_v2_enabled,
-    )
+    if v3_agentic:
+        # V3: Findings are already normalized by explore_with_agentic_vision_streaming
+        normalized_findings = raw_findings
+        downgraded_verified_count = 0
+    else:
+        normalized_findings, downgraded_verified_count = _normalize_deep_findings_for_contract(
+            raw_findings,
+            enforce_verified_evidence=deep_v2_enabled,
+        )
     truncated_finding_count = max(0, len(normalized_findings) - DEEP_MAX_FINDINGS)
     if len(normalized_findings) > DEEP_MAX_FINDINGS:
         normalized_findings = normalized_findings[:DEEP_MAX_FINDINGS]
