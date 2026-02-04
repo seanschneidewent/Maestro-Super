@@ -15,6 +15,21 @@ from app.models import (  # noqa: F401
     UsageEvent,
 )
 
+# Load .env and .env.local for alembic CLI (pydantic-settings handles this for
+# the app, but alembic runs standalone and its get_url() uses os.getenv directly)
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+    _api_dir = Path(__file__).resolve().parent.parent
+    _env_file = _api_dir / ".env"
+    _env_local = _api_dir / ".env.local"
+    if _env_file.exists():
+        load_dotenv(_env_file, override=False)
+    if _env_local.exists():
+        load_dotenv(_env_local, override=True)
+except ImportError:
+    pass  # python-dotenv not installed; env vars must be set externally
+
 # This is the Alembic Config object
 config = context.config
 
