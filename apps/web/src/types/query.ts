@@ -69,11 +69,16 @@ export interface AgentToolResultEvent {
 }
 
 export interface AgentTraceStep {
-  type: 'reasoning' | 'tool_call' | 'tool_result' | 'thinking';
+  type: 'reasoning' | 'tool_call' | 'tool_result' | 'thinking' | 'code_execution' | 'code_result';
   content?: string;
   tool?: string;
   input?: Record<string, unknown>;
   result?: Record<string, unknown>;
+}
+
+export interface AnnotatedImage {
+  imageBase64: string;
+  mimeType: string;
 }
 
 export interface AgentDoneEvent {

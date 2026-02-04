@@ -9,7 +9,7 @@ import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
 import { TextHighlightOverlay } from './TextHighlightOverlay';
 import { FindingBboxOverlay } from './FindingBboxOverlay';
-import type { AgentTraceStep, AgentFinding, AgentCrossReference } from '../../types';
+import type { AgentTraceStep, AgentFinding, AgentCrossReference, AnnotatedImage } from '../../types';
 
 // Set up PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -23,7 +23,8 @@ export type FeedItem =
   | { type: 'pages'; id: string; pages: AgentSelectedPage[]; findings?: AgentFinding[]; timestamp: number }
   | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; mode?: 'fast' | 'med' | 'deep'; elapsedTime?: number; timestamp: number }
   | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; mode?: 'fast' | 'med' | 'deep'; timestamp: number }
-  | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number };
+  | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number }
+  | { type: 'annotated-images'; id: string; images: AnnotatedImage[]; timestamp: number };
 
 interface PageImage {
   dataUrl: string;
@@ -922,6 +923,54 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                     crossReferences={item.crossReferences}
                     mode={item.mode}
                   />
+                </div>
+              );
+
+            case 'annotated-images':
+              return (
+                <div key={item.id} className="py-2 mx-auto space-y-6" style={{ maxWidth: containerWidth }}>
+                  <div className="mx-auto w-full max-w-3xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">Deep Analysis</div>
+                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide bg-cyan-100 text-cyan-700 border-cyan-200">
+                        Agentic Vision
+                      </span>
+                    </div>
+                  </div>
+                  {item.images.map((img, idx) => (
+                    <div key={`annotated-${idx}`} className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
+                      <button
+                        onClick={() => {
+                          // Open in expanded modal-like view
+                          const dataUrl = `data:${img.mimeType};base64,${img.imageBase64}`;
+                          const win = window.open('', '_blank');
+                          if (win) {
+                            win.document.write(`
+                              <html>
+                                <head><title>Deep Analysis - Image ${idx + 1}</title>
+                                <style>body{margin:0;background:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;}
+                                img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head>
+                                <body><img src="${dataUrl}" /></body>
+                              </html>
+                            `);
+                          }
+                        }}
+                        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden w-full"
+                      >
+                        <img
+                          src={`data:${img.mimeType};base64,${img.imageBase64}`}
+                          alt={`Deep analysis finding ${idx + 1}`}
+                          className="w-full h-auto"
+                          draggable={false}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/10 transition-colors">
+                          <span className="opacity-0 hover:opacity-100 text-white text-sm font-medium bg-black/50 px-3 py-1 rounded-full transition-opacity">
+                            Tap to expand
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  ))}
                 </div>
               );
 

@@ -337,6 +337,16 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         });
       }
 
+      // Add annotated images from Agentic Vision if available
+      if (query.annotatedImages && query.annotatedImages.length > 0) {
+        newItems.push({
+          type: 'annotated-images',
+          id: crypto.randomUUID(),
+          images: query.annotatedImages,
+          timestamp: Date.now(),
+        });
+      }
+
       // Add structured findings if available
       if (query.conceptResponse && (query.conceptResponse.findings?.length || query.conceptResponse.gaps?.length)) {
         newItems.push({

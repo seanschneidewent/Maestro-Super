@@ -36,6 +36,7 @@ export {
   type AgentToolCallEvent,
   type AgentToolResultEvent,
   type AgentTraceStep,
+  type AnnotatedImage,
   type AgentDoneEvent,
   type AgentErrorEvent,
   type AgentEvent,
