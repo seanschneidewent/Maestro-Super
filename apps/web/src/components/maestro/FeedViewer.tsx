@@ -9,6 +9,8 @@ import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
 import { TextHighlightOverlay } from './TextHighlightOverlay';
 import { FindingBboxOverlay } from './FindingBboxOverlay';
+import { PageWorkspace } from './PageWorkspace';
+import type { WorkspacePage } from './WorkspacePageCard';
 import type { AgentTraceStep, AgentFinding, AgentCrossReference, AnnotatedImage } from '../../types';
 
 // Set up PDF.js worker
@@ -24,7 +26,8 @@ export type FeedItem =
   | { type: 'text'; id: string; content: string; trace: AgentTraceStep[]; mode?: 'fast' | 'med' | 'deep'; elapsedTime?: number; timestamp: number }
   | { type: 'findings'; id: string; conceptName?: string | null; summary?: string | null; findings: AgentFinding[]; gaps?: string[]; crossReferences?: AgentCrossReference[]; mode?: 'fast' | 'med' | 'deep'; timestamp: number }
   | { type: 'standalone-page'; id: string; page: AgentSelectedPage; timestamp: number }
-  | { type: 'annotated-images'; id: string; images: AnnotatedImage[]; timestamp: number };
+  | { type: 'annotated-images'; id: string; images: AnnotatedImage[]; timestamp: number }
+  | { type: 'workspace'; id: string; workspacePages: WorkspacePage[]; onTogglePin?: (pageId: string) => void; timestamp: number };
 
 interface PageImage {
   dataUrl: string;
@@ -154,6 +157,10 @@ interface FeedViewerProps {
   tutorialText?: string;
   tutorialStep?: string | null;
   onExpandedPageClose?: () => void;
+  /** Workspace pages to display in the vertical workspace (Phase 1). */
+  workspacePages?: WorkspacePage[];
+  /** Callback when a workspace page pin is toggled. */
+  onWorkspaceTogglePin?: (pageId: string) => void;
 }
 
 // Cache for rendered page images (shared with PlanViewer if needed)
@@ -672,6 +679,8 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   tutorialText,
   tutorialStep,
   onExpandedPageClose,
+  workspacePages,
+  onWorkspaceTogglePin,
 }) => {
   // Scroll container ref and auto-scroll logic
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -790,6 +799,14 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
       data-scroll-container
     >
       <div className="space-y-6 w-full" style={{ maxWidth: containerWidth }}>
+        {/* Workspace: vertical page cards when query found pages */}
+        {workspacePages && workspacePages.length > 0 && (
+          <PageWorkspace
+            pages={workspacePages}
+            onTogglePin={onWorkspaceTogglePin}
+          />
+        )}
+
         {feedItems.map((item) => {
           switch (item.type) {
             case 'user-query':
@@ -971,6 +988,16 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                       </button>
                     </div>
                   ))}
+                </div>
+              );
+
+            case 'workspace':
+              return (
+                <div key={item.id} className="py-2 mx-auto w-full" style={{ maxWidth: containerWidth }}>
+                  <PageWorkspace
+                    pages={item.workspacePages}
+                    onTogglePin={item.onTogglePin}
+                  />
                 </div>
               );
 

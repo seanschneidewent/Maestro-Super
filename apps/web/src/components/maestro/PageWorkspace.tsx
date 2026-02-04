@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { WorkspacePageCard, WorkspacePage, PageState, BoundingBox } from './WorkspacePageCard';
 import { Layers } from 'lucide-react';
 
@@ -30,7 +30,7 @@ interface PageWorkspaceProps {
  *
  * Features:
  * - Pinned pages are displayed first
- * - Each card shows page name, image with bbox overlays, state badge, and pin toggle
+ * - Each card shows page name, image with bbox + finding overlays, state badge, and pin toggle
  * - Mobile-first: single-column vertical scroll
  * - Blueprint-grid background inherited from parent layout
  */
@@ -73,11 +73,11 @@ export const PageWorkspace: React.FC<PageWorkspaceProps> = ({
       {/* Stats bar */}
       <div className="flex items-center justify-between mb-4 max-w-3xl mx-auto">
         <span className="text-xs uppercase tracking-wide text-slate-500">
-          Workspace · {sortedPages.length} page{sortedPages.length !== 1 ? 's' : ''}
+          Workspace {'\u00B7'} {sortedPages.length} page{sortedPages.length !== 1 ? 's' : ''}
         </span>
         {sortedPages.some((p) => p.pinned) && (
           <span className="text-xs text-cyan-600 font-medium">
-            📌 {sortedPages.filter((p) => p.pinned).length} pinned
+            {sortedPages.filter((p) => p.pinned).length} pinned
           </span>
         )}
       </div>

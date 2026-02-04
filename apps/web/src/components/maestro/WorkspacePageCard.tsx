@@ -1,5 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Pin, PinOff, Loader2 } from 'lucide-react';
+import { getPublicUrl } from '../../lib/storage';
+import { FindingBboxOverlay } from './FindingBboxOverlay';
+import type { AgentFinding } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -13,15 +16,19 @@ export interface BoundingBox {
   width: number;
   height: number;
   label?: string;
+  confidence?: string;
 }
 
 export interface WorkspacePage {
   pageId: string;
   pageName: string;
+  /** Supabase storage path or full URL */
   imageUrl: string;
   state: PageState;
   pinned: boolean;
   bboxes: BoundingBox[];
+  /** Agent findings with bbox data for overlay rendering */
+  findings: AgentFinding[];
 }
 
 // ---------------------------------------------------------------------------
@@ -30,17 +37,17 @@ export interface WorkspacePage {
 
 const STATE_BADGES: Record<PageState, { emoji: string; label: string; classes: string }> = {
   queued: {
-    emoji: '⏳',
+    emoji: '\u23F3',
     label: 'Queued',
     classes: 'bg-slate-100 text-slate-600 border-slate-200',
   },
   processing: {
-    emoji: '🔬',
+    emoji: '\uD83D\uDD2C',
     label: 'Processing',
     classes: 'bg-amber-100 text-amber-700 border-amber-200',
   },
   done: {
-    emoji: '✅',
+    emoji: '\u2705',
     label: 'Done',
     classes: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   },
@@ -48,6 +55,17 @@ const STATE_BADGES: Record<PageState, { emoji: string; label: string; classes: s
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Resolve a Supabase storage path to a public URL.
+ * If the value already looks like a full URL, return it as-is.
+ */
+function resolveImageUrl(imageUrl: string): string {
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:')) {
+    return imageUrl;
+  }
+  return getPublicUrl(imageUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +144,9 @@ interface WorkspacePageCardProps {
 /**
  * Individual page card for the Agent Workspace.
  *
- * Displays a page image with optional bbox overlays, a processing state badge,
- * and a pin/unpin toggle. Designed for vertical scroll within `<PageWorkspace>`.
+ * Displays a page image with optional bbox overlays (raw bboxes + agent findings),
+ * a processing state badge, and a pin/unpin toggle.
+ * Designed for vertical scroll within `<PageWorkspace>`.
  */
 export const WorkspacePageCard: React.FC<WorkspacePageCardProps> = ({
   page,
@@ -135,6 +154,14 @@ export const WorkspacePageCard: React.FC<WorkspacePageCardProps> = ({
 }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
+
+  const resolvedUrl = resolveImageUrl(page.imageUrl);
+
+  // Reset load state when image URL changes
+  useEffect(() => {
+    setImgLoaded(false);
+    setImgError(false);
+  }, [page.imageUrl]);
 
   const handleTogglePin = useCallback(() => {
     onTogglePin?.(page.pageId);
@@ -181,7 +208,7 @@ export const WorkspacePageCard: React.FC<WorkspacePageCardProps> = ({
         )}
 
         <img
-          src={page.imageUrl}
+          src={resolvedUrl}
           alt={page.pageName}
           onLoad={() => setImgLoaded(true)}
           onError={() => setImgError(true)}
@@ -189,9 +216,17 @@ export const WorkspacePageCard: React.FC<WorkspacePageCardProps> = ({
           draggable={false}
         />
 
-        {/* Bbox overlay — only rendered once the image has loaded */}
+        {/* Raw bbox overlay — only rendered once the image has loaded */}
         {imgLoaded && page.bboxes.length > 0 && (
           <BboxOverlay bboxes={page.bboxes} />
+        )}
+
+        {/* Agent finding bbox overlay (reuses existing FindingBboxOverlay component) */}
+        {imgLoaded && page.findings.length > 0 && (
+          <FindingBboxOverlay
+            findings={page.findings}
+            pageId={page.pageId}
+          />
         )}
 
         {/* Processing shimmer for queued/processing states */}
