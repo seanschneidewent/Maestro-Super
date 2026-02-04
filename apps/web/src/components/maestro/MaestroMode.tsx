@@ -24,6 +24,7 @@ import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentToastStack } from './AgentToastStack';
 import { ConversationIndicator } from './ConversationIndicator';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
+import { useWorkspacePages } from '../../hooks/useWorkspacePages';
 
 /**
  * Extract final answer text from the query trace.
@@ -285,6 +286,15 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   // Keyboard height for adjusting input position on iOS
   const keyboardHeight = useKeyboardHeight();
 
+  // Workspace pages state (vertical page workspace for query results)
+  const {
+    pages: workspacePages,
+    syncFromSelectedPages: syncWorkspacePages,
+    markAllDone: markWorkspaceDone,
+    togglePin: toggleWorkspacePin,
+    clear: clearWorkspace,
+  } = useWorkspacePages();
+
   // Callback when a query completes
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
@@ -320,6 +330,12 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
             : c
         ) ?? []
       );
+    }
+
+    // Sync workspace pages from query results and mark done
+    if (query.pages.length > 0) {
+      syncWorkspacePages(query.pages, query.conceptResponse?.findings);
+      markWorkspaceDone();
     }
 
     // Add pages and text response to feed (using callback data which has correct trace)
@@ -380,7 +396,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
     setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId]);
+  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId, syncWorkspacePages, markWorkspaceDone]);
 
   // Multi-query manager - supports concurrent background queries
   const {
@@ -410,6 +426,13 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const error = activeQuery?.error ?? null;
 
   // Toast management is now handled internally by useQueryManager
+
+  // Real-time workspace sync: update workspace pages as agent selects pages during streaming
+  useEffect(() => {
+    if (isStreaming && selectedPages.length > 0) {
+      syncWorkspacePages(selectedPages);
+    }
+  }, [isStreaming, selectedPages, syncWorkspacePages]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback(async (prompt: string) => {
@@ -805,6 +828,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     queryTraceCache.clear();
     setSelectedPageId(null);  // Reset viewer to empty state
     setFeedItems([]);  // Clear feed
+    clearWorkspace();  // Clear workspace pages
 
     // Tutorial: advance from 'new-session' step to 'cta'
     if (tutorialActive && currentStep === 'new-session') {
@@ -913,6 +937,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           currentTool={currentTool}
           tutorialStep={currentStep}
           onExpandedPageClose={handleExpandedPageClose}
+          workspacePages={workspacePages}
+          onWorkspaceTogglePin={toggleWorkspacePin}
         />
 
         {/* Query input bar - bottom, adjusts for keyboard on iOS */}

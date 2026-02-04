@@ -99,15 +99,20 @@ export function getRateLimitInfo(error: ApiError): {
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;
 
-  // Get auth token if user is logged in
-  const { data: { session } } = await supabase.auth.getSession();
-
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  if (session?.access_token) {
-    headers['Authorization'] = `Bearer ${session.access_token}`;
+  // Skip auth token in dev mode (backend uses DEV_USER_ID bypass)
+  if (import.meta.env.VITE_DEV_MODE !== 'true') {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+    } catch {
+      // Auth unavailable - continue without token
+    }
   }
 
   const response = await fetch(`${API_URL}${endpoint}`, {

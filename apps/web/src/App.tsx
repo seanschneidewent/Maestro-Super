@@ -52,6 +52,13 @@ const App: React.FC = () => {
   // Initialize auth - check session or sign in anonymously
   useEffect(() => {
     async function initAuth() {
+      // Dev mode bypass - skip Supabase auth entirely
+      if (import.meta.env.VITE_DEV_MODE === 'true') {
+        setMode(AppMode.USE);
+        setCheckingAuth(false);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session) {
@@ -75,8 +82,9 @@ const App: React.FC = () => {
     }
     initAuth();
 
-    // Listen for auth changes
+    // Listen for auth changes (skip in dev mode)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (import.meta.env.VITE_DEV_MODE === 'true') return; // Don't override dev mode
       if (event === 'SIGNED_IN' && session) {
         if (isAnonymousUser(session)) {
           // Don't switch to DEMO if we're transitioning to LOGIN
@@ -138,7 +146,6 @@ const App: React.FC = () => {
       try {
         setProjectLoading(true);
         setProjectError(null);
-
         const projects = await api.projects.list();
 
         if (projects.length > 0) {

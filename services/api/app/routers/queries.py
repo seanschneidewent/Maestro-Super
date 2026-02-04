@@ -22,8 +22,10 @@ from app.models.query_page import QueryPage
 from app.models.conversation import Conversation
 from app.schemas.query import AgentQueryRequest, QueryCreate, QueryResponse, QueryUpdate
 from app.services.agent import run_agent_query
+from app.services.core.big_maestro import run_maestro_query
 from app.services.conversation_memory import fetch_conversation_history
 from app.services.usage import UsageService
+from app.services.debug_trace import write_debug_trace
 from app.services.search import search_pointers
 from app.services.tools import search_pages, list_project_pages
 
@@ -275,6 +277,9 @@ async def stream_query(
     - data: {"type": "thinking", "content": "..."} - Gemini thinking chunks (vision stream)
     - data: {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - data: {"type": "tool_result", "tool": "...", "result": {...}} - Tool result
+    - data: {"type": "page_state", "page_id": "...", "state": "queued|processing|done"} - Page lifecycle (orchestrator)
+    - data: {"type": "response_update", "text": "...", "version": N} - Evolved response (orchestrator)
+    - data: {"type": "learning", "text": "...", "classification": "..."} - Learning events (orchestrator)
     - data: {"type": "done", "trace": [...], "usage": {...}, "displayTitle": "...", "conversationTitle": "..."} - Final event
     - data: {"type": "error", "message": "..."} - Error event
 
@@ -374,6 +379,12 @@ async def stream_query(
             }
             logger.info(f"User is viewing page {page.page_name} ({data.viewing_page_id})")
 
+    # Decide whether to use orchestrator.
+    # In production, require explicit MAESTRO_ORCHESTRATOR=true.
+    # Keep learning_mode as a local-dev override when DEV_USER_ID is set.
+    orchestrator_enabled = bool(getattr(settings, "maestro_orchestrator", False))
+    use_orchestrator = orchestrator_enabled or (data.learning_mode and settings.is_dev_mode)
+
     async def event_generator():
         total_tokens = 0
         usage_input_tokens = 0
@@ -385,14 +396,26 @@ async def stream_query(
         stored_trace = []
         pages_data: list[dict[str, Any]] = []
         try:
-            async for event in run_agent_query(
-                db,
-                project_id,
-                data.query,
-                history_messages=history_messages,
-                viewing_context=viewing_context,
-                mode=data.mode,
-            ):
+            if use_orchestrator:
+                event_source = run_maestro_query(
+                    db,
+                    project_id,
+                    str(user.id),
+                    data.query,
+                    history_messages=history_messages,
+                    viewing_context=viewing_context,
+                    mode=data.mode,
+                )
+            else:
+                event_source = run_agent_query(
+                    db,
+                    project_id,
+                    data.query,
+                    history_messages=history_messages,
+                    viewing_context=viewing_context,
+                    mode=data.mode,
+                )
+            async for event in event_source:
                 # Check if client disconnected - stop processing to save resources
                 if await request.is_disconnected():
                     logger.info(f"Client disconnected for query {query_id}, stopping stream")
@@ -459,6 +482,27 @@ async def stream_query(
                     logger.info(f"Created {len(pages_data)} QueryPage records for query {query_id}")
             except Exception as e:
                 logger.warning(f"Failed to create QueryPage records: {e}")
+
+            # Write debug trace for local development
+            if settings.is_dev_mode:
+                try:
+                    write_debug_trace(
+                        query_text=data.query,
+                        mode=data.mode,
+                        trace=stored_trace,
+                        usage={
+                            "inputTokens": usage_input_tokens,
+                            "outputTokens": usage_output_tokens,
+                            "totalTokens": total_tokens,
+                        },
+                        response_text=response_text,
+                        display_title=display_title,
+                        pages_data=pages_data,
+                        query_id=query_id,
+                        project_id=str(project_id),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to write debug trace: {e}")
 
             # Track token usage
             if total_tokens > 0:

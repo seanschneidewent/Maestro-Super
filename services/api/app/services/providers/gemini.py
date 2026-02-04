@@ -126,6 +126,7 @@ PROJECT STRUCTURE (disciplines and pages):
 CANDIDATE PAGES (sheet cards + compact context from RAG search):
 {page_candidates}
 
+{memory_section}
 {history_section}
 {viewing_section}
 USER QUERY: {query}
@@ -153,6 +154,7 @@ Return JSON:
 
 FAST_QUERY_ROUTER_PROMPT = '''You are a lightweight query router for construction drawing retrieval.
 
+{memory_section}
 {history_section}
 {viewing_section}
 USER QUERY: {query}
@@ -472,6 +474,7 @@ async def route_fast_query(
     query: str,
     history_context: str = "",
     viewing_context: str = "",
+    memory_context: str = "",
 ) -> dict[str, Any]:
     """
     Lightweight routing pass that shapes fast-mode retrieval before full selection.
@@ -497,8 +500,14 @@ async def route_fast_query(
         if viewing_context:
             viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
 
+        memory_section = ""
+        memory_context = (memory_context or "").strip()
+        if memory_context:
+            memory_section = f"PROJECT MEMORY:\n{escape_braces(memory_context)}\n"
+
         prompt = FAST_QUERY_ROUTER_PROMPT.format(
             query=escape_braces(query),
+            memory_section=memory_section,
             history_section=history_section,
             viewing_section=viewing_section,
         )
@@ -1431,6 +1440,7 @@ async def select_pages_smart(
     query: str,
     history_context: str = "",
     viewing_context: str = "",
+    memory_context: str = "",
 ) -> dict[str, Any]:
     """
     Smart Fast Mode page selection with Gemini Flash.
@@ -1623,10 +1633,15 @@ async def select_pages_smart(
         if viewing_context:
             viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}\n"
 
+        memory_section = ""
+        if memory_context:
+            memory_section = f"PROJECT MEMORY:\n{escape_braces(memory_context)}\n"
+
         prompt = SMART_PAGE_SELECTION_PROMPT.format(
             project_structure=json.dumps(compact_project_structure, indent=2),
             page_candidates=json.dumps(condensed_candidates, indent=2),
             query=escape_braces(query),
+            memory_section=memory_section,
             history_section=history_section,
             viewing_section=viewing_section,
         )
@@ -2504,7 +2519,7 @@ DEEP_AGENTIC_VISION_V4_PROMPT = '''You are Maestro, a construction plan speciali
 
 SEARCH MISSION:
 {search_mission}
-
+{memory_section}
 INSTRUCTIONS:
 1. Examine each page image for the search targets listed in the mission above.
 2. Use code execution to investigate:
@@ -2534,6 +2549,7 @@ async def explore_with_agentic_vision_v4(
     search_mission: dict[str, Any],
     history_context: str = "",
     viewing_context: str = "",
+    memory_context: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Deep Mode V4: Unconstrained Agentic Vision with Gemini 3 Flash.
@@ -2566,11 +2582,16 @@ async def explore_with_agentic_vision_v4(
         if viewing_context:
             viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}"
 
+        memory_section = ""
+        if memory_context:
+            memory_section = f"\nPROJECT MEMORY (learned preferences and corrections):\n{escape_braces(memory_context)}\n"
+
         # Format search mission as readable JSON
         mission_text = json.dumps(search_mission, indent=2)
 
         prompt = DEEP_AGENTIC_VISION_V4_PROMPT.format(
             search_mission=mission_text,
+            memory_section=memory_section,
             history_section=history_section,
             viewing_section=viewing_section,
         )

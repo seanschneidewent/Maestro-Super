@@ -3642,6 +3642,200 @@ async def run_agent_query_med(
     }
 
 
+async def run_deep_page_selection_pipeline(
+    db: Session,
+    project_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+    memory_context: str = "",
+) -> AsyncIterator[dict]:
+    """
+    Extracted Fast Mode pipeline for deep mode page selection.
+
+    Runs steps 1-4 of the deep query flow: project structure, query routing,
+    RAG search, smart page selection, and page persistence. Yields SSE events
+    as it progresses, then yields a final 'pipeline_complete' event with results.
+
+    Yields:
+        Standard tool_call/tool_result events during execution
+        {"type": "pipeline_complete", "ordered_page_ids": [...], "page_map": {...},
+         "selected_pages_payload": [...], "region_matches": {...},
+         "project_structure": {...}, "selection": {...},
+         "history_context": "...", "viewing_context_str": "...", "trace": [...]}
+    """
+    from app.services.providers.gemini import route_fast_query, select_pages_smart
+    from app.services.tools import get_project_structure_summary, search_pages, select_pages
+    from app.services.utils.search import search_pages_and_regions
+
+    trace: list[dict] = []
+
+    # 1) Project structure summary
+    yield {"type": "tool_call", "tool": "list_project_pages", "input": {}}
+    trace.append({"type": "tool_call", "tool": "list_project_pages", "input": {}})
+
+    project_structure: dict[str, Any] = {"disciplines": [], "total_pages": 0}
+    try:
+        structure_result = await get_project_structure_summary(db, project_id=project_id)
+        if isinstance(structure_result, dict):
+            project_structure = structure_result
+    except Exception as e:
+        logger.warning("Project structure summary failed: %s", e)
+
+    yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure}
+    trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
+
+    history_context = _build_history_context(history_messages)
+    viewing_context_str = _build_viewing_context_str(viewing_context)
+    region_matches: dict[str, list[dict[str, Any]]] = {}
+
+    # 2a) Lightweight query router
+    yield {"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}})
+    router: dict[str, Any] = {
+        "intent": "qa", "must_terms": [], "preferred_page_types": [],
+        "strict": False, "k": DEEP_PAGE_LIMIT,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    try:
+        router = await route_fast_query(
+            query=query, history_context=history_context, viewing_context=viewing_context_str,
+            memory_context=memory_context,
+        )
+    except Exception as e:
+        logger.warning("Pipeline route_fast_query failed, continuing with defaults: %s", e)
+
+    router_result = router if isinstance(router, dict) else {}
+    yield {"type": "tool_result", "tool": "route_fast_query", "result": router_result}
+    trace.append({"type": "tool_result", "tool": "route_fast_query", "result": router_result})
+
+    router_must_terms = _normalize_router_terms(router_result.get("must_terms"))
+    router_preferred_page_types = _normalize_router_page_types(router_result.get("preferred_page_types"))
+    search_query = _build_routed_search_query(query, router_must_terms, router_preferred_page_types)
+
+    # 2b) RAG region search
+    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": search_query, "source_query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": search_query, "source_query": query}})
+    try:
+        region_matches = await search_pages_and_regions(db, query=search_query, project_id=project_id)
+    except Exception as e:
+        logger.exception("Pipeline region search failed: %s", e)
+        yield {"type": "error", "message": f"Search failed: {str(e)}"}
+        return
+    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+    # 2c) Keyword search
+    yield {"type": "tool_call", "tool": "search_pages", "input": {"query": search_query, "source_query": query}}
+    trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": search_query, "source_query": query}})
+    page_results = await search_pages(db, query=search_query, project_id=project_id, limit=FAST_PAGE_LIMIT)
+    yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+    trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+    for page_result in page_results:
+        if isinstance(page_result, dict):
+            _hydrate_sheet_card(page_result)
+
+    # 2d) Merge candidate page IDs
+    region_page_ids = _dedupe_ids([pid for pid in region_matches.keys() if pid], limit=FAST_PAGE_LIMIT)
+    keyword_page_ids = _dedupe_ids(
+        [str(p.get("page_id")) for p in page_results if isinstance(p, dict) and p.get("page_id")],
+        limit=FAST_PAGE_LIMIT,
+    )
+    all_candidate_ids = _dedupe_ids([*region_page_ids, *keyword_page_ids])
+
+    # 2e) Smart page selection
+    yield {"type": "tool_call", "tool": "select_pages_smart", "input": {"query": query}}
+    trace.append({"type": "tool_call", "tool": "select_pages_smart", "input": {"query": query}})
+    selection: dict[str, Any] = {}
+    try:
+        selection = await select_pages_smart(
+            project_structure=project_structure, page_candidates=page_results,
+            query=query, history_context=history_context, viewing_context=viewing_context_str,
+            memory_context=memory_context,
+        )
+    except Exception as e:
+        logger.warning("Pipeline select_pages_smart failed, using search results: %s", e)
+
+    selection_result = selection if isinstance(selection, dict) else {}
+    yield {"type": "tool_result", "tool": "select_pages_smart", "result": selection_result}
+    trace.append({"type": "tool_result", "tool": "select_pages_smart", "result": selection_result})
+
+    selected_page_ids: list[str] = []
+    raw_selected_pages = selection.get("selected_pages")
+    if isinstance(raw_selected_pages, list):
+        for item in raw_selected_pages:
+            if isinstance(item, dict):
+                page_id = str(item.get("page_id") or "").strip()
+                if page_id:
+                    selected_page_ids.append(page_id)
+    if not selected_page_ids:
+        raw_page_ids = selection.get("page_ids")
+        if isinstance(raw_page_ids, list):
+            for item in raw_page_ids:
+                page_id = str(item).strip()
+                if page_id:
+                    selected_page_ids.append(page_id)
+
+    page_ids = _dedupe_ids([*selected_page_ids, *all_candidate_ids])
+
+    if not page_ids:
+        disciplines = project_structure.get("disciplines", [])
+        if isinstance(disciplines, list):
+            for discipline in disciplines:
+                pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                if not isinstance(pages, list):
+                    continue
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    page_id = page.get("page_id")
+                    if page_id and page_id not in page_ids:
+                        page_ids.append(page_id)
+                    if len(page_ids) >= DEEP_PAGE_LIMIT:
+                        break
+                if len(page_ids) >= DEEP_PAGE_LIMIT:
+                    break
+
+    if page_ids:
+        page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+
+    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
+    ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+
+    # 4) Select pages for persistence
+    selected_pages_payload: list[dict[str, Any]] = []
+    if ordered_page_ids:
+        yield {"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}}
+        trace.append({"type": "tool_call", "tool": "select_pages", "input": {"page_ids": ordered_page_ids}})
+        try:
+            result = await select_pages(db, page_ids=ordered_page_ids)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(by_alias=True, mode="json")
+            if isinstance(result, dict):
+                selected_pages_payload = result.get("pages") if isinstance(result.get("pages"), list) else []
+            yield {"type": "tool_result", "tool": "select_pages", "result": result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": result})
+        except Exception as e:
+            logger.error("select_pages failed: %s", e)
+            error_result = {"error": str(e)}
+            yield {"type": "tool_result", "tool": "select_pages", "result": error_result}
+            trace.append({"type": "tool_result", "tool": "select_pages", "result": error_result})
+
+    # Emit final pipeline result
+    yield {
+        "type": "pipeline_complete",
+        "ordered_page_ids": ordered_page_ids,
+        "page_map": page_map,
+        "selected_pages_payload": selected_pages_payload,
+        "region_matches": region_matches,
+        "project_structure": project_structure,
+        "selection": selection,
+        "history_context": history_context,
+        "viewing_context_str": viewing_context_str,
+        "trace": trace,
+    }
+
+
 async def run_agent_query_deep(
     db: Session,
     project_id: str,

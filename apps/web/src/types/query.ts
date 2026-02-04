@@ -99,13 +99,36 @@ export interface AgentErrorEvent {
   message: string;
 }
 
+export interface AgentPageStateEvent {
+  type: 'page_state';
+  page_id: string;
+  page_name?: string;
+  state: 'queued' | 'processing' | 'done';
+}
+
+export interface AgentResponseUpdateEvent {
+  type: 'response_update';
+  text: string;
+  version: number;
+}
+
+export interface AgentLearningEvent {
+  type: 'learning';
+  text: string;
+  classification?: string;
+  file_updated?: string;
+}
+
 export type AgentEvent =
   | AgentTextEvent
   | AgentThinkingEvent
   | AgentToolCallEvent
   | AgentToolResultEvent
   | AgentDoneEvent
-  | AgentErrorEvent;
+  | AgentErrorEvent
+  | AgentPageStateEvent
+  | AgentResponseUpdateEvent
+  | AgentLearningEvent;
 
 export interface AgentFinding {
   category: string;
