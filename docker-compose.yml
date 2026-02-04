@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: maestro-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: maestro
+      POSTGRES_DB: maestro
+    ports:
+      - "5432:5432"
+    volumes:
+      - maestro_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d maestro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  maestro_pgdata:
