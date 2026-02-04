@@ -379,8 +379,11 @@ async def stream_query(
             }
             logger.info(f"User is viewing page {page.page_name} ({data.viewing_page_id})")
 
-    # Decide whether to use orchestrator
-    use_orchestrator = data.learning_mode or bool(getattr(settings, "maestro_orchestrator", False))
+    # Decide whether to use orchestrator.
+    # In production, require explicit MAESTRO_ORCHESTRATOR=true.
+    # Keep learning_mode as a local-dev override when DEV_USER_ID is set.
+    orchestrator_enabled = bool(getattr(settings, "maestro_orchestrator", False))
+    use_orchestrator = orchestrator_enabled or (data.learning_mode and settings.is_dev_mode)
 
     async def event_generator():
         total_tokens = 0

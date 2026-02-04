@@ -54,7 +54,6 @@ const App: React.FC = () => {
     async function initAuth() {
       // Dev mode bypass - skip Supabase auth entirely
       if (import.meta.env.VITE_DEV_MODE === 'true') {
-        console.log('[DEV] Auth bypassed - going straight to USE mode');
         setMode(AppMode.USE);
         setCheckingAuth(false);
         return;
@@ -147,10 +146,7 @@ const App: React.FC = () => {
       try {
         setProjectLoading(true);
         setProjectError(null);
-        console.log('[DEV] loadProject starting, calling api.projects.list()...');
-
         const projects = await api.projects.list();
-        console.log('[DEV] loadProject got projects:', projects);
 
         if (projects.length > 0) {
           setProject(projects[0]);
