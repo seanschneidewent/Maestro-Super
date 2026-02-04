@@ -3655,7 +3655,12 @@ async def run_agent_query_deep(
     - Streams Gemini thinking while exploring regions with vision
     - Returns structured findings/cross-references/gaps
     """
-    from app.services.providers.gemini import explore_concept_with_vision_streaming
+    from app.services.providers.gemini import (
+        explore_concept_with_vision_streaming,
+        explore_with_agentic_vision_v4,
+        route_fast_query,
+        select_pages_smart,
+    )
     from app.services.tools import (
         get_project_structure_summary,
         resolve_highlights,
@@ -3666,6 +3671,7 @@ async def run_agent_query_deep(
 
     trace: list[dict] = []
     settings = get_settings()
+    v4_unconstrained = bool(getattr(settings, "deep_mode_v4_unconstrained", False))
     deep_v2_enabled = bool(getattr(settings, "deep_mode_vision_v2", False))
     v3_agentic = bool(getattr(settings, "deep_mode_v3_agentic", False))
     deep_started_at = asyncio.get_running_loop().time()
@@ -3685,54 +3691,203 @@ async def run_agent_query_deep(
     yield {"type": "tool_result", "tool": "list_project_pages", "result": project_structure}
     trace.append({"type": "tool_result", "tool": "list_project_pages", "result": project_structure})
 
-    # 2) RAG region search
-    yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
-    trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
+    history_context = _build_history_context(history_messages)
+    viewing_context_str = _build_viewing_context_str(viewing_context)
+    region_matches: dict[str, list[dict[str, Any]]] = {}
 
-    try:
-        region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
-    except Exception as e:
-        logger.exception("Region search failed: %s", e)
-        yield {"type": "error", "message": f"Search failed: {str(e)}"}
-        return
+    if v4_unconstrained:
+        # V4: Use Fast Mode's page selection pipeline for better page coverage
 
-    yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
-    trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+        # 2a) Lightweight query router
+        yield {"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}}
+        trace.append({"type": "tool_call", "tool": "route_fast_query", "input": {"query": query}})
+        router: dict[str, Any] = {
+            "intent": "qa",
+            "must_terms": [],
+            "preferred_page_types": [],
+            "strict": False,
+            "k": DEEP_PAGE_LIMIT,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+        try:
+            router = await route_fast_query(
+                query=query,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            )
+        except Exception as e:
+            logger.warning("V4 route_fast_query failed, continuing with defaults: %s", e)
 
-    page_ids = [pid for pid in region_matches.keys() if pid]
+        router_result = router if isinstance(router, dict) else {}
+        yield {"type": "tool_result", "tool": "route_fast_query", "result": router_result}
+        trace.append({"type": "tool_result", "tool": "route_fast_query", "result": router_result})
 
-    # 3) Fallback keyword search when region retrieval is empty
-    if not page_ids:
-        yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
-        trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
-        page_results = await search_pages(db, query=query, project_id=project_id, limit=DEEP_PAGE_LIMIT)
+        router_must_terms = _normalize_router_terms(router_result.get("must_terms"))
+        router_preferred_page_types = _normalize_router_page_types(router_result.get("preferred_page_types"))
+        search_query = _build_routed_search_query(query, router_must_terms, router_preferred_page_types)
+
+        # 2b) RAG region search with routed query
+        yield {
+            "type": "tool_call",
+            "tool": "search_pages_and_regions",
+            "input": {"query": search_query, "source_query": query},
+        }
+        trace.append({
+            "type": "tool_call",
+            "tool": "search_pages_and_regions",
+            "input": {"query": search_query, "source_query": query},
+        })
+
+        try:
+            region_matches = await search_pages_and_regions(db, query=search_query, project_id=project_id)
+        except Exception as e:
+            logger.exception("V4 region search failed: %s", e)
+            yield {"type": "error", "message": f"Search failed: {str(e)}"}
+            return
+
+        yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+        trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+        # 2c) Keyword search (always, not just as fallback)
+        yield {
+            "type": "tool_call",
+            "tool": "search_pages",
+            "input": {"query": search_query, "source_query": query},
+        }
+        trace.append({
+            "type": "tool_call",
+            "tool": "search_pages",
+            "input": {"query": search_query, "source_query": query},
+        })
+        page_results = await search_pages(db, query=search_query, project_id=project_id, limit=FAST_PAGE_LIMIT)
         yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
         trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
-        page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+        for page_result in page_results:
+            if isinstance(page_result, dict):
+                _hydrate_sheet_card(page_result)
 
-    if not page_ids:
-        disciplines = project_structure.get("disciplines", [])
-        if isinstance(disciplines, list):
-            for discipline in disciplines:
-                pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
-                if not isinstance(pages, list):
-                    continue
-                for page in pages:
-                    if not isinstance(page, dict):
+        # 2d) Merge all candidate page IDs
+        region_page_ids = _dedupe_ids([pid for pid in region_matches.keys() if pid], limit=FAST_PAGE_LIMIT)
+        keyword_page_ids = _dedupe_ids(
+            [str(p.get("page_id")) for p in page_results if isinstance(p, dict) and p.get("page_id")],
+            limit=FAST_PAGE_LIMIT,
+        )
+        all_candidate_ids = _dedupe_ids([*region_page_ids, *keyword_page_ids])
+
+        # 2e) Smart page selection with Gemini
+        yield {"type": "tool_call", "tool": "select_pages_smart", "input": {"query": query}}
+        trace.append({"type": "tool_call", "tool": "select_pages_smart", "input": {"query": query}})
+
+        selection: dict[str, Any] = {}
+        try:
+            selection = await select_pages_smart(
+                project_structure=project_structure,
+                page_candidates=page_results,
+                query=query,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            )
+        except Exception as e:
+            logger.warning("V4 select_pages_smart failed, using search results: %s", e)
+
+        selection_result = selection if isinstance(selection, dict) else {}
+        yield {"type": "tool_result", "tool": "select_pages_smart", "result": selection_result}
+        trace.append({"type": "tool_result", "tool": "select_pages_smart", "result": selection_result})
+
+        # Extract selected page IDs from smart selection
+        selected_page_ids: list[str] = []
+        raw_selected_pages = selection.get("selected_pages")
+        if isinstance(raw_selected_pages, list):
+            for item in raw_selected_pages:
+                if isinstance(item, dict):
+                    page_id = str(item.get("page_id") or "").strip()
+                    if page_id:
+                        selected_page_ids.append(page_id)
+        if not selected_page_ids:
+            raw_page_ids = selection.get("page_ids")
+            if isinstance(raw_page_ids, list):
+                for item in raw_page_ids:
+                    page_id = str(item).strip()
+                    if page_id:
+                        selected_page_ids.append(page_id)
+
+        # Merge: prefer smart selection, fall back to search results
+        page_ids = _dedupe_ids([*selected_page_ids, *all_candidate_ids])
+
+        if not page_ids:
+            disciplines = project_structure.get("disciplines", [])
+            if isinstance(disciplines, list):
+                for discipline in disciplines:
+                    pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                    if not isinstance(pages, list):
                         continue
-                    page_id = page.get("page_id")
-                    if page_id and page_id not in page_ids:
-                        page_ids.append(page_id)
+                    for page in pages:
+                        if not isinstance(page, dict):
+                            continue
+                        page_id = page.get("page_id")
+                        if page_id and page_id not in page_ids:
+                            page_ids.append(page_id)
+                        if len(page_ids) >= DEEP_PAGE_LIMIT:
+                            break
                     if len(page_ids) >= DEEP_PAGE_LIMIT:
                         break
-                if len(page_ids) >= DEEP_PAGE_LIMIT:
-                    break
 
-    if page_ids:
-        page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+        if page_ids:
+            page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
 
-    page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
-    ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+        page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
+        ordered_page_ids, page_map = _order_page_ids(db, page_ids)
+
+    else:
+        # V2/V3: Original RAG-only search
+        # 2) RAG region search
+        yield {"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}}
+        trace.append({"type": "tool_call", "tool": "search_pages_and_regions", "input": {"query": query}})
+
+        try:
+            region_matches = await search_pages_and_regions(db, query=query, project_id=project_id)
+        except Exception as e:
+            logger.exception("Region search failed: %s", e)
+            yield {"type": "error", "message": f"Search failed: {str(e)}"}
+            return
+
+        yield {"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches}
+        trace.append({"type": "tool_result", "tool": "search_pages_and_regions", "result": region_matches})
+
+        page_ids = [pid for pid in region_matches.keys() if pid]
+
+        # 3) Fallback keyword search when region retrieval is empty
+        if not page_ids:
+            yield {"type": "tool_call", "tool": "search_pages", "input": {"query": query}}
+            trace.append({"type": "tool_call", "tool": "search_pages", "input": {"query": query}})
+            page_results = await search_pages(db, query=query, project_id=project_id, limit=DEEP_PAGE_LIMIT)
+            yield {"type": "tool_result", "tool": "search_pages", "result": page_results}
+            trace.append({"type": "tool_result", "tool": "search_pages", "result": page_results})
+            page_ids = [p.get("page_id") for p in page_results if p.get("page_id")]
+
+        if not page_ids:
+            disciplines = project_structure.get("disciplines", [])
+            if isinstance(disciplines, list):
+                for discipline in disciplines:
+                    pages = discipline.get("pages", []) if isinstance(discipline, dict) else []
+                    if not isinstance(pages, list):
+                        continue
+                    for page in pages:
+                        if not isinstance(page, dict):
+                            continue
+                        page_id = page.get("page_id")
+                        if page_id and page_id not in page_ids:
+                            page_ids.append(page_id)
+                        if len(page_ids) >= DEEP_PAGE_LIMIT:
+                            break
+                    if len(page_ids) >= DEEP_PAGE_LIMIT:
+                        break
+
+        if page_ids:
+            page_ids = _expand_with_cross_reference_pages(db, project_id, page_ids)
+
+        page_ids = list(dict.fromkeys([pid for pid in page_ids if pid]))[:DEEP_PAGE_LIMIT]
+        ordered_page_ids, page_map = _order_page_ids(db, page_ids)
 
     selected_pages_payload: list[dict[str, Any]] = []
     # 4) Select pages so frontend and persistence stay consistent
@@ -3780,8 +3935,10 @@ async def run_agent_query_deep(
 
     # 5) Prepare deep vision page payload
     query_tokens = _extract_query_tokens(query)
-    history_context = _build_history_context(history_messages)
-    viewing_context_str = _build_viewing_context_str(viewing_context)
+    # history_context and viewing_context_str may already be set by V4 path above
+    if not v4_unconstrained:
+        history_context = _build_history_context(history_messages)
+        viewing_context_str = _build_viewing_context_str(viewing_context)
     must_terms = query_tokens[:4]
     preferred_page_types: list[str] = []
     query_norm = _normalize_text(query)
@@ -3792,9 +3949,9 @@ async def run_agent_query_deep(
     if "note" in query_norm or "legend" in query_norm:
         preferred_page_types.append("notes")
 
-    # V3: Build search missions for Agentic Vision
+    # V3/V4: Build search missions for Agentic Vision
     search_mission: dict[str, Any] = {}
-    if v3_agentic:
+    if v4_unconstrained or v3_agentic:
         from app.services.core.search_missions import build_search_missions
 
         search_mission = build_search_missions(
@@ -3804,9 +3961,9 @@ async def run_agent_query_deep(
             region_matches=region_matches,
         )
 
-    # V2: Build verification plan with regions/budgets (skipped when V3 active)
+    # V2: Build verification plan with regions/budgets (skipped when V3/V4 active)
     verification_plan: dict[str, Any] = {}
-    if deep_v2_enabled and not v3_agentic:
+    if deep_v2_enabled and not v3_agentic and not v4_unconstrained:
         verification_plan = _build_deep_verification_plan(
             query=query,
             ordered_page_ids=ordered_page_ids,
@@ -3841,8 +3998,8 @@ async def run_agent_query_deep(
         if not image_bytes:
             continue
 
-        if v3_agentic:
-            # V3: Just images + IDs — search mission carries the context
+        if v4_unconstrained or v3_agentic:
+            # V3/V4: Just images + IDs — search mission carries the context
             pages_for_vision.append(
                 {
                     "page_id": str(page.id),
@@ -3940,7 +4097,9 @@ async def run_agent_query_deep(
 
     vision_page_ids = [str(p.get("page_id")) for p in pages_for_vision if p.get("page_id")]
     tool_input = {"query": query, "page_ids": vision_page_ids}
-    if v3_agentic:
+    if v4_unconstrained:
+        tool_input["mode"] = "v4_unconstrained"
+    elif v3_agentic:
         tool_input["mode"] = "v3_agentic"
     elif deep_v2_enabled:
         tool_input["verification_mode"] = "v2"
@@ -3948,9 +4107,52 @@ async def run_agent_query_deep(
     trace.append({"type": "tool_call", "tool": "explore_concept_with_vision", "input": tool_input})
 
     concept_result: dict[str, Any] = {}
+    accumulated_response_text = ""
     exploration_failed = False
     try:
-        if v3_agentic:
+        if v4_unconstrained:
+            # V4: Unconstrained Agentic Vision — no JSON constraint, capture annotated images
+            async for event in explore_with_agentic_vision_v4(
+                query=query,
+                pages=pages_for_vision,
+                search_mission=search_mission,
+                history_context=history_context,
+                viewing_context=viewing_context_str,
+            ):
+                event_type = event.get("type")
+                if event_type == "thinking":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "thinking", "content": content}
+                        trace.append({"type": "thinking", "content": content})
+                elif event_type == "code":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "code_execution", "content": content}
+                        trace.append({"type": "code_execution", "content": content})
+                elif event_type == "code_result":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "code_result", "content": content}
+                        trace.append({"type": "code_result", "content": content})
+                elif event_type == "annotated_image":
+                    # NEW: pass annotated images through to frontend
+                    yield {
+                        "type": "annotated_image",
+                        "image_base64": event.get("image_base64"),
+                        "mime_type": event.get("mime_type", "image/png"),
+                    }
+                    trace.append({"type": "annotated_image"})
+                elif event_type == "text":
+                    content = event.get("content")
+                    if isinstance(content, str) and content:
+                        accumulated_response_text += content
+                elif event_type == "result":
+                    data = event.get("data")
+                    if isinstance(data, dict):
+                        concept_result = data
+
+        elif v3_agentic:
             # V3: Agentic Vision — model zooms/crops freely via code execution
             from app.services.providers.gemini import explore_with_agentic_vision_streaming
 
@@ -4001,6 +4203,10 @@ async def run_agent_query_deep(
                     if isinstance(data, dict):
                         concept_result = data
     except Exception as e:
+        if v4_unconstrained:
+            logger.exception("Deep V4 Unconstrained Agentic Vision failed: %s", e)
+            yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
+            return
         if v3_agentic:
             logger.exception("Deep V3 Agentic Vision failed: %s", e)
             yield {"type": "error", "message": f"Deep analysis failed: {str(e)}"}
@@ -4040,7 +4246,11 @@ async def run_agent_query_deep(
         if isinstance(concept_result.get("findings"), list)
         else []
     )
-    if v3_agentic:
+    if v4_unconstrained:
+        # V4: No structured findings — findings come as annotated images
+        normalized_findings = []
+        downgraded_verified_count = 0
+    elif v3_agentic:
         # V3: Findings are already normalized by explore_with_agentic_vision_streaming
         normalized_findings = raw_findings
         downgraded_verified_count = 0
@@ -4196,12 +4406,10 @@ async def run_agent_query_deep(
     yield {"type": "tool_result", "tool": "deep_mode_trace", "result": deep_mode_trace_payload}
     trace.append({"type": "tool_result", "tool": "deep_mode_trace", "result": deep_mode_trace_payload})
 
-    response_text = concept_result.get("response")
-    if not isinstance(response_text, str) or not response_text.strip():
-        summary = concept_result.get("summary")
-        if isinstance(summary, str) and summary.strip():
-            response_text = summary.strip()
-        else:
+    if v4_unconstrained:
+        # V4: Response text comes from accumulated text events or concept_result
+        response_text = accumulated_response_text or concept_result.get("response", "")
+        if not isinstance(response_text, str) or not response_text.strip():
             top_names = [
                 page_map[pid].page_name
                 for pid in ordered_page_ids[:3]
@@ -4212,37 +4420,80 @@ async def run_agent_query_deep(
             else:
                 response_text = "Deep analysis complete."
 
-    yield {"type": "text", "content": response_text}
-    trace.append({"type": "reasoning", "content": response_text})
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
 
-    concept_name = concept_result.get("concept_name")
-    if not isinstance(concept_name, str):
-        concept_name = None
-    summary = concept_result.get("summary")
-    if not isinstance(summary, str):
-        summary = None
-    findings = normalized_findings
-    cross_references = concept_result.get("cross_references")
-    if not isinstance(cross_references, list):
-        cross_references = concept_result.get("crossReferences") if isinstance(concept_result.get("crossReferences"), list) else []
-    gaps = concept_result.get("gaps") if isinstance(concept_result.get("gaps"), list) else []
+        tokens = _extract_query_tokens(query)
+        display_title = " ".join(tokens[:3]).title() if tokens else "Query"
+        # Use selection title if available from V4 smart selection
+        if isinstance(selection, dict):
+            sel_title = str(selection.get("chat_title") or "").strip()
+            if sel_title:
+                display_title = sel_title
 
-    tokens = _extract_query_tokens(query)
-    display_title = concept_name or (" ".join(tokens[:3]).title() if tokens else "Query")
+        gaps = concept_result.get("gaps") if isinstance(concept_result.get("gaps"), list) else []
 
-    yield {
-        "type": "done",
-        "trace": trace,
-        "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
-        "displayTitle": display_title,
-        "conversationTitle": display_title,
-        "highlights": [],
-        "conceptName": concept_name,
-        "summary": summary,
-        "findings": findings,
-        "crossReferences": cross_references,
-        "gaps": gaps,
-    }
+        yield {
+            "type": "done",
+            "trace": trace,
+            "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
+            "displayTitle": display_title,
+            "conversationTitle": display_title,
+            "highlights": [],
+            "conceptName": None,
+            "summary": None,
+            "findings": [],
+            "crossReferences": [],
+            "gaps": gaps,
+        }
+    else:
+        response_text = concept_result.get("response")
+        if not isinstance(response_text, str) or not response_text.strip():
+            summary = concept_result.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                response_text = summary.strip()
+            else:
+                top_names = [
+                    page_map[pid].page_name
+                    for pid in ordered_page_ids[:3]
+                    if pid in page_map and page_map[pid].page_name
+                ]
+                if top_names:
+                    response_text = f"I ran a deep review on {', '.join(top_names)}."
+                else:
+                    response_text = "Deep analysis complete."
+
+        yield {"type": "text", "content": response_text}
+        trace.append({"type": "reasoning", "content": response_text})
+
+        concept_name = concept_result.get("concept_name")
+        if not isinstance(concept_name, str):
+            concept_name = None
+        summary = concept_result.get("summary")
+        if not isinstance(summary, str):
+            summary = None
+        findings = normalized_findings
+        cross_references = concept_result.get("cross_references")
+        if not isinstance(cross_references, list):
+            cross_references = concept_result.get("crossReferences") if isinstance(concept_result.get("crossReferences"), list) else []
+        gaps = concept_result.get("gaps") if isinstance(concept_result.get("gaps"), list) else []
+
+        tokens = _extract_query_tokens(query)
+        display_title = concept_name or (" ".join(tokens[:3]).title() if tokens else "Query")
+
+        yield {
+            "type": "done",
+            "trace": trace,
+            "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
+            "displayTitle": display_title,
+            "conversationTitle": display_title,
+            "highlights": [],
+            "conceptName": concept_name,
+            "summary": summary,
+            "findings": findings,
+            "crossReferences": cross_references,
+            "gaps": gaps,
+        }
 
 
 async def run_agent_query_gemini(
