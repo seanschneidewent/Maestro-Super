@@ -83,8 +83,9 @@ const App: React.FC = () => {
     }
     initAuth();
 
-    // Listen for auth changes
+    // Listen for auth changes (skip in dev mode)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (import.meta.env.VITE_DEV_MODE === 'true') return; // Don't override dev mode
       if (event === 'SIGNED_IN' && session) {
         if (isAnonymousUser(session)) {
           // Don't switch to DEMO if we're transitioning to LOGIN
@@ -146,8 +147,10 @@ const App: React.FC = () => {
       try {
         setProjectLoading(true);
         setProjectError(null);
+        console.log('[DEV] loadProject starting, calling api.projects.list()...');
 
         const projects = await api.projects.list();
+        console.log('[DEV] loadProject got projects:', projects);
 
         if (projects.length > 0) {
           setProject(projects[0]);
