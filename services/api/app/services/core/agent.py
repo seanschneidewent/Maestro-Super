@@ -3648,6 +3648,7 @@ async def run_deep_page_selection_pipeline(
     query: str,
     history_messages: list[dict[str, Any]] | None = None,
     viewing_context: dict[str, Any] | None = None,
+    memory_context: str = "",
 ) -> AsyncIterator[dict]:
     """
     Extracted Fast Mode pipeline for deep mode page selection.
@@ -3699,6 +3700,7 @@ async def run_deep_page_selection_pipeline(
     try:
         router = await route_fast_query(
             query=query, history_context=history_context, viewing_context=viewing_context_str,
+            memory_context=memory_context,
         )
     except Exception as e:
         logger.warning("Pipeline route_fast_query failed, continuing with defaults: %s", e)
@@ -3749,6 +3751,7 @@ async def run_deep_page_selection_pipeline(
         selection = await select_pages_smart(
             project_structure=project_structure, page_candidates=page_results,
             query=query, history_context=history_context, viewing_context=viewing_context_str,
+            memory_context=memory_context,
         )
     except Exception as e:
         logger.warning("Pipeline select_pages_smart failed, using search results: %s", e)

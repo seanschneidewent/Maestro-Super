@@ -534,6 +534,7 @@ async def run_deep_agent_for_page(
             search_mission=per_page_mission,
             history_context=history_context,
             viewing_context=viewing_context,
+            memory_context=memory_context,
         ):
             event_type = event.get("type")
             if event_type == "thinking":
@@ -687,6 +688,7 @@ async def run_maestro_query(
     pipeline_result = None
     async for event in run_deep_page_selection_pipeline(
         db, project_id, query, history_messages, viewing_context,
+        memory_context=memory_context,
     ):
         if event.get("type") == "pipeline_complete":
             pipeline_result = event
