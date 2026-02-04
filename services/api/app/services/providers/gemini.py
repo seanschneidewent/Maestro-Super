@@ -2129,3 +2129,367 @@ Return JSON:
             "references": [],
             "text_spans": [],
         }
+
+
+# ---------------------------------------------------------------------------
+# Deep Mode V3 — Agentic Vision with Gemini 3 Flash
+# ---------------------------------------------------------------------------
+
+DEEP_AGENTIC_VISION_PROMPT = '''You are Maestro, a construction plan specialist. You have code execution enabled with Python.
+
+You are inspecting construction drawing pages to find specific information for a superintendent.
+
+SEARCH MISSION:
+{search_mission}
+
+YOUR PROCESS:
+1. Scan each page image for the search targets listed in the mission
+2. When you spot a promising area, write Python code to crop and zoom into it
+3. Examine the cropped region closely — read exact text, dimensions, specs, labels
+4. If details are still unclear or too small, crop even tighter and examine again
+5. Keep drilling until you can read the exact text or confirm it's not there
+6. Report every finding with the precise bounding box where you found it
+
+RULES:
+- Always verify by zooming. Never guess text you can't clearly read.
+- Each crop should be purposeful — zoom into where the information likely is.
+- If a page has nothing relevant, say so explicitly in gaps. Don't force findings.
+- Bounding boxes must be normalized 0-1 coordinates [x0, y0, x1, y1] relative to the full page image.
+- source_text must be the EXACT text you read from the drawing, not a paraphrase.
+- For each finding, page_id must match exactly one page_id from the search mission.
+
+{history_section}
+{viewing_section}
+
+PAGE IMAGES:
+Images are provided in the same order as the search mission pages. Each image is labeled with its page name and ID.
+
+Return JSON:
+{{{{
+  "findings": [
+    {{{{
+      "page_id": "exact page_id from search mission",
+      "category": "location|dimensions|electrical|schedule|spec|detail|note|equipment",
+      "content": "Human-readable description of what you found",
+      "source_text": "Exact text read from the document",
+      "bbox": [x0, y0, x1, y1],
+      "confidence": "high|medium|low",
+      "drill_depth": 1
+    }}}}
+  ],
+  "gaps": ["Things you looked for but could not find"],
+  "response": "Conversational summary for the superintendent — be brief, direct, helpful"
+}}}}'''
+
+
+def _normalize_bbox_v3(bbox: Any) -> list[float] | None:
+    """
+    Normalize a bbox to [x0, y0, x1, y1] in 0-1 range.
+
+    Agentic Vision returns bboxes in various formats since the model
+    writes its own code. Handle them all gracefully.
+    """
+    coords: list[float] | None = None
+
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        try:
+            coords = [float(v) for v in bbox]
+        except (TypeError, ValueError):
+            return None
+    elif isinstance(bbox, dict):
+        if all(k in bbox for k in ("x0", "y0", "x1", "y1")):
+            coords = [
+                _coerce_float(bbox["x0"]),
+                _coerce_float(bbox["y0"]),
+                _coerce_float(bbox["x1"]),
+                _coerce_float(bbox["y1"]),
+            ]
+        elif all(k in bbox for k in ("left", "top", "right", "bottom")):
+            coords = [
+                _coerce_float(bbox["left"]),
+                _coerce_float(bbox["top"]),
+                _coerce_float(bbox["right"]),
+                _coerce_float(bbox["bottom"]),
+            ]
+        elif all(k in bbox for k in ("x", "y", "width", "height")):
+            x = _coerce_float(bbox["x"])
+            y = _coerce_float(bbox["y"])
+            coords = [x, y, x + _coerce_float(bbox["width"]), y + _coerce_float(bbox["height"])]
+        else:
+            return None
+    else:
+        return None
+
+    if coords is None:
+        return None
+
+    # Auto-detect coordinate space
+    max_val = max(abs(v) for v in coords) if coords else 0
+    if max_val > 1.0 and max_val <= 1000.0:
+        coords = [v / 1000.0 for v in coords]
+
+    # Ensure x0 < x1, y0 < y1
+    if coords[2] < coords[0]:
+        coords[0], coords[2] = coords[2], coords[0]
+    if coords[3] < coords[1]:
+        coords[1], coords[3] = coords[3], coords[1]
+
+    # Clamp to 0-1
+    coords = [max(0.0, min(1.0, v)) for v in coords]
+
+    # Reject degenerate bboxes
+    if coords[2] <= coords[0] or coords[3] <= coords[1]:
+        return None
+
+    return coords
+
+
+def normalize_v3_findings(
+    findings: Any,
+    page_id_set: set[str],
+    page_alias_map: dict[str, str],
+) -> list[dict[str, Any]]:
+    """
+    Normalize findings from Agentic Vision V3 response.
+
+    Simpler than V2 — no region anchoring needed.
+    Just validate page_ids, normalize bboxes, and pass through.
+    """
+    if not isinstance(findings, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+
+        # Resolve page_id
+        raw_page = str(finding.get("page_id") or "").strip()
+        page_id = page_alias_map.get(raw_page.casefold(), raw_page)
+        if page_id not in page_id_set:
+            resolved = page_alias_map.get(raw_page.casefold())
+            if resolved:
+                page_id = resolved
+            else:
+                logger.warning("V3 finding references unknown page_id: %s", raw_page)
+                continue
+
+        # Normalize bbox
+        bbox = _normalize_bbox_v3(finding.get("bbox"))
+
+        # Build normalized finding
+        content = str(finding.get("content") or "").strip()
+        if not content:
+            continue
+
+        output: dict[str, Any] = {
+            "page_id": page_id,
+            "category": str(finding.get("category") or "").strip(),
+            "content": content,
+            "confidence": str(finding.get("confidence") or "medium").strip(),
+        }
+
+        source_text = finding.get("source_text")
+        if isinstance(source_text, str) and source_text.strip():
+            output["source_text"] = source_text.strip()
+
+        if bbox is not None:
+            output["bbox"] = bbox
+
+        drill_depth = finding.get("drill_depth")
+        if isinstance(drill_depth, (int, float)):
+            output["drill_depth"] = int(drill_depth)
+
+        normalized.append(output)
+
+    return normalized
+
+
+async def explore_with_agentic_vision_streaming(
+    query: str,
+    pages: list[dict[str, Any]],
+    search_mission: dict[str, Any],
+    history_context: str = "",
+    viewing_context: str = "",
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Deep Mode V3: Agentic Vision with Gemini 3 Flash.
+
+    Streams thinking text and code execution events, then yields final result.
+    The model uses code execution to zoom/crop/inspect freely.
+
+    Args:
+        query: User's question
+        pages: List of page dicts with image_bytes and page_id/page_name
+        search_mission: Structured search mission from build_search_missions()
+        history_context: Formatted conversation history
+        viewing_context: Current page viewing context
+
+    Yields:
+        {"type": "thinking", "content": "..."} for thought chunks
+        {"type": "code", "content": "..."} for code the model wrote
+        {"type": "code_result", "content": "..."} for execution output
+        {"type": "result", "data": {...}} once final JSON is parsed
+    """
+    try:
+        client = _get_gemini_client()
+
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        history_section = ""
+        if history_context:
+            truncated = history_context[-1000:]
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(truncated)}"
+
+        viewing_section = ""
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}"
+
+        # Format search mission as readable JSON
+        mission_text = json.dumps(search_mission, indent=2)
+
+        prompt = DEEP_AGENTIC_VISION_PROMPT.format(
+            search_mission=mission_text,
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        # Build content parts: images first, then prompt
+        parts: list[types.Part] = []
+        for page in pages:
+            image_bytes = page.get("image_bytes")
+            if not image_bytes:
+                continue
+            page_label = f"PAGE IMAGE: {page.get('page_name')} ({page.get('page_id')})"
+            parts.append(types.Part.from_text(text=page_label))
+            parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+
+        parts.append(types.Part.from_text(text=prompt))
+
+        # Configure: Code Execution + Thinking (required for Agentic Vision)
+        try:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution)
+        except Exception:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution())
+
+        config_kwargs: dict[str, Any] = {
+            "response_mime_type": "application/json",
+            "tools": [code_exec_tool],
+            "media_resolution": "media_resolution_high",
+            "temperature": 0,
+        }
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_level="HIGH",
+                include_thoughts=True,
+            )
+        except Exception:
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_level="HIGH"
+                )
+            except Exception:
+                pass
+
+        # Stream the response
+        settings = get_settings()
+        model = settings.brain_mode_model  # gemini-3-flash-preview
+
+        stream = client.models.generate_content_stream(
+            model=model,
+            contents=[types.Content(parts=parts)],
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+        accumulated_text = ""
+        usage_metadata = None
+
+        for chunk in stream:
+            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                usage_metadata = chunk.usage_metadata
+
+            candidates = getattr(chunk, "candidates", None) or []
+            if not candidates:
+                continue
+
+            content = getattr(candidates[0], "content", None)
+            if not content:
+                continue
+
+            for part in getattr(content, "parts", []) or []:
+                # Thinking text
+                if getattr(part, "thought", False):
+                    text = getattr(part, "text", None)
+                    if text:
+                        yield {"type": "thinking", "content": text}
+                    continue
+
+                # Regular text (JSON response)
+                text = getattr(part, "text", None)
+                if text:
+                    accumulated_text += text
+                    continue
+
+                # Code execution — model-generated code
+                exec_code = getattr(part, "executable_code", None)
+                if exec_code:
+                    code = getattr(exec_code, "code", "")
+                    if code:
+                        yield {"type": "code", "content": code}
+                    continue
+
+                # Code execution — result
+                exec_result = getattr(part, "code_execution_result", None)
+                if exec_result:
+                    output = getattr(exec_result, "output", "")
+                    if output:
+                        yield {"type": "code_result", "content": output}
+                    continue
+
+        # Parse final JSON response
+        result = extract_json_response(accumulated_text)
+
+        # Build page ID resolution maps
+        page_id_set: set[str] = set()
+        page_alias_map: dict[str, str] = {}
+        for page in pages:
+            pid = str(page.get("page_id") or "").strip()
+            pname = str(page.get("page_name") or "").strip()
+            if pid:
+                page_id_set.add(pid)
+                page_alias_map[pid.casefold()] = pid
+                if pname:
+                    page_alias_map[pname.casefold()] = pid
+
+        # Normalize findings
+        findings = normalize_v3_findings(
+            result.get("findings"),
+            page_id_set,
+            page_alias_map,
+        )
+
+        input_tokens = 0
+        output_tokens = 0
+        if usage_metadata:
+            input_tokens = getattr(usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = (
+                getattr(usage_metadata, "candidates_token_count", 0) or 0
+            )
+
+        yield {
+            "type": "result",
+            "data": {
+                "findings": findings,
+                "gaps": result.get("gaps") or [],
+                "response": result.get("response") or "",
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            },
+        }
+
+    except Exception as e:
+        logger.error("Agentic Vision V3 exploration failed: %s", e)
+        raise
