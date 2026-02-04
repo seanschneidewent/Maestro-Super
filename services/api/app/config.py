@@ -18,6 +18,7 @@ MED_MODE_REGIONS = True
 DEEP_MODE_VISION_V2 = True
 DEEP_MODE_V3_AGENTIC = True
 DEEP_MODE_V4_UNCONSTRAINED = True
+MAESTRO_ORCHESTRATOR = False
 
 
 class Settings(BaseSettings):
@@ -64,6 +65,7 @@ class Settings(BaseSettings):
     deep_mode_vision_v2: bool = DEEP_MODE_VISION_V2
     deep_mode_v3_agentic: bool = DEEP_MODE_V3_AGENTIC
     deep_mode_v4_unconstrained: bool = DEEP_MODE_V4_UNCONSTRAINED
+    maestro_orchestrator: bool = MAESTRO_ORCHESTRATOR
 
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production

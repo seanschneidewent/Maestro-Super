@@ -15,6 +15,7 @@ from .conversation import Conversation
 from .usage_event import UsageEvent
 from .user_usage import UserUsage
 from .processing_job import ProcessingJob
+from .project_memory import ProjectMemoryFile, LearningEvent
 
 __all__ = [
     # Event type constants
@@ -34,4 +35,6 @@ __all__ = [
     "UsageEvent",
     "UserUsage",
     "ProcessingJob",
+    "ProjectMemoryFile",
+    "LearningEvent",
 ]
