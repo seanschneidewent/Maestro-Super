@@ -167,6 +167,21 @@ function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): 
         }
         i++;
       }
+    } else if (step.type === 'code_execution') {
+      const content = step.content?.trim() || '';
+      if (content.length > 0) {
+        const truncated = content.length > 80 ? content.slice(0, 80) + '...' : content;
+        actions.push({
+          type: 'action',
+          text: `🔍 ${truncated}`,
+          isComplete: true,
+          expandedContent: content.length > 80 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'code_result') {
+      // Code execution results are part of the investigation - skip in display
+      i++;
     } else if (step.type === 'tool_result') {
       // Orphan result without call (shouldn't happen, but handle it)
       i++;

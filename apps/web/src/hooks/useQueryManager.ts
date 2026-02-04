@@ -14,7 +14,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding } from '../types'
+import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding, AnnotatedImage } from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 import { useAgentToast } from '../contexts/AgentToastContext'
 
@@ -58,6 +58,7 @@ export interface CompletedQuery {
   conversationTitle: string | null
   pages: AgentSelectedPage[]
   finalAnswer: string
+  annotatedImages: AnnotatedImage[]
   trace: AgentTraceStep[]
   elapsedTime: number
   conceptResponse?: AgentConceptResponse
@@ -85,6 +86,7 @@ export interface QueryState {
   startTime: number
   response: FieldResponse | null
   conceptResponse?: AgentConceptResponse
+  annotatedImages: AnnotatedImage[]
 }
 
 interface UseQueryManagerOptions {
@@ -228,6 +230,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       reasoning: [] as string[],
       trace: [] as AgentTraceStep[],
       selectedPages: [] as AgentSelectedPage[],
+      annotatedImages: [] as AnnotatedImage[],
       lastToolResultIndex: -1,
     }
 
@@ -344,6 +347,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       reasoning: string[]
       trace: AgentTraceStep[]
       selectedPages: AgentSelectedPage[]
+      annotatedImages: AnnotatedImage[]
       lastToolResultIndex: number
     }
   ) => {
@@ -629,6 +633,39 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         break
       }
 
+      case 'code_execution': {
+        if (typeof data.content === 'string') {
+          accumulator.trace.push({ type: 'code_execution', content: data.content })
+          updateQuery(queryId, {
+            trace: [...accumulator.trace],
+            thinkingText: '🔍 Running code...',
+          })
+        }
+        break
+      }
+
+      case 'code_result': {
+        if (typeof data.content === 'string') {
+          accumulator.trace.push({ type: 'code_result', content: data.content })
+          updateQuery(queryId, {
+            trace: [...accumulator.trace],
+          })
+        }
+        break
+      }
+
+      case 'annotated_image': {
+        const imageBase64 = data.image_base64
+        const mimeType = typeof data.mime_type === 'string' ? data.mime_type : 'image/png'
+        if (typeof imageBase64 === 'string' && imageBase64.length > 0) {
+          accumulator.annotatedImages.push({ imageBase64, mimeType })
+          updateQuery(queryId, {
+            annotatedImages: [...accumulator.annotatedImages],
+          })
+        }
+        break
+      }
+
       case 'done': {
         const displayTitle = typeof data.displayTitle === 'string' ? data.displayTitle : null
         const conversationTitle = typeof data.conversationTitle === 'string' ? data.conversationTitle : null
@@ -739,6 +776,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
               conversationTitle,
               pages: [...accumulator.selectedPages],
               finalAnswer: extractedAnswer,
+              annotatedImages: [...accumulator.annotatedImages],
               trace: [...accumulator.trace],
               elapsedTime: Date.now() - query.startTime,
               conceptResponse,
@@ -759,6 +797,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             finalAnswer: extractedAnswer,
             trace: [...accumulator.trace],
             selectedPages: [...accumulator.selectedPages],
+            annotatedImages: [...accumulator.annotatedImages],
             currentTool: null,
             response: fieldResponse,
             conceptResponse,
@@ -823,6 +862,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         status: 'streaming',
         trace: [],
         selectedPages: [],
+        annotatedImages: [],
         thinkingText: '',
         finalAnswer: '',
         displayTitle: null,
@@ -897,6 +937,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       status: 'complete',
       trace,
       selectedPages: pages || [],
+      annotatedImages: [],
       thinkingText: '',
       finalAnswer,
       displayTitle,
