@@ -9,6 +9,8 @@ Big Maestro is a superintendent's partner that:
 - Shows visible thinking during learning
 """
 
+import asyncio
+import json
 import logging
 import re
 from typing import Any, AsyncIterator, Literal, Optional
@@ -466,3 +468,369 @@ async def run_with_learning(
         db, project_id, query, history_messages, enriched_viewing_context, mode
     ):
         yield event
+
+
+def synthesize_evolved_response(page_results: list[dict[str, Any]]) -> str:
+    """Build evolved response from completed page results (R4: simple concatenation for v1)."""
+    parts = []
+    for result in page_results:
+        text = result.get("response_text", "").strip()
+        if text:
+            page_name = result.get("page_name", "Page")
+            parts.append(f"**{page_name}:** {text}")
+    return "\n\n".join(parts)
+
+
+async def run_deep_agent_for_page(
+    page: dict[str, Any],
+    search_mission: dict[str, Any],
+    query: str,
+    memory_context: str,
+    history_context: str,
+    viewing_context: str,
+) -> AsyncIterator[dict]:
+    """
+    Run Deep Mode V4 agentic vision on a single page.
+
+    Wraps explore_with_agentic_vision_v4() with a single-page list and the
+    page's specific search mission. Tags all events with page_id.
+
+    Yields:
+        {"type": "thinking", "content": "...", "page_id": "..."}
+        {"type": "code_execution", "content": "...", "page_id": "..."}
+        {"type": "code_result", "content": "...", "page_id": "..."}
+        {"type": "annotated_image", "image_base64": "...", "page_id": "..."}
+        {"type": "text", "content": "...", "page_id": "..."}
+        {"type": "page_complete", "page_id": "...", "page_name": "...", "response_text": "...", "usage": {...}}
+    """
+    from app.services.providers.gemini import explore_with_agentic_vision_v4
+
+    page_id = str(page.get("page_id", ""))
+    page_name = page.get("page_name", "")
+    accumulated_text = ""
+
+    # Build per-page search mission
+    per_page_mission = dict(search_mission)
+    page_missions = search_mission.get("pages", [])
+    for pm in page_missions:
+        if str(pm.get("page_id", "")) == page_id:
+            per_page_mission = {
+                "query": search_mission.get("query", query),
+                "pages": [pm],
+            }
+            break
+
+    # Build the single-page list for V4
+    single_page_list = [{
+        "page_id": page_id,
+        "page_name": page_name,
+        "image_bytes": page.get("image_bytes"),
+    }]
+
+    try:
+        async for event in explore_with_agentic_vision_v4(
+            query=query,
+            pages=single_page_list,
+            search_mission=per_page_mission,
+            history_context=history_context,
+            viewing_context=viewing_context,
+        ):
+            event_type = event.get("type")
+            if event_type == "thinking":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "thinking", "content": content, "page_id": page_id}
+            elif event_type == "code":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "code_execution", "content": content, "page_id": page_id}
+            elif event_type == "code_result":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "code_result", "content": content, "page_id": page_id}
+            elif event_type == "annotated_image":
+                yield {
+                    "type": "annotated_image",
+                    "image_base64": event.get("image_base64"),
+                    "mime_type": event.get("mime_type", "image/png"),
+                    "page_id": page_id,
+                }
+            elif event_type == "text":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    accumulated_text += content
+                    yield {"type": "text", "content": content, "page_id": page_id}
+            elif event_type == "result":
+                data = event.get("data")
+                if isinstance(data, dict):
+                    usage = data.get("usage", {})
+                    yield {
+                        "type": "page_complete",
+                        "page_id": page_id,
+                        "page_name": page_name,
+                        "response_text": accumulated_text,
+                        "usage": usage,
+                    }
+                    return
+    except Exception as e:
+        logger.exception("Deep agent failed for page %s (%s): %s", page_name, page_id, e)
+        yield {
+            "type": "page_complete",
+            "page_id": page_id,
+            "page_name": page_name,
+            "response_text": f"Analysis failed for {page_name}.",
+            "usage": {},
+            "error": str(e),
+        }
+        return
+
+    # If we get here without a result event, still emit page_complete
+    yield {
+        "type": "page_complete",
+        "page_id": page_id,
+        "page_name": page_name,
+        "response_text": accumulated_text or f"Analysis complete for {page_name}.",
+        "usage": {},
+    }
+
+
+async def run_maestro_query(
+    db: Session,
+    project_id: str,
+    user_id: str,
+    query: str,
+    history_messages: list[dict[str, Any]] | None = None,
+    viewing_context: dict[str, Any] | None = None,
+    mode: Literal["fast", "med", "deep"] = "fast",
+) -> AsyncIterator[dict]:
+    """
+    Main Maestro Orchestrator entry point (R2).
+
+    Flow:
+    1. Build memory context
+    2. Detect teaching intent -> process learning if yes
+    3. For non-deep modes, delegate to run_agent_query
+    4. For deep mode: run Fast Mode pipeline, spawn parallel per-page Deep agents,
+       synthesize evolved response
+    """
+    from app.services.core.agent import (
+        run_agent_query,
+        run_deep_page_selection_pipeline,
+        _load_page_image_bytes,
+    )
+    from app.services.core.search_missions import build_search_missions
+
+    project_uuid = UUID(project_id) if isinstance(project_id, str) else project_id
+
+    # 1. Build memory context once for all agents
+    memory_context = ""
+    try:
+        memory_context = await build_memory_context(db, project_uuid, user_id, mode)
+    except Exception as e:
+        logger.warning("Failed to build memory context: %s", e)
+
+    # 2. Detect teaching intent
+    previous_query = None
+    previous_response = None
+    if history_messages and len(history_messages) >= 2:
+        for msg in reversed(history_messages):
+            if msg.get("role") == "assistant" and not previous_response:
+                previous_response = msg.get("content", "")
+            elif msg.get("role") == "user" and not previous_query:
+                previous_query = msg.get("content", "")
+            if previous_query and previous_response:
+                break
+
+    is_teaching = detect_teaching_intent(query, previous_response)
+
+    if is_teaching:
+        async for event in process_learning(
+            db, project_uuid, user_id, query, previous_query, previous_response
+        ):
+            # Re-emit learning events with the 'learning' type for frontend
+            if event.get("type") == "thinking":
+                yield {"type": "learning", "text": event.get("content", ""), "classification": "teaching"}
+            elif event.get("type") == "learning_complete":
+                yield {
+                    "type": "learning",
+                    "text": f"Updated {_file_type_to_display(event.get('file_updated', ''))}",
+                    "classification": event.get("classification", ""),
+                    "file_updated": event.get("file_updated", ""),
+                }
+            else:
+                yield event
+
+        yield {
+            "type": "text",
+            "content": "Want me to try that again with this new knowledge, or is there something else?"
+        }
+        yield {"type": "done", "trace": [], "usage": {}}
+        return
+
+    # 3. For non-deep modes, delegate to normal agent with memory context
+    if mode != "deep":
+        enriched_viewing_context = viewing_context or {}
+        if memory_context:
+            enriched_viewing_context["memory_context"] = memory_context
+        async for event in run_agent_query(
+            db, project_id, query, history_messages, enriched_viewing_context, mode
+        ):
+            yield event
+        return
+
+    # 4. Deep mode: Orchestrated parallel per-page agents
+    trace: list[dict] = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    # 4a. Run Fast Mode pipeline (page selection)
+    pipeline_result = None
+    async for event in run_deep_page_selection_pipeline(
+        db, project_id, query, history_messages, viewing_context,
+    ):
+        if event.get("type") == "pipeline_complete":
+            pipeline_result = event
+        elif event.get("type") == "error":
+            yield event
+            return
+        else:
+            # Forward tool_call/tool_result events to frontend
+            yield event
+            trace.append(event)
+
+    if not pipeline_result:
+        yield {"type": "text", "content": "Page selection failed."}
+        yield {"type": "done", "trace": trace, "usage": {"inputTokens": 0, "outputTokens": 0}}
+        return
+
+    ordered_page_ids = pipeline_result.get("ordered_page_ids", [])
+    page_map = pipeline_result.get("page_map", {})
+    region_matches = pipeline_result.get("region_matches", {})
+    selection = pipeline_result.get("selection", {})
+    history_context = pipeline_result.get("history_context", "")
+    viewing_context_str = pipeline_result.get("viewing_context_str", "")
+    trace.extend(pipeline_result.get("trace", []))
+
+    if not ordered_page_ids:
+        yield {"type": "text", "content": "I couldn't find relevant sheets for deep analysis."}
+        yield {"type": "done", "trace": trace, "usage": {"inputTokens": 0, "outputTokens": 0}}
+        return
+
+    # 4b. Emit page_state(queued) for each page
+    for page_id in ordered_page_ids:
+        page = page_map.get(page_id)
+        page_name = page.page_name if page else page_id
+        yield {"type": "page_state", "page_id": page_id, "page_name": page_name, "state": "queued"}
+
+    # 4c. Build search missions and load images
+    search_mission: dict[str, Any] = {}
+    try:
+        search_mission = build_search_missions(
+            query=query,
+            ordered_page_ids=ordered_page_ids,
+            page_map=page_map,
+            region_matches=region_matches,
+        )
+    except Exception as e:
+        logger.warning("build_search_missions failed: %s", e)
+
+    pages_for_vision: list[dict[str, Any]] = []
+    for page_id in ordered_page_ids:
+        page = page_map.get(page_id)
+        if not page:
+            continue
+        image_bytes = await _load_page_image_bytes(page)
+        if not image_bytes:
+            continue
+        pages_for_vision.append({
+            "page_id": str(page.id),
+            "page_name": page.page_name,
+            "image_bytes": image_bytes,
+        })
+
+    if not pages_for_vision:
+        yield {"type": "text", "content": "Found relevant sheets but couldn't load images for deep analysis."}
+        yield {"type": "done", "trace": trace, "usage": {"inputTokens": 0, "outputTokens": 0}}
+        return
+
+    # 4d. Spawn parallel per-page Deep agents
+    page_results: list[dict[str, Any]] = []
+    response_version = 0
+
+    async def _collect_page_events(page_data: dict[str, Any]) -> dict[str, Any]:
+        """Run a deep agent for one page, collecting its events."""
+        events = []
+        result = {"page_id": page_data["page_id"], "page_name": page_data["page_name"], "response_text": "", "usage": {}}
+        async for ev in run_deep_agent_for_page(
+            page=page_data,
+            search_mission=search_mission,
+            query=query,
+            memory_context=memory_context,
+            history_context=history_context,
+            viewing_context=viewing_context_str,
+        ):
+            events.append(ev)
+            if ev.get("type") == "page_complete":
+                result["response_text"] = ev.get("response_text", "")
+                result["usage"] = ev.get("usage", {})
+        result["events"] = events
+        return result
+
+    # Run all page agents concurrently
+    tasks = [_collect_page_events(page) for page in pages_for_vision]
+
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        page_id = result["page_id"]
+        page_name = result["page_name"]
+
+        # Emit page_state(processing) at start — since as_completed returns on completion,
+        # we emit processing then immediately done
+        yield {"type": "page_state", "page_id": page_id, "state": "processing"}
+
+        # Forward the collected events from this page agent
+        for ev in result.get("events", []):
+            ev_type = ev.get("type")
+            if ev_type in ("thinking", "code_execution", "code_result", "annotated_image", "text"):
+                yield ev
+                trace.append(ev)
+
+        # Track usage
+        usage = result.get("usage", {})
+        total_input_tokens += int(usage.get("input_tokens", 0) or usage.get("inputTokens", 0) or 0)
+        total_output_tokens += int(usage.get("output_tokens", 0) or usage.get("outputTokens", 0) or 0)
+
+        # Mark page done
+        yield {"type": "page_state", "page_id": page_id, "state": "done"}
+
+        # Build evolved response
+        page_results.append(result)
+        response_version += 1
+        evolved_text = synthesize_evolved_response(page_results)
+        yield {"type": "response_update", "text": evolved_text, "version": response_version}
+
+    # 5. Final done event
+    final_text = synthesize_evolved_response(page_results)
+    if final_text:
+        yield {"type": "text", "content": final_text}
+        trace.append({"type": "reasoning", "content": final_text})
+
+    display_title = "Deep Analysis"
+    if isinstance(selection, dict):
+        sel_title = str(selection.get("chat_title") or "").strip()
+        if sel_title:
+            display_title = sel_title
+
+    yield {
+        "type": "done",
+        "trace": trace,
+        "usage": {"inputTokens": total_input_tokens, "outputTokens": total_output_tokens},
+        "displayTitle": display_title,
+        "conversationTitle": display_title,
+        "highlights": [],
+        "conceptName": None,
+        "summary": None,
+        "findings": [],
+        "crossReferences": [],
+        "gaps": [],
+    }
