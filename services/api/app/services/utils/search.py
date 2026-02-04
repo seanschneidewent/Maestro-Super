@@ -281,11 +281,11 @@ async def search_pages_and_regions(
             embedding = region.get("embedding")
             similarity = _cosine_similarity(query_embedding, embedding) if embedding else 0.0
 
-            if similarity <= 0.0:
-                # Fallback: keyword match on label/type
+            if similarity < similarity_threshold:
+                # Fallback: keyword match on label/type when embedding similarity is weak
                 haystack = f"{region.get('type', '')} {region.get('label', '')} {region.get('detail_number', '')}".lower()
                 if query_tokens and any(t in haystack for t in query_tokens):
-                    similarity = max(similarity_threshold, 0.5)
+                    similarity = max(similarity, similarity_threshold)
 
             adjusted_similarity = similarity * page_boost
             if adjusted_similarity >= similarity_threshold:
