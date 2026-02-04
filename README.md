@@ -91,12 +91,90 @@ cd apps/web
 pnpm install
 pnpm dev
 
-# Backend  
+# Backend
 cd services/api
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+## Local Development Setup
+
+Full local dev with a Docker Postgres, hot-reload backend, and Vite frontend.
+
+### Prerequisites
+
+- **Docker Desktop** (Windows) — [install](https://docs.docker.com/desktop/install/windows-install/)
+- **Python 3.13+** with venv at `services/api/venv/`
+- **Node.js v22+** with pnpm
+- **PostgreSQL 16 client tools** (for `pg_dump`/`psql`) — [install](https://www.postgresql.org/download/windows/)
+
+### Quick Start
+
+```powershell
+# One-command startup (Docker, Postgres, migrations, backend, frontend)
+.\scripts\dev.ps1
+
+# Seed production data into local Postgres (first time only)
+.\scripts\seed-local-db.ps1
+```
+
+### Manual Steps
+
+```powershell
+# 1. Start Postgres
+docker compose up -d
+
+# 2. Run migrations
+cd services\api
+.\venv\Scripts\Activate.ps1
+alembic upgrade head
+
+# 3. Start backend (new terminal)
+uvicorn app.main:app --reload --port 8000
+
+# 4. Start frontend (new terminal)
+cd apps\web
+pnpm dev
+```
+
+### Environment Files
+
+Local overrides go in `.env.local` (gitignored):
+
+| File | Purpose |
+|------|---------|
+| `services/api/.env.local` | DB credentials, DEV_USER_ID, Supabase keys, AI keys |
+| `apps/web/.env.local` | `VITE_API_URL=http://localhost:8000`, Supabase URL/key |
+
+See `services/api/.env.example` for all available variables.
+
+### Debug Traces
+
+When `DEV_USER_ID` is set, every query writes a debug summary to:
+
+```
+services/api/debug/last-query.json
+```
+
+Last 5 queries are kept as `last-query-1.json` through `last-query-5.json`.
+
+### Data Seeding
+
+```powershell
+# Dump production data into local Postgres
+.\scripts\seed-local-db.ps1
+
+# If pg_dump is not on PATH, use Docker-based dump:
+.\scripts\seed-local-db.ps1 -UsePgDocker
+
+# Reset database completely (wipe volume, re-init, re-migrate)
+docker compose down -v
+docker compose up -d
+# Wait for healthy, then:
+cd services\api && .\venv\Scripts\python.exe -m alembic upgrade head
+.\scripts\seed-local-db.ps1
 ```
 
 ## Environment Variables
