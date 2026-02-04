@@ -2,6 +2,7 @@
 Gemini AI service for context extraction and agent queries.
 """
 
+import base64
 import json
 import logging
 import re
@@ -2492,4 +2493,209 @@ async def explore_with_agentic_vision_streaming(
 
     except Exception as e:
         logger.error("Agentic Vision V3 exploration failed: %s", e)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Deep Mode V4 — Unconstrained Agentic Vision
+# ---------------------------------------------------------------------------
+
+DEEP_AGENTIC_VISION_V4_PROMPT = '''You are Maestro, a construction plan specialist with code execution and visual analysis tools.
+
+SEARCH MISSION:
+{search_mission}
+
+INSTRUCTIONS:
+1. Examine each page image for the search targets listed in the mission above.
+2. Use code execution to investigate:
+   - Crop and zoom into promising areas to read fine details
+   - Draw bounding boxes and labels on the page images to mark your findings
+   - Use cv2.rectangle(), matplotlib patches, or PIL ImageDraw to annotate
+   - Label each annotation with what it contains
+3. If text is too small, crop tighter and zoom in further.
+4. If a page has nothing relevant, skip it — don't force findings.
+5. After investigating all pages, write a clear summary of everything you found for the superintendent.
+
+ANNOTATION GUIDELINES:
+- Use bright, visible colors (red, green, blue) for bounding boxes
+- Add text labels near each box describing the finding
+- Use different colors for different categories (e.g., red for equipment, blue for dimensions, green for notes)
+- Make annotations clear enough to understand at a glance
+
+PAGE IMAGES are provided in order, each labeled with page name and ID.
+
+{history_section}
+{viewing_section}'''
+
+
+async def explore_with_agentic_vision_v4(
+    query: str,
+    pages: list[dict[str, Any]],
+    search_mission: dict[str, Any],
+    history_context: str = "",
+    viewing_context: str = "",
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Deep Mode V4: Unconstrained Agentic Vision with Gemini 3 Flash.
+
+    Key differences from V3:
+    - NO response_mime_type="application/json" — model outputs freely
+    - Captures annotated images the model draws via part.as_image()
+    - Simple prompt encouraging zoom, crop, draw, and explain
+
+    Yields:
+        {"type": "thinking", "content": "..."} for thought chunks
+        {"type": "code", "content": "..."} for code the model wrote
+        {"type": "code_result", "content": "..."} for execution output
+        {"type": "annotated_image", "image_base64": "...", "mime_type": "image/png"}
+        {"type": "text", "content": "..."} for text response chunks
+        {"type": "result", "data": {...}} once streaming is complete
+    """
+    try:
+        client = _get_gemini_client()
+
+        def escape_braces(s: str) -> str:
+            return s.replace("{", "{{").replace("}", "}}")
+
+        history_section = ""
+        if history_context:
+            truncated = history_context[-1000:]
+            history_section = f"CONVERSATION HISTORY:\n{escape_braces(truncated)}"
+
+        viewing_section = ""
+        if viewing_context:
+            viewing_section = f"CURRENT VIEW: {escape_braces(viewing_context)}"
+
+        # Format search mission as readable JSON
+        mission_text = json.dumps(search_mission, indent=2)
+
+        prompt = DEEP_AGENTIC_VISION_V4_PROMPT.format(
+            search_mission=mission_text,
+            history_section=history_section,
+            viewing_section=viewing_section,
+        )
+
+        # Build content parts: images first, then prompt
+        parts: list[types.Part] = []
+        for page in pages:
+            image_bytes = page.get("image_bytes")
+            if not image_bytes:
+                continue
+            page_label = f"PAGE IMAGE: {page.get('page_name')} ({page.get('page_id')})"
+            parts.append(types.Part.from_text(text=page_label))
+            parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+
+        parts.append(types.Part.from_text(text=prompt))
+
+        # Configure: Code Execution + Thinking — NO response_mime_type
+        try:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution)
+        except Exception:
+            code_exec_tool = types.Tool(code_execution=types.ToolCodeExecution())
+
+        config_kwargs: dict[str, Any] = {
+            "tools": [code_exec_tool],
+            "media_resolution": "media_resolution_high",
+            "temperature": 0,
+        }
+
+        # Add thinking
+        config_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_level="HIGH",
+            include_thoughts=True,
+        )
+
+        # Stream the response
+        settings = get_settings()
+        model = settings.brain_mode_model  # gemini-3-flash-preview
+
+        stream = client.models.generate_content_stream(
+            model=model,
+            contents=[types.Content(parts=parts)],
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+        accumulated_text = ""
+        usage_metadata = None
+
+        for chunk in stream:
+            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                usage_metadata = chunk.usage_metadata
+
+            candidates = getattr(chunk, "candidates", None) or []
+            if not candidates:
+                continue
+
+            content = getattr(candidates[0], "content", None)
+            if not content:
+                continue
+
+            for part in getattr(content, "parts", []) or []:
+                # Thinking text
+                if getattr(part, "thought", False):
+                    text = getattr(part, "text", None)
+                    if text:
+                        yield {"type": "thinking", "content": text}
+                    continue
+
+                # Code execution — model-generated code
+                exec_code = getattr(part, "executable_code", None)
+                if exec_code:
+                    code = getattr(exec_code, "code", "")
+                    if code:
+                        yield {"type": "code", "content": code}
+                    continue
+
+                # Code execution — result
+                exec_result = getattr(part, "code_execution_result", None)
+                if exec_result:
+                    output = getattr(exec_result, "output", "")
+                    if output:
+                        yield {"type": "code_result", "content": output}
+                    continue
+
+                # Annotated image — model drew on an image
+                try:
+                    image = part.as_image()
+                    if image is not None:
+                        image_bytes_out = image.image_bytes
+                        if image_bytes_out:
+                            encoded = base64.b64encode(image_bytes_out).decode("utf-8")
+                            yield {
+                                "type": "annotated_image",
+                                "image_base64": encoded,
+                                "mime_type": "image/png",
+                            }
+                        continue
+                except Exception:
+                    pass
+
+                # Regular text (model's free-form response)
+                text = getattr(part, "text", None)
+                if text:
+                    accumulated_text += text
+                    yield {"type": "text", "content": text}
+
+        input_tokens = 0
+        output_tokens = 0
+        if usage_metadata:
+            input_tokens = getattr(usage_metadata, "prompt_token_count", 0) or 0
+            output_tokens = (
+                getattr(usage_metadata, "candidates_token_count", 0) or 0
+            )
+
+        yield {
+            "type": "result",
+            "data": {
+                "response": accumulated_text,
+                "gaps": [],
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            },
+        }
+
+    except Exception as e:
+        logger.error("Agentic Vision V4 exploration failed: %s", e)
         raise
