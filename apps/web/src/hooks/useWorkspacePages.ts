@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { WorkspacePage, PageState, BoundingBox } from '../components/maestro/PageWorkspace';
-import type { AgentSelectedPage } from './useQueryManager';
+import type { AgentSelectedPage, PageAgentState } from './useQueryManager';
 import type { AgentFinding } from '../types';
 
 // Re-export for convenience
@@ -47,6 +47,12 @@ interface UseWorkspacePagesReturn {
 
   /** Clear all pages (e.g. on new conversation). */
   clear: () => void;
+
+  /**
+   * Sync workspace page states from orchestrator page_state events.
+   * Maps orchestrator states (queued/processing/done) to workspace PageState.
+   */
+  syncFromPageAgentStates: (pageAgentStates: PageAgentState[]) => void;
 }
 
 /**
@@ -215,10 +221,39 @@ export function useWorkspacePages(): UseWorkspacePagesReturn {
     setPages([]);
   }, []);
 
+  /**
+   * Sync workspace page states from orchestrator page_state events.
+   * Maps orchestrator states (queued/processing/done) to workspace PageState.
+   */
+  const syncFromPageAgentStates = useCallback(
+    (pageAgentStates: PageAgentState[]) => {
+      setPages((prev) => {
+        let changed = false;
+        const updatedPages = prev.map((wp) => {
+          const agentState = pageAgentStates.find((s) => s.pageId === wp.pageId);
+          if (!agentState) return wp;
+
+          const mappedState: PageState =
+            agentState.state === 'done' ? 'done' :
+            agentState.state === 'processing' ? 'processing' : 'queued';
+
+          if (wp.state !== mappedState) {
+            changed = true;
+            return { ...wp, state: mappedState };
+          }
+          return wp;
+        });
+        return changed ? updatedPages : prev;
+      });
+    },
+    [],
+  );
+
   return {
     pages,
     addPage,
     syncFromSelectedPages,
+    syncFromPageAgentStates,
     addBboxes,
     setFindings,
     setPageState,

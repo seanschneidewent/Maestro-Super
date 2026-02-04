@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2, Sparkles, FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { AgentTraceStep } from '../../types';
+import type { PageAgentState } from '../../hooks/useQueryManager';
 import { ConstellationAnimation } from './ConstellationAnimation';
 
 interface ThinkingSectionProps {
@@ -12,6 +13,8 @@ interface ThinkingSectionProps {
   initialElapsedTime?: number; // For completed responses - time in ms
   onNavigateToPage?: (pageId: string) => void;
   onOpenPointer?: (pointerId: string) => void;
+  /** Orchestrator per-page agent states */
+  pageAgentStates?: PageAgentState[];
 }
 
 // Generate human-readable text for a completed tool action
@@ -286,6 +289,7 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   initialElapsedTime,
   onNavigateToPage,
   onOpenPointer,
+  pageAgentStates = [],
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -427,6 +431,43 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
               index={index}
             />
           ))}
+
+          {/* Per-page agent progress (orchestrator mode) */}
+          {pageAgentStates.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
+              <div className="px-2 text-xs font-medium text-slate-500 mb-1">Page Agents</div>
+              {pageAgentStates.map((page) => (
+                <div
+                  key={page.pageId}
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg"
+                >
+                  <div className="flex-shrink-0 w-4">
+                    {page.state === 'done' ? (
+                      <CheckCircle2 size={14} className="text-green-500" />
+                    ) : page.state === 'processing' ? (
+                      <Loader2 size={14} className="text-cyan-500 animate-spin" />
+                    ) : (
+                      <FileText size={14} className="text-slate-400" />
+                    )}
+                  </div>
+                  <span className={`text-xs truncate ${
+                    page.state === 'done' ? 'text-slate-600' :
+                    page.state === 'processing' ? 'text-cyan-700 font-medium' :
+                    'text-slate-400'
+                  }`}>
+                    {page.pageName}
+                  </span>
+                  <span className={`text-[10px] ml-auto flex-shrink-0 ${
+                    page.state === 'done' ? 'text-green-500' :
+                    page.state === 'processing' ? 'text-cyan-500' :
+                    'text-slate-300'
+                  }`}>
+                    {page.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

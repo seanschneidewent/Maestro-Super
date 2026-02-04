@@ -67,6 +67,18 @@ export interface CompletedQuery {
 export type QueryStatus = 'streaming' | 'complete' | 'error'
 export type QueryMode = 'fast' | 'med' | 'deep'
 
+export interface PageAgentState {
+  pageId: string
+  pageName: string
+  state: 'queued' | 'processing' | 'done'
+}
+
+export interface LearningNote {
+  text: string
+  classification?: string
+  fileUpdated?: string
+}
+
 export interface QueryState {
   id: string
   queryText: string
@@ -87,6 +99,11 @@ export interface QueryState {
   response: FieldResponse | null
   conceptResponse?: AgentConceptResponse
   annotatedImages: AnnotatedImage[]
+  // Orchestrator-specific fields
+  pageAgentStates: PageAgentState[]
+  evolvedResponseText: string
+  evolvedResponseVersion: number
+  learningNotes: LearningNote[]
 }
 
 interface UseQueryManagerOptions {
@@ -807,6 +824,62 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         break
       }
 
+      case 'page_state': {
+        const pageId = typeof data.page_id === 'string' ? data.page_id : ''
+        const pageName = typeof data.page_name === 'string' ? data.page_name : pageId
+        const pageState = typeof data.state === 'string' ? data.state as 'queued' | 'processing' | 'done' : 'queued'
+
+        if (pageId) {
+          setQueries((prev) => {
+            const query = prev.get(queryId)
+            if (!query) return prev
+
+            const existing = query.pageAgentStates.findIndex(p => p.pageId === pageId)
+            const newStates = [...query.pageAgentStates]
+            if (existing >= 0) {
+              newStates[existing] = { pageId, pageName: pageName || newStates[existing].pageName, state: pageState }
+            } else {
+              newStates.push({ pageId, pageName, state: pageState })
+            }
+
+            const newMap = new Map(prev)
+            newMap.set(queryId, { ...query, pageAgentStates: newStates })
+            return newMap
+          })
+        }
+        break
+      }
+
+      case 'response_update': {
+        const text = typeof data.text === 'string' ? data.text : ''
+        const version = typeof data.version === 'number' ? data.version : 0
+
+        updateQuery(queryId, {
+          evolvedResponseText: text,
+          evolvedResponseVersion: version,
+        })
+        break
+      }
+
+      case 'learning': {
+        const text = typeof data.text === 'string' ? data.text : ''
+        const classification = typeof data.classification === 'string' ? data.classification : undefined
+        const fileUpdated = typeof data.file_updated === 'string' ? data.file_updated : undefined
+
+        if (text) {
+          setQueries((prev) => {
+            const query = prev.get(queryId)
+            if (!query) return prev
+
+            const newNotes = [...query.learningNotes, { text, classification, fileUpdated }]
+            const newMap = new Map(prev)
+            newMap.set(queryId, { ...query, learningNotes: newNotes })
+            return newMap
+          })
+        }
+        break
+      }
+
       case 'error': {
         const message = typeof data.message === 'string' ? data.message : 'An error occurred'
 
@@ -872,6 +945,10 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         startTime: Date.now(),
         response: null,
         conceptResponse: undefined,
+        pageAgentStates: [],
+        evolvedResponseText: '',
+        evolvedResponseVersion: 0,
+        learningNotes: [],
       }
 
     // Add to state
@@ -946,6 +1023,10 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       error: null,
       startTime: Date.now(),
       response: null,
+      pageAgentStates: [],
+      evolvedResponseText: '',
+      evolvedResponseVersion: 0,
+      learningNotes: [],
     }
 
     setQueries((prev) => new Map(prev).set(queryId, queryState))
