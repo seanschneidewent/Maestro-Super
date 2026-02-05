@@ -17,6 +17,7 @@ export { SuggestedPrompts } from './SuggestedPrompts'
 
 // Use/Maestro components (formerly from use/)
 export { MaestroMode } from './MaestroMode'
+export { WorkspacesPanel } from './WorkspacesPanel'
 export { PlansPanel } from './PlansPanel'
 export { PlanViewer } from './PlanViewer'
 export { ThinkingSection } from './ThinkingSection'

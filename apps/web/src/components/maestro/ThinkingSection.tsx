@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import type { V3ThinkingPanel } from '../../types/v3'
 
 interface CognitionPanelProps {
   title: string
@@ -15,6 +16,49 @@ const COLOR_CLASSES: Record<CognitionPanelProps['color'], string> = {
   cyan: 'border-cyan-200 bg-cyan-50/60 text-cyan-700',
   yellow: 'border-amber-200 bg-amber-50/60 text-amber-700',
   purple: 'border-purple-200 bg-purple-50/60 text-purple-700',
+}
+
+const PANEL_META: Array<{
+  key: V3ThinkingPanel
+  label: string
+  color: string
+}> = [
+  { key: 'workspace_assembly', label: 'Assembly', color: 'bg-cyan-500' },
+  { key: 'learning', label: 'Learning', color: 'bg-amber-500' },
+  { key: 'knowledge_update', label: 'Knowledge', color: 'bg-purple-500' },
+]
+
+interface CognitionIndicatorProps {
+  panels: Record<V3ThinkingPanel, string>
+  learningActive?: boolean
+  className?: string
+}
+
+export const CognitionIndicator: React.FC<CognitionIndicatorProps> = ({
+  panels,
+  learningActive = false,
+  className,
+}) => {
+  const dots = useMemo(() => {
+    return PANEL_META.map((panel) => {
+      const hasContent = panels[panel.key]?.trim().length > 0
+      const isActive = panel.key === 'learning' ? hasContent || learningActive : hasContent
+      return { ...panel, isActive }
+    })
+  }, [panels, learningActive])
+
+  return (
+    <div className={`flex items-center gap-1.5 ${className ?? ''}`}>
+      {dots.map((dot) => (
+        <span key={dot.key} className="flex items-center gap-1">
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${dot.isActive ? dot.color : 'bg-slate-300'}`}
+            title={dot.label}
+          />
+        </span>
+      ))}
+    </div>
+  )
 }
 
 export const CognitionPanel: React.FC<CognitionPanelProps> = ({
@@ -82,9 +126,6 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   defaultExpanded = false,
   learningActive = false,
 }) => {
-  const showLearning = learning.trim().length > 0 || learningActive
-  const showKnowledgeUpdate = knowledgeUpdate.trim().length > 0
-
   return (
     <div className="space-y-2">
       <CognitionPanel
@@ -94,25 +135,21 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         isActive={isActive}
         defaultExpanded={defaultExpanded}
       />
-      {showLearning && (
-        <CognitionPanel
-          title="Learning"
-          color="yellow"
-          content={learning}
-          isActive={learningActive}
-          defaultExpanded={false}
-          emptyLabel={learningActive ? 'Learning in progress...' : 'No activity yet.'}
-        />
-      )}
-      {showKnowledgeUpdate && (
-        <CognitionPanel
-          title="Knowledge Update"
-          color="purple"
-          content={knowledgeUpdate}
-          isActive={false}
-          defaultExpanded={false}
-        />
-      )}
+      <CognitionPanel
+        title="Learning"
+        color="yellow"
+        content={learning}
+        isActive={learningActive}
+        defaultExpanded={false}
+        emptyLabel={learningActive ? 'Learning in progress...' : 'No activity yet.'}
+      />
+      <CognitionPanel
+        title="Knowledge Update"
+        color="purple"
+        content={knowledgeUpdate}
+        isActive={false}
+        defaultExpanded={false}
+      />
     </div>
   )
 }

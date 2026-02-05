@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -120,6 +120,7 @@ class SessionManager:
             project_id=project_uuid,
             user_id=user_id,
             session_type=session_type,
+            workspace_name=workspace_name,
             maestro_messages=list(session_row.maestro_messages or []),
             learning_messages=list(session_row.learning_messages or []),
             workspace_state=None
@@ -147,11 +148,18 @@ class SessionManager:
         if not row:
             return None
 
+        if row.status != "active":
+            row.status = "active"
+            row.last_active_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+
         live = LiveSession(
             session_id=session_uuid,
             project_id=_to_uuid(row.project_id),
             user_id=row.user_id,
             session_type=row.session_type,
+            workspace_name=row.workspace_name,
             maestro_messages=list(row.maestro_messages or []),
             learning_messages=list(row.learning_messages or []),
             workspace_state=None
@@ -198,6 +206,7 @@ class SessionManager:
 
         row.maestro_messages = session.maestro_messages
         row.learning_messages = session.learning_messages
+        row.workspace_name = session.workspace_name
         if session.session_type == "telegram":
             row.workspace_state = None
         else:
@@ -235,6 +244,7 @@ class SessionManager:
                 project_id=_to_uuid(row.project_id),
                 user_id=row.user_id,
                 session_type=row.session_type,
+                workspace_name=row.workspace_name,
                 maestro_messages=list(row.maestro_messages or []),
                 learning_messages=list(row.learning_messages or []),
                 workspace_state=None
@@ -278,7 +288,7 @@ class SessionManager:
         self.close_session(session_uuid, db)
         workspace_name = None
         if session.session_type == "workspace":
-            workspace_name = "Workspace"
+            workspace_name = session.workspace_name or "Workspace"
         return self.create_session(
             session.project_id,
             session.user_id,
@@ -286,6 +296,64 @@ class SessionManager:
             workspace_name,
             db,
         )
+
+    def _evict_session(self, session_id: UUID) -> None:
+        session = self._sessions.pop(session_id, None)
+        if session:
+            self._cancel_learning_worker(session)
+
+    def _cleanup_idle_sessions(self, db: DBSession) -> None:
+        now = datetime.now(timezone.utc)
+        idle_cutoff = now - timedelta(hours=24)
+        close_cutoff = now - timedelta(days=7)
+
+        to_idle = (
+            db.query(MaestroSession)
+            .filter(MaestroSession.status == "active")
+            .filter(MaestroSession.last_active_at < idle_cutoff)
+            .all()
+        )
+        to_close = (
+            db.query(MaestroSession)
+            .filter(MaestroSession.status == "idle")
+            .filter(MaestroSession.last_active_at < close_cutoff)
+            .all()
+        )
+
+        if not to_idle and not to_close:
+            return
+
+        for row in to_idle:
+            row.status = "idle"
+            row.updated_at = now
+
+        for row in to_close:
+            row.status = "closed"
+            row.updated_at = now
+
+        db.commit()
+
+        for row in [*to_idle, *to_close]:
+            try:
+                self._evict_session(_to_uuid(row.id))
+            except Exception:
+                continue
+
+    def list_sessions(
+        self,
+        project_id: str | UUID,
+        session_type: str | None,
+        status: list[str] | None,
+        db: DBSession,
+    ) -> list[MaestroSession]:
+        project_uuid = _to_uuid(project_id)
+        self._cleanup_idle_sessions(db)
+        query = db.query(MaestroSession).filter(MaestroSession.project_id == str(project_uuid))
+        if session_type:
+            query = query.filter(MaestroSession.session_type == session_type)
+        if status:
+            query = query.filter(MaestroSession.status.in_(status))
+        return query.order_by(MaestroSession.updated_at.desc()).all()
 
     def compact_session(self, session: LiveSession, db: DBSession) -> None:
         def compact_messages(messages: list[dict], keep: int = 6) -> list[dict]:

@@ -218,6 +218,35 @@ def _tool_summary(tool_name: str, tool_args: dict[str, Any], result: Any) -> str
     return f"{tool_name}"
 
 
+def _append_panel_text(current: str, incoming: str) -> str:
+    if not incoming:
+        return current
+    return f"{current}\n{incoming}" if current else incoming
+
+
+def _append_panel_to_turn(
+    session: LiveSession,
+    turn_number: int,
+    panel: str,
+    content: str,
+) -> None:
+    if not content:
+        return
+    for message in reversed(session.maestro_messages):
+        if message.get("role") != "assistant":
+            continue
+        if message.get("turn_number") != turn_number:
+            continue
+        panels = message.setdefault(
+            "panels",
+            {"workspace_assembly": "", "learning": "", "knowledge_update": ""},
+        )
+        current = panels.get(panel, "")
+        panels[panel] = _append_panel_text(current, content)
+        session.dirty = True
+        return
+
+
 async def run_learning_turn(
     session: LiveSession,
     interaction: InteractionPackage,
@@ -258,6 +287,7 @@ async def run_learning_turn(
             elif event_type == "thinking":
                 content = chunk.get("content") or ""
                 if content:
+                    _append_panel_to_turn(session, turn_number, "learning", content)
                     yield _thinking_event("learning", content, turn_number)
             elif event_type == "tool_call":
                 tool_calls.append(
@@ -303,6 +333,7 @@ async def run_learning_turn(
 
                 if panel:
                     summary = _tool_summary(call["name"], call["arguments"], result)
+                    _append_panel_to_turn(session, turn_number, panel, summary)
                     yield _thinking_event(panel, summary, turn_number)
 
                 session.dirty = True
@@ -310,6 +341,7 @@ async def run_learning_turn(
             continue
 
         if iteration_text:
+            _append_panel_to_turn(session, turn_number, "learning", iteration_text)
             yield _thinking_event("learning", iteration_text, turn_number)
 
         session.learning_messages.append(

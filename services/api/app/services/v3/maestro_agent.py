@@ -22,6 +22,35 @@ from app.types.session import LiveSession
 logger = logging.getLogger(__name__)
 
 
+def _create_panel_state() -> dict[str, str]:
+    return {
+        "workspace_assembly": "",
+        "learning": "",
+        "knowledge_update": "",
+    }
+
+
+def _append_panel_text(current: str, incoming: str) -> str:
+    if not incoming:
+        return current
+    return f"{current}\n{incoming}" if current else incoming
+
+
+def _append_panel(panel_state: dict[str, str], panel: str, content: str) -> None:
+    if not content:
+        return
+    existing = panel_state.get(panel, "")
+    panel_state[panel] = _append_panel_text(existing, content)
+
+
+def _format_tool_event(kind: str, name: str, payload: dict[str, Any] | list[Any]) -> str:
+    try:
+        formatted = json.dumps(payload, indent=2)
+    except TypeError:
+        formatted = json.dumps(str(payload))
+    return f"**Tool {kind}**: {name}\n{formatted}"
+
+
 WORKSPACE_TOOLS = [
     {
         "name": "search_knowledge",
@@ -233,8 +262,16 @@ async def run_maestro_turn(
     user_message: str,
     db: DBSession,
 ) -> AsyncIterator[dict[str, Any]]:
-    session.maestro_messages.append({"role": "user", "content": user_message})
+    turn_number = (
+        sum(1 for message in session.maestro_messages if message.get("role") == "user")
+        + 1
+    )
+    session.maestro_messages.append(
+        {"role": "user", "content": user_message, "turn_number": turn_number}
+    )
     session.last_active = time.time()
+
+    panel_state = _create_panel_state()
 
     pointers_retrieved: list[dict[str, Any]] = []
     workspace_actions: list[dict[str, Any]] = []
@@ -281,6 +318,7 @@ async def run_maestro_turn(
             elif event_type == "thinking":
                 content = chunk.get("content") or ""
                 if content:
+                    _append_panel(panel_state, "workspace_assembly", content)
                     yield {
                         "type": "thinking",
                         "panel": "workspace_assembly",
@@ -293,6 +331,15 @@ async def run_maestro_turn(
                         "name": chunk.get("name"),
                         "arguments": chunk.get("arguments") or {},
                     }
+                )
+                _append_panel(
+                    panel_state,
+                    "workspace_assembly",
+                    _format_tool_event(
+                        "call",
+                        str(chunk.get("name") or ""),
+                        chunk.get("arguments") or {},
+                    ),
                 )
                 yield {
                     "type": "tool_call",
@@ -325,6 +372,11 @@ async def run_maestro_turn(
                     "tool": call["name"],
                     "result": result,
                 }
+                _append_panel(
+                    panel_state,
+                    "workspace_assembly",
+                    _format_tool_event("result", call["name"], result),
+                )
 
                 if call["name"] == "search_knowledge" and isinstance(result, list):
                     for item in result:
@@ -380,13 +432,17 @@ async def run_maestro_turn(
             continue
 
         # Final response
-        session.maestro_messages.append({"role": "assistant", "content": iteration_text})
+        session.maestro_messages.append(
+            {
+                "role": "assistant",
+                "content": iteration_text,
+                "turn_number": turn_number,
+                "panels": panel_state,
+            }
+        )
         session.dirty = True
         session.last_active = time.time()
 
-        turn_number = sum(
-            1 for message in session.maestro_messages if message.get("role") == "user"
-        )
         interaction_package = InteractionPackage(
             user_query=user_message,
             maestro_response=iteration_text,
