@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase'
 import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding, AnnotatedImage } from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 import { useAgentToast } from '../contexts/AgentToastContext'
+import type { BoundingBox } from '../components/maestro/PageWorkspace'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -104,6 +105,7 @@ export interface QueryState {
   evolvedResponseText: string
   evolvedResponseVersion: number
   learningNotes: LearningNote[]
+  codeBboxes: Record<string, BoundingBox[]>
 }
 
 interface UseQueryManagerOptions {
@@ -248,6 +250,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       trace: [] as AgentTraceStep[],
       selectedPages: [] as AgentSelectedPage[],
       annotatedImages: [] as AnnotatedImage[],
+      codeBboxes: {} as Record<string, BoundingBox[]>,
       lastToolResultIndex: -1,
     }
 
@@ -365,6 +368,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       trace: AgentTraceStep[]
       selectedPages: AgentSelectedPage[]
       annotatedImages: AnnotatedImage[]
+      codeBboxes: Record<string, BoundingBox[]>
       lastToolResultIndex: number
     }
   ) => {
@@ -671,6 +675,42 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         break
       }
 
+      case 'code_bboxes': {
+        const pageId = typeof data.page_id === 'string' ? data.page_id : ''
+        const rawBboxes = Array.isArray(data.bboxes) ? data.bboxes : []
+        if (pageId && rawBboxes.length > 0) {
+          const bboxes: BoundingBox[] = rawBboxes
+            .filter((bbox): bbox is { bbox: [number, number, number, number]; label?: string } => {
+              if (typeof bbox !== 'object' || bbox === null) return false
+              const coords = (bbox as { bbox?: unknown }).bbox
+              return (
+                Array.isArray(coords) &&
+                coords.length === 4 &&
+                coords.every((value) => typeof value === 'number' && Number.isFinite(value))
+              )
+            })
+            .map((bbox) => ({
+              x: bbox.bbox[0],
+              y: bbox.bbox[1],
+              width: bbox.bbox[2] - bbox.bbox[0],
+              height: bbox.bbox[3] - bbox.bbox[1],
+              label: typeof bbox.label === 'string' ? bbox.label : undefined,
+            }))
+            .filter((bbox) => bbox.width > 0 && bbox.height > 0)
+
+          if (bboxes.length > 0) {
+            if (!accumulator.codeBboxes[pageId]) {
+              accumulator.codeBboxes[pageId] = []
+            }
+            accumulator.codeBboxes[pageId].push(...bboxes)
+            updateQuery(queryId, {
+              codeBboxes: { ...accumulator.codeBboxes },
+            })
+          }
+        }
+        break
+      }
+
       case 'annotated_image': {
         const imageBase64 = data.image_base64
         const mimeType = typeof data.mime_type === 'string' ? data.mime_type : 'image/png'
@@ -949,6 +989,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         evolvedResponseText: '',
         evolvedResponseVersion: 0,
         learningNotes: [],
+        codeBboxes: {},
       }
 
     // Add to state
@@ -1027,6 +1068,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       evolvedResponseText: '',
       evolvedResponseVersion: 0,
       learningNotes: [],
+      codeBboxes: {},
     }
 
     setQueries((prev) => new Map(prev).set(queryId, queryState))

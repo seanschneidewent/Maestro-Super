@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { Loader2, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
-import { AgentSelectedPage } from '../../hooks/useQueryManager';
+import { AgentSelectedPage, PageAgentState, LearningNote } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 import { ThinkingSection } from './ThinkingSection';
+import { EvolvedResponse } from './EvolvedResponse';
 import { TextHighlightOverlay } from './TextHighlightOverlay';
 import { FindingBboxOverlay } from './FindingBboxOverlay';
 import { PageWorkspace } from './PageWorkspace';
@@ -161,6 +161,11 @@ interface FeedViewerProps {
   workspacePages?: WorkspacePage[];
   /** Callback when a workspace page pin is toggled. */
   onWorkspaceTogglePin?: (pageId: string) => void;
+  finalAnswerText?: string;
+  evolvedResponseText?: string;
+  evolvedResponseVersion?: number;
+  pageAgentStates?: PageAgentState[];
+  learningNotes?: LearningNote[];
 }
 
 // Cache for rendered page images (shared with PlanViewer if needed)
@@ -453,160 +458,6 @@ const ExpandedPageModal: React.FC<{
   );
 };
 
-// Pages cluster with sequential loading to avoid memory pressure
-const PagesCluster: React.FC<{
-  pages: AgentSelectedPage[];
-  findings: AgentFinding[];
-  containerWidth: number;
-  onTap: (page: AgentSelectedPage, pageImage: PageImage, findings: AgentFinding[]) => void;
-  isFirstCluster?: boolean;
-}> = ({ pages, findings, containerWidth, onTap, isFirstCluster = false }) => {
-  // Track loaded images and current loading index
-  const [loadedImages, setLoadedImages] = useState<Map<string, PageImage>>(new Map());
-  const [loadingIndex, setLoadingIndex] = useState(0);
-  const [currentlyLoading, setCurrentlyLoading] = useState(false);
-
-  // Load pages one at a time
-  useEffect(() => {
-    if (loadingIndex >= pages.length || currentlyLoading) return;
-
-    const page = pages[loadingIndex];
-
-    // Skip if already loaded (from cache)
-    const cached = pageImageCache.get(page.pageId);
-    if (cached) {
-      setLoadedImages(prev => new Map(prev).set(page.pageId, cached));
-      setLoadingIndex(prev => prev + 1);
-      return;
-    }
-
-    // Load this page
-    setCurrentlyLoading(true);
-    loadPageImage(page).then((img) => {
-      if (img) {
-        setLoadedImages(prev => new Map(prev).set(page.pageId, img));
-      }
-      setCurrentlyLoading(false);
-      setLoadingIndex(prev => prev + 1);
-    });
-  }, [pages, loadingIndex, currentlyLoading]);
-
-  return (
-    <div className="space-y-8">
-      {pages.map((page, index) => {
-        const pageImage = loadedImages.get(page.pageId);
-        const isWaiting = index > loadingIndex;
-        const isLoading = index === loadingIndex && currentlyLoading;
-
-        return (
-          <FeedPageItemDisplay
-            key={page.pageId}
-            page={page}
-            findings={findings}
-            pageImage={pageImage}
-            isLoading={isLoading}
-            isWaiting={isWaiting}
-            containerWidth={containerWidth}
-            onTap={onTap}
-            isFirstPage={isFirstCluster && index === 0}
-          />
-        );
-      })}
-    </div>
-  );
-};
-
-// Display component for a single page (doesn't handle loading itself)
-const FeedPageItemDisplay: React.FC<{
-  page: AgentSelectedPage;
-  findings: AgentFinding[];
-  pageImage: PageImage | null | undefined;
-  isLoading: boolean;
-  isWaiting: boolean;
-  containerWidth: number;
-  onTap: (page: AgentSelectedPage, pageImage: PageImage, findings: AgentFinding[]) => void;
-  isFirstPage?: boolean;
-}> = ({ page, findings, pageImage, isLoading, isWaiting, containerWidth, onTap, isFirstPage = false }) => {
-  // Loading or waiting state
-  if (isLoading || isWaiting || !pageImage) {
-    return (
-      <div className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
-        <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
-          <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
-        </div>
-        <div className="flex items-center justify-center bg-slate-100 rounded-xl w-full aspect-[4/3]">
-          {isLoading ? (
-            <Loader2 size={48} className="text-cyan-500 animate-spin" />
-          ) : isWaiting ? (
-            <div className="text-slate-400 text-sm">Waiting...</div>
-          ) : (
-            <div className="text-slate-500">Failed to load</div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Loaded state - clickable thumbnail
-  return (
-    <div className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
-      <div className="mb-2 bg-white/90 backdrop-blur-md border border-slate-200/50 px-4 py-2 rounded-xl shadow-sm">
-        <span className="text-sm font-medium text-slate-700">{page.pageName}</span>
-      </div>
-
-      <button
-        onClick={() => onTap(page, pageImage, findings)}
-        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden w-full"
-        {...(isFirstPage && { 'data-tutorial': 'first-page-result' })}
-      >
-        <img
-          src={pageImage.dataUrl}
-          alt={page.pageName}
-          className="w-full h-auto"
-          draggable={false}
-        />
-
-        {/* Text highlights from agent */}
-        {page.highlights && page.highlights.length > 0 && (
-          <TextHighlightOverlay
-            highlights={page.highlights}
-            imageWidth={pageImage.width}
-            imageHeight={pageImage.height}
-            originalWidth={page.imageWidth}
-            originalHeight={page.imageHeight}
-          />
-        )}
-
-        <FindingBboxOverlay
-          findings={findings}
-          pageId={page.pageId}
-        />
-
-        {/* Legacy pointer overlays */}
-        {page.pointers.map((pointer) => (
-          <div
-            key={pointer.pointerId}
-            className="absolute border-2 border-cyan-500/70 bg-cyan-500/10"
-            style={{
-              left: `${pointer.bboxX * 100}%`,
-              top: `${pointer.bboxY * 100}%`,
-              width: `${pointer.bboxWidth * 100}%`,
-              height: `${pointer.bboxHeight * 100}%`,
-            }}
-          />
-        ))}
-
-        {/* Tap hint overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/10 transition-colors">
-          <span className="opacity-0 hover:opacity-100 text-white text-sm font-medium bg-black/50 px-3 py-1 rounded-full transition-opacity">
-            Tap to zoom
-          </span>
-        </div>
-      </button>
-    </div>
-  );
-};
-
 // Standalone page viewer - full-screen zoomable view for file tree selections
 const StandalonePageViewer: React.FC<{
   page: AgentSelectedPage;
@@ -681,6 +532,11 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
   onExpandedPageClose,
   workspacePages,
   onWorkspaceTogglePin,
+  finalAnswerText = '',
+  evolvedResponseText = '',
+  evolvedResponseVersion = 0,
+  pageAgentStates = [],
+  learningNotes = [],
 }) => {
   // Scroll container ref and auto-scroll logic
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -788,8 +644,16 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
     );
   }
 
-  // Track if we've seen the first pages cluster for tutorial targeting
-  let isFirstPagesCluster = true;
+  const latestTextItem = [...feedItems]
+    .reverse()
+    .find((item): item is Extract<FeedItem, { type: 'text' }> => item.type === 'text');
+  const completedTrace = streamingTrace.length > 0 ? streamingTrace : (latestTextItem?.trace ?? []);
+  const completedElapsedTime = latestTextItem?.elapsedTime;
+  const fallbackResponseText = latestTextItem?.content ?? '';
+  const traceForThinking = isStreaming ? streamingTrace : completedTrace;
+  const hasTrace = traceForThinking.length > 0;
+  const responseText = evolvedResponseText || finalAnswerText || fallbackResponseText;
+  const showEvolvedResponse = Boolean(responseText) || pageAgentStates.length > 0 || learningNotes.length > 0;
 
   return (
     <div
@@ -807,127 +671,45 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
           />
         )}
 
+        {(isStreaming || hasTrace) && (
+          <ThinkingSection
+            isStreaming={isStreaming}
+            autoCollapse={false}
+            trace={traceForThinking}
+            thinkingText={thinkingText}
+            initialElapsedTime={isStreaming ? undefined : completedElapsedTime}
+            pageAgentStates={pageAgentStates}
+          />
+        )}
+
+        {showEvolvedResponse && (
+          <div className="w-full max-w-3xl mx-auto">
+            <EvolvedResponse
+              text={responseText}
+              version={evolvedResponseVersion}
+              pageAgentStates={pageAgentStates}
+              learningNotes={learningNotes}
+              isStreaming={isStreaming}
+            />
+          </div>
+        )}
+
         {feedItems.map((item) => {
           switch (item.type) {
             case 'user-query':
               return (
-                <div key={item.id} className="flex flex-col items-end gap-1 max-w-4xl mx-auto">
+                <div key={item.id} className="flex flex-col items-end max-w-4xl mx-auto">
                   <div className="max-w-[80%] bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-md">
                     {item.text}
                   </div>
-                  <ModeBadge mode={item.mode} />
                 </div>
               );
 
-            case 'pages': {
-              // Pages cluster - thumbnails are sized in FeedPageItemDisplay
-              // Uses sequential loading to avoid memory pressure
-              const isFirst = isFirstPagesCluster;
-              isFirstPagesCluster = false;
-              return (
-                <div key={item.id} className="mx-auto" style={{ maxWidth: containerWidth }}>
-                  <PagesCluster
-                    pages={item.pages}
-                    findings={item.findings || []}
-                    containerWidth={containerWidth}
-                    onTap={handlePageTap}
-                    isFirstCluster={isFirst}
-                  />
-                </div>
-              );
-            }
-
-            case 'text': {
-              const hasTrace = (item.trace?.length ?? 0) > 0;
-              const hasContent = (item.content?.trim() ?? '').length > 0;
-
-              return (
-                <div
-                  key={item.id}
-                  className="py-2 mx-auto space-y-4"
-                  style={{ maxWidth: containerWidth }}
-                >
-                  {/* ThinkingSection for completed responses */}
-                  {hasTrace && (
-                    <ThinkingSection
-                      isStreaming={false}
-                      autoCollapse={false}
-                      trace={item.trace}
-                      initialElapsedTime={item.elapsedTime}
-                    />
-                  )}
-
-                  {hasContent ? (
-                    <div className="mx-auto w-full max-w-3xl">
-                      <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl shadow-sm p-4 md:p-6">
-                        <div className="mb-3">
-                          <ModeBadge mode={item.mode} />
-                        </div>
-                        <div className="text-sm text-slate-700 leading-relaxed">
-                          <ReactMarkdown
-                            components={{
-                              h1: ({ children }) => (
-                                <h1 className="text-xl font-semibold text-slate-800 mt-4 mb-2">{children}</h1>
-                              ),
-                              h2: ({ children }) => (
-                                <h2 className="text-lg font-semibold text-slate-800 mt-4 mb-2">{children}</h2>
-                              ),
-                              h3: ({ children }) => (
-                                <h3 className="text-base font-semibold text-slate-800 mt-3 mb-2">{children}</h3>
-                              ),
-                              p: ({ children }) => (
-                                <p className="my-2 first:mt-0 last:mb-0">{children}</p>
-                              ),
-                              ul: ({ children }) => <ul className="my-2 ml-4 list-disc">{children}</ul>,
-                              ol: ({ children }) => <ol className="my-2 ml-4 list-decimal">{children}</ol>,
-                              li: ({ children }) => <li className="my-1">{children}</li>,
-                              strong: ({ children }) => (
-                                <strong className="font-semibold text-slate-800">{children}</strong>
-                              ),
-                              em: ({ children }) => <em className="text-slate-700">{children}</em>,
-                              a: ({ children, href }) => (
-                                <a
-                                  href={href}
-                                  className="text-cyan-600 hover:text-cyan-700 underline"
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {children}
-                                </a>
-                              ),
-                              code: ({ inline, children }) =>
-                                inline ? (
-                                  <code className="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">
-                                    {children}
-                                  </code>
-                                ) : (
-                                  <code className="text-xs font-mono">{children}</code>
-                                ),
-                              pre: ({ children }) => (
-                                <pre className="bg-slate-100 text-slate-800 rounded-lg p-3 overflow-x-auto text-xs font-mono">
-                                  {children}
-                                </pre>
-                              ),
-                              blockquote: ({ children }) => (
-                                <blockquote className="border-l-2 border-slate-200 pl-3 text-slate-600 italic">
-                                  {children}
-                                </blockquote>
-                              ),
-                            }}
-                          >
-                            {item.content}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-400 italic text-center">
-                      No response text available.
-                    </div>
-                  )}
-                </div>
-              );
-            }
+            case 'pages':
+            case 'text':
+            case 'annotated-images':
+            case 'workspace':
+              return null;
 
             case 'findings':
               return (
@@ -943,80 +725,10 @@ export const FeedViewer: React.FC<FeedViewerProps> = ({
                 </div>
               );
 
-            case 'annotated-images':
-              return (
-                <div key={item.id} className="py-2 mx-auto space-y-6" style={{ maxWidth: containerWidth }}>
-                  <div className="mx-auto w-full max-w-3xl">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500">Deep Analysis</div>
-                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide bg-cyan-100 text-cyan-700 border-cyan-200">
-                        Agentic Vision
-                      </span>
-                    </div>
-                  </div>
-                  {item.images.map((img, idx) => (
-                    <div key={`annotated-${idx}`} className="flex flex-col items-center w-[85%] max-w-[450px] mx-auto">
-                      <button
-                        onClick={() => {
-                          // Open in expanded modal-like view
-                          const dataUrl = `data:${img.mimeType};base64,${img.imageBase64}`;
-                          const win = window.open('', '_blank');
-                          if (win) {
-                            win.document.write(`
-                              <html>
-                                <head><title>Deep Analysis - Image ${idx + 1}</title>
-                                <style>body{margin:0;background:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;}
-                                img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head>
-                                <body><img src="${dataUrl}" /></body>
-                              </html>
-                            `);
-                          }
-                        }}
-                        className="relative shadow-2xl select-none cursor-pointer hover:ring-4 hover:ring-cyan-400/50 transition-all rounded-sm overflow-hidden w-full"
-                      >
-                        <img
-                          src={`data:${img.mimeType};base64,${img.imageBase64}`}
-                          alt={`Deep analysis finding ${idx + 1}`}
-                          className="w-full h-auto"
-                          draggable={false}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/10 transition-colors">
-                          <span className="opacity-0 hover:opacity-100 text-white text-sm font-medium bg-black/50 px-3 py-1 rounded-full transition-opacity">
-                            Tap to expand
-                          </span>
-                        </div>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              );
-
-            case 'workspace':
-              return (
-                <div key={item.id} className="py-2 mx-auto w-full" style={{ maxWidth: containerWidth }}>
-                  <PageWorkspace
-                    pages={item.workspacePages}
-                    onTogglePin={item.onTogglePin}
-                  />
-                </div>
-              );
-
             default:
               return null;
           }
         })}
-
-        {/* Streaming response with live ThinkingSection */}
-        {isStreaming && (
-          <div className="py-2 mx-auto" style={{ maxWidth: containerWidth }}>
-            <ThinkingSection
-              isStreaming={true}
-              autoCollapse={false}
-              trace={streamingTrace}
-              thinkingText={thinkingText}
-            />
-          </div>
-        )}
       </div>
 
       {/* Expanded page modal */}
