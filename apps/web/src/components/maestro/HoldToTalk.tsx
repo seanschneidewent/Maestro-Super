@@ -6,8 +6,6 @@ interface QueryInputProps {
   onChange: (value: string) => void
   onSubmit: () => void
   isProcessing: boolean
-  queryMode?: 'fast' | 'med' | 'deep'
-  onQueryModeChange?: (mode: 'fast' | 'med' | 'deep') => void
   placeholder?: string
   onFocus?: () => void
 }
@@ -20,8 +18,6 @@ export function QueryInput({
   onChange,
   onSubmit,
   isProcessing,
-  queryMode = 'fast',
-  onQueryModeChange,
   placeholder = 'Ask about your plans...',
   onFocus,
 }: QueryInputProps) {
@@ -139,7 +135,6 @@ export function QueryInput({
 
   // Button size matches the pill height for seamless integration
   const buttonSize = 52
-  const nextMode = queryMode === 'fast' ? 'med' : queryMode === 'med' ? 'deep' : 'fast'
 
   // Determine button state and icon
   const getButtonContent = () => {
@@ -192,40 +187,6 @@ export function QueryInput({
           ${isRecording ? 'placeholder:text-red-400' : ''}
         `}
       />
-
-      {/* Fast/Deep mode toggle */}
-      {onQueryModeChange && (
-        <button
-          type="button"
-          onClick={() => onQueryModeChange(nextMode)}
-          disabled={isProcessing}
-          title={`${queryMode.charAt(0).toUpperCase()}${queryMode.slice(1)} mode enabled`}
-          className={`
-            flex-shrink-0 rounded-full px-3 mr-2
-            text-xs font-semibold uppercase tracking-wide
-            transition-all duration-150
-            ${isProcessing ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : ''}
-            ${
-              !isProcessing && queryMode === 'deep'
-                ? 'bg-cyan-500 text-white hover:bg-cyan-600'
-                : ''
-            }
-            ${
-              !isProcessing && queryMode === 'med'
-                ? 'bg-amber-400 text-amber-900 hover:bg-amber-500'
-                : ''
-            }
-            ${
-              !isProcessing && queryMode === 'fast'
-                ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                : ''
-            }
-          `}
-          style={{ height: buttonSize }}
-        >
-          {queryMode === 'deep' ? 'Deep' : queryMode === 'med' ? 'Med' : 'Fast'}
-        </button>
-      )}
 
       {/* Action button - Mic / Stop / Send */}
       <button

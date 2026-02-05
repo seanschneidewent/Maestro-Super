@@ -481,6 +481,67 @@ def synthesize_evolved_response(page_results: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+def parse_code_bboxes(code: str) -> list[dict[str, Any]]:
+    """
+    Parse box_2d entries from Gemini code execution source.
+
+    Gemini emits boxes in code as:
+        {"box_2d": [ymin, xmin, ymax, xmax], "label": "..."}
+    with coordinates normalized to 0-1000.
+
+    We convert to frontend-friendly:
+        {"bbox": [x0, y0, x1, y1], "label": "..."}
+    with coordinates normalized to 0-1.
+    """
+    if not code:
+        return []
+
+    results: list[dict[str, Any]] = []
+    box_pattern = re.compile(
+        r'["\']box_2d["\']\s*:\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]'
+    )
+    label_pattern = re.compile(r'["\']label["\']\s*:\s*["\']((?:[^"\\]|\\.)*)["\']')
+
+    for box_match in box_pattern.finditer(code):
+        ymin = int(box_match.group(1))
+        xmin = int(box_match.group(2))
+        ymax = int(box_match.group(3))
+        xmax = int(box_match.group(4))
+
+        search_start = box_match.end()
+        search_region = code[search_start:search_start + 200]
+        label_match = label_pattern.search(search_region)
+        label = ""
+        if label_match:
+            raw_label = label_match.group(1)
+            try:
+                label = bytes(raw_label, "utf-8").decode("unicode_escape")
+            except Exception:
+                label = raw_label
+
+        x0 = xmin / 1000.0
+        y0 = ymin / 1000.0
+        x1 = xmax / 1000.0
+        y1 = ymax / 1000.0
+
+        # Skip degenerate boxes
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        # Clamp bounds to 0-1
+        x0 = max(0.0, min(1.0, x0))
+        y0 = max(0.0, min(1.0, y0))
+        x1 = max(0.0, min(1.0, x1))
+        y1 = max(0.0, min(1.0, y1))
+
+        results.append({
+            "bbox": [x0, y0, x1, y1],
+            "label": label,
+        })
+
+    return results
+
+
 async def run_deep_agent_for_page(
     page: dict[str, Any],
     search_mission: dict[str, Any],
@@ -545,6 +606,13 @@ async def run_deep_agent_for_page(
                 content = event.get("content")
                 if isinstance(content, str) and content:
                     yield {"type": "code_execution", "content": content, "page_id": page_id}
+                    bboxes = parse_code_bboxes(content)
+                    if bboxes:
+                        yield {
+                            "type": "code_bboxes",
+                            "page_id": page_id,
+                            "bboxes": bboxes,
+                        }
             elif event_type == "code_result":
                 content = event.get("content")
                 if isinstance(content, str) and content:
@@ -793,7 +861,7 @@ async def run_maestro_query(
         # Forward the collected events from this page agent
         for ev in result.get("events", []):
             ev_type = ev.get("type")
-            if ev_type in ("thinking", "code_execution", "code_result", "annotated_image", "text"):
+            if ev_type in ("thinking", "code_execution", "code_result", "annotated_image", "text", "code_bboxes"):
                 yield ev
                 trace.append(ev)
 

@@ -242,7 +242,6 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   // UI state
   const [showHistory, setShowHistory] = useState(false);
   const [queryInput, setQueryInput] = useState('');
-  const [queryMode, setQueryMode] = useState<'fast' | 'med' | 'deep'>('fast');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
   const [inputHasBeenFocused, setInputHasBeenFocused] = useState(false);
@@ -290,6 +289,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const {
     pages: workspacePages,
     syncFromSelectedPages: syncWorkspacePages,
+    syncFromPageAgentStates,
+    addBboxes,
     markAllDone: markWorkspaceDone,
     togglePin: toggleWorkspacePin,
     clear: clearWorkspace,
@@ -338,30 +339,9 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
       markWorkspaceDone();
     }
 
-    // Add pages and text response to feed (using callback data which has correct trace)
+    // Add findings + text response to feed (workspace cards handle page rendering)
     setFeedItems((prev) => {
       const newItems: FeedItem[] = [...prev];
-
-      // Add pages if we have them
-      if (query.pages.length > 0) {
-        newItems.push({
-          type: 'pages',
-          id: crypto.randomUUID(),
-          pages: query.pages,
-          findings: query.conceptResponse?.findings || [],
-          timestamp: Date.now(),
-        });
-      }
-
-      // Add annotated images from Agentic Vision if available
-      if (query.annotatedImages && query.annotatedImages.length > 0) {
-        newItems.push({
-          type: 'annotated-images',
-          id: crypto.randomUUID(),
-          images: query.annotatedImages,
-          timestamp: Date.now(),
-        });
-      }
 
       // Add structured findings if available
       if (query.conceptResponse && (query.conceptResponse.findings?.length || query.conceptResponse.gaps?.length)) {
@@ -424,6 +404,13 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const selectedPages = activeQuery?.selectedPages ?? [];
   const currentTool = activeQuery?.currentTool ?? null;
   const error = activeQuery?.error ?? null;
+  const codeBboxes = activeQuery?.codeBboxes ?? {};
+  const pageAgentStates = activeQuery?.pageAgentStates ?? [];
+  const learningNotes = activeQuery?.learningNotes ?? [];
+  const evolvedResponseText = activeQuery?.evolvedResponseText ?? '';
+  const evolvedResponseVersion = activeQuery?.evolvedResponseVersion ?? 0;
+  const lastPushedBboxCountRef = useRef<Record<string, number>>({});
+  const lastCodeBboxQueryIdRef = useRef<string | null>(null);
 
   // Toast management is now handled internally by useQueryManager
 
@@ -433,6 +420,33 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
       syncWorkspacePages(selectedPages);
     }
   }, [isStreaming, selectedPages, syncWorkspacePages]);
+
+  // Reset per-page bbox push counters when active query changes.
+  useEffect(() => {
+    if (lastCodeBboxQueryIdRef.current !== currentQueryId) {
+      lastCodeBboxQueryIdRef.current = currentQueryId;
+      lastPushedBboxCountRef.current = {};
+    }
+  }, [currentQueryId]);
+
+  // Stream code-execution bboxes into workspace cards without re-pushing duplicates.
+  useEffect(() => {
+    if (!isStreaming) return;
+    for (const [pageId, bboxes] of Object.entries(codeBboxes)) {
+      const lastCount = lastPushedBboxCountRef.current[pageId] ?? 0;
+      if (bboxes.length > lastCount) {
+        addBboxes(pageId, bboxes.slice(lastCount));
+        lastPushedBboxCountRef.current[pageId] = bboxes.length;
+      }
+    }
+  }, [isStreaming, codeBboxes, addBboxes]);
+
+  // Keep workspace card state badges in sync with orchestrator page_state events.
+  useEffect(() => {
+    if (isStreaming && pageAgentStates.length > 0) {
+      syncFromPageAgentStates(pageAgentStates);
+    }
+  }, [isStreaming, pageAgentStates, syncFromPageAgentStates]);
 
   // Handle suggested prompt selection - auto-submit
   const handleSuggestedPrompt = useCallback(async (prompt: string) => {
@@ -457,15 +471,14 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         type: 'user-query',
         id: crypto.randomUUID(),
         text: prompt,
-        mode: queryMode,
         timestamp: Date.now(),
       },
     ]);
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     // Toast management handled by useQueryManager
-    submitQuery(prompt, conversationId ?? undefined, selectedPageId, queryMode);
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, queryMode, tutorialActive, currentStep, advanceStep]);
+    submitQuery(prompt, conversationId ?? undefined, selectedPageId, 'deep');
+  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -620,6 +633,20 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     setShowHistory(false);
 
     const cachedPages = queryPagesCache.get(selectedQueryId);
+    if (cachedPages && cachedPages.length > 0) {
+      const pageNameLookup = new Map<string, string>(
+        cachedPages.map((page) => [page.pageId, page.pageName]),
+      );
+      const conceptData = extractConceptDataFromTrace(
+        (selectedQuery?.trace || []) as AgentTraceStep[],
+        pageNameLookup,
+      );
+      syncWorkspacePages(cachedPages, conceptData?.findings);
+      markWorkspaceDone();
+    } else {
+      clearWorkspace();
+    }
+
     // Use API responseText, or extract from trace as fallback
     const selectedResponseText = selectedQuery?.responseText || extractFinalAnswerFromTrace(selectedQuery?.trace) || '';
     restore(
@@ -939,6 +966,11 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
           onExpandedPageClose={handleExpandedPageClose}
           workspacePages={workspacePages}
           onWorkspaceTogglePin={toggleWorkspacePin}
+          finalAnswerText={finalAnswer}
+          evolvedResponseText={evolvedResponseText}
+          evolvedResponseVersion={evolvedResponseVersion}
+          pageAgentStates={pageAgentStates}
+          learningNotes={learningNotes}
         />
 
         {/* Query input bar - bottom, adjusts for keyboard on iOS */}
@@ -989,20 +1021,17 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
                           type: 'user-query',
                           id: crypto.randomUUID(),
                           text: trimmedQuery,
-                          mode: queryMode,
                           timestamp: Date.now(),
                         },
                       ]);
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
                       // Toast management handled by useQueryManager
-                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId, queryMode);
+                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId, 'deep');
                       setQueryInput('');
                     }
                   }}
                   isProcessing={isStreaming}
-                  queryMode={queryMode}
-                  onQueryModeChange={setQueryMode}
                   onFocus={() => {
                     setInputHasBeenFocused(true);
                   }}
