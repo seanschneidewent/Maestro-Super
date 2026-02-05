@@ -1,7 +1,9 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import sys
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 # Configure logging to output to stdout (Railway captures this)
@@ -18,6 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.services.core.pass2_worker import run_pass2_worker
 
 logger = logging.getLogger(__name__)
 from app.routers import (
@@ -33,11 +36,30 @@ from app.routers import (
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle — start background workers on startup."""
+    # Start Pass 2 enrichment worker
+    pass2_task = asyncio.create_task(run_pass2_worker())
+    logger.info("Pass 2 enrichment worker launched")
+
+    yield
+
+    # Shutdown: cancel the worker
+    pass2_task.cancel()
+    try:
+        await pass2_task
+    except asyncio.CancelledError:
+        logger.info("Pass 2 enrichment worker stopped")
+
+
 app = FastAPI(
     title="Maestro Super API",
     description="Construction plan analysis for superintendents",
     version="0.1.0",
     redirect_slashes=False,  # Prevent 307 redirects that break HTTPS through proxies
+    lifespan=lifespan,
 )
 
 # CORS for frontend

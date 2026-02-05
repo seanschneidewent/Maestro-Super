@@ -63,6 +63,17 @@ class Pointer(Base):
     # Flag for retry queue - set when embedding generation fails
     needs_embedding: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # V3 Pass 2 enrichment pipeline
+    enrichment_status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False, index=True,
+    )  # 'pending' | 'processing' | 'complete' | 'failed'
+    cross_references: Mapped[Optional[list]] = mapped_column(
+        JSONB, nullable=True,
+    )  # ["S-101", "E-201", "Detail 4/A3.01"]
+    enrichment_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB, nullable=True,
+    )  # {"confidence": 0.95, "reground_count": 0, "last_enriched_at": "..."}
+
     # Vector embedding for semantic search (Voyage 1024 dimensions)
     # Note: This column type only works with PostgreSQL + pgvector extension
     # When pgvector is not available, this column is skipped entirely

@@ -28,6 +28,7 @@ from app.schemas.upload import (
     PageInDisciplineResponse,
 )
 from app.schemas.hierarchy import ProjectHierarchyResponse
+from app.services.v3.experience import seed_default_experience
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,13 @@ def create_project(
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    # Seed default Experience files for V3
+    try:
+        seed_default_experience(project.id, db)
+    except Exception as e:
+        logger.warning("Failed to seed Experience for project %s: %s", project.id, e)
+
     return project
 
 
@@ -178,6 +186,12 @@ def bulk_upload(
         )
 
     db.commit()
+
+    # Seed default Experience files for V3
+    try:
+        seed_default_experience(project.id, db)
+    except Exception as e:
+        logger.warning("Failed to seed Experience for project %s: %s", project.id, e)
 
     return {
         "project": project,

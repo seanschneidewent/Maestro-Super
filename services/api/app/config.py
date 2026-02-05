@@ -20,6 +20,9 @@ DEEP_MODE_V3_AGENTIC = True
 DEEP_MODE_V4_UNCONSTRAINED = True
 MAESTRO_ORCHESTRATOR = False
 
+# V3 Pass 2 Enrichment
+PASS2_MODEL = BRAIN_MODE_MODEL  # Same model as Brain Mode by default
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -66,6 +69,11 @@ class Settings(BaseSettings):
     deep_mode_v3_agentic: bool = DEEP_MODE_V3_AGENTIC
     deep_mode_v4_unconstrained: bool = DEEP_MODE_V4_UNCONSTRAINED
     maestro_orchestrator: bool = MAESTRO_ORCHESTRATOR
+
+    # V3 Pass 2 Enrichment
+    pass2_model: str = PASS2_MODEL
+    pass2_max_concurrent: int = 3
+    pass2_poll_interval: float = 5.0  # seconds between poll cycles
 
     # CORS - production frontend URL
     frontend_url: str | None = None  # Set to Vercel URL in production
