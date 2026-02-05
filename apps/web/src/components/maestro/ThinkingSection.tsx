@@ -8,6 +8,7 @@ interface CognitionPanelProps {
   content: string
   isActive?: boolean
   defaultExpanded?: boolean
+  emptyLabel?: string
 }
 
 const COLOR_CLASSES: Record<CognitionPanelProps['color'], string> = {
@@ -22,12 +23,13 @@ export const CognitionPanel: React.FC<CognitionPanelProps> = ({
   content,
   isActive = false,
   defaultExpanded = false,
+  emptyLabel = 'No activity yet.',
 }) => {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const hasContent = content.trim().length > 0
 
   return (
-    <div className={`rounded-xl border ${COLOR_CLASSES[color]} overflow-hidden`}>
+    <div className={`rounded-xl border ${COLOR_CLASSES[color]} overflow-hidden transition-all duration-300`}>
       <button
         onClick={() => setExpanded((prev) => !prev)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left"
@@ -55,7 +57,7 @@ export const CognitionPanel: React.FC<CognitionPanelProps> = ({
               {content}
             </ReactMarkdown>
           ) : (
-            <div className="text-slate-400">No activity yet.</div>
+            <div className="text-slate-400">{emptyLabel}</div>
           )}
         </div>
       )}
@@ -69,6 +71,7 @@ interface ThinkingSectionProps {
   knowledgeUpdate?: string
   isActive?: boolean
   defaultExpanded?: boolean
+  learningActive?: boolean
 }
 
 export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
@@ -77,7 +80,11 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
   knowledgeUpdate = '',
   isActive = false,
   defaultExpanded = false,
+  learningActive = false,
 }) => {
+  const showLearning = learning.trim().length > 0 || learningActive
+  const showKnowledgeUpdate = knowledgeUpdate.trim().length > 0
+
   return (
     <div className="space-y-2">
       <CognitionPanel
@@ -87,20 +94,25 @@ export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
         isActive={isActive}
         defaultExpanded={defaultExpanded}
       />
-      <CognitionPanel
-        title="Learning"
-        color="yellow"
-        content={learning}
-        isActive={false}
-        defaultExpanded={false}
-      />
-      <CognitionPanel
-        title="Knowledge Update"
-        color="purple"
-        content={knowledgeUpdate}
-        isActive={false}
-        defaultExpanded={false}
-      />
+      {showLearning && (
+        <CognitionPanel
+          title="Learning"
+          color="yellow"
+          content={learning}
+          isActive={learningActive}
+          defaultExpanded={false}
+          emptyLabel={learningActive ? 'Learning in progress...' : 'No activity yet.'}
+        />
+      )}
+      {showKnowledgeUpdate && (
+        <CognitionPanel
+          title="Knowledge Update"
+          color="purple"
+          content={knowledgeUpdate}
+          isActive={false}
+          defaultExpanded={false}
+        />
+      )}
     </div>
   )
 }

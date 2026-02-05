@@ -42,6 +42,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle — start background workers on startup."""
+    SessionManager.instance().set_event_loop(asyncio.get_running_loop())
+
     # Rehydrate active V3 sessions
     db = SessionLocal()
     try:

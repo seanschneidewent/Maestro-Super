@@ -15,7 +15,7 @@ FAST_ROUTER_MODEL = "gemma-3-4b-it"
 
 # V3 Shell models
 MAESTRO_MODEL = "gemini-3-flash-preview"
-LEARNING_MODEL = "gemini-3-flash-preview"  # Placeholder for Phase 3
+LEARNING_MODEL = "gemini-3-flash-preview"
 
 # V3 Pass 2 Enrichment
 PASS2_MODEL = BRAIN_MODE_MODEL  # Same model as Brain Mode by default

@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.services.v3.experience import read_experience_for_query
 from app.services.v3.providers import chat_completion
 from app.services.v3.tool_executor import execute_maestro_tool
+from app.types.learning import InteractionPackage
 from app.types.session import LiveSession
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,10 @@ async def run_maestro_turn(
     session.maestro_messages.append({"role": "user", "content": user_message})
     session.last_active = time.time()
 
+    pointers_retrieved: list[dict[str, Any]] = []
+    workspace_actions: list[dict[str, Any]] = []
+    retrieved_ids: set[str] = set()
+
     experience_context, paths_read = read_experience_for_query(
         project_id=str(session.project_id),
         user_query=user_message,
@@ -321,6 +326,23 @@ async def run_maestro_turn(
                     "result": result,
                 }
 
+                if call["name"] == "search_knowledge" and isinstance(result, list):
+                    for item in result:
+                        if not isinstance(item, dict):
+                            continue
+                        pointer_id = item.get("pointer_id")
+                        if not pointer_id or pointer_id in retrieved_ids:
+                            continue
+                        pointers_retrieved.append(
+                            {
+                                "pointer_id": pointer_id,
+                                "title": item.get("title"),
+                                "description_snippet": item.get("description_snippet")
+                                or item.get("relevance_snippet"),
+                            }
+                        )
+                        retrieved_ids.add(pointer_id)
+
                 messages.append(
                     {
                         "role": "tool",
@@ -332,6 +354,28 @@ async def run_maestro_turn(
 
                 if call["name"] in {"add_pages", "remove_pages", "highlight_pointers", "pin_page"}:
                     yield _workspace_update_event(call["name"], result, session)
+                    action_entry: dict[str, Any] = {"action": call["name"]}
+                    if isinstance(result, dict):
+                        if result.get("page_ids"):
+                            action_entry["page_ids"] = result.get("page_ids")
+                        if result.get("pointer_ids"):
+                            action_entry["pointer_ids"] = result.get("pointer_ids")
+                        if result.get("page_id") and "page_ids" not in action_entry:
+                            action_entry["page_ids"] = [result.get("page_id")]
+                    workspace_actions.append(action_entry)
+
+                if call["name"] == "workspace_action":
+                    action_entry = {
+                        "action": (result.get("action") if isinstance(result, dict) else None)
+                        or call["arguments"].get("action"),
+                    }
+                    page_ids = call["arguments"].get("page_ids") or []
+                    pointer_ids = call["arguments"].get("pointer_ids") or []
+                    if page_ids:
+                        action_entry["page_ids"] = page_ids
+                    if pointer_ids:
+                        action_entry["pointer_ids"] = pointer_ids
+                    workspace_actions.append(action_entry)
 
             continue
 
@@ -340,12 +384,18 @@ async def run_maestro_turn(
         session.dirty = True
         session.last_active = time.time()
 
-        interaction_package = {
-            "query": user_message,
-            "response": iteration_text,
-            "paths_read": paths_read,
-            "workspace_state": _workspace_state_payload(session),
-        }
+        turn_number = sum(
+            1 for message in session.maestro_messages if message.get("role") == "user"
+        )
+        interaction_package = InteractionPackage(
+            user_query=user_message,
+            maestro_response=iteration_text,
+            pointers_retrieved=pointers_retrieved,
+            experience_context_used=paths_read,
+            workspace_actions=workspace_actions,
+            turn_number=turn_number,
+            timestamp=time.time(),
+        )
         try:
             session.learning_queue.put_nowait(interaction_package)
         except Exception:

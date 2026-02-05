@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Literal, Optional
@@ -24,6 +25,20 @@ from app.services.v3.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v3", tags=["v3"])
+
+
+def _drain_event_bus(session) -> list[dict]:
+    events: list[dict] = []
+    if not getattr(session, "event_bus", None):
+        return events
+    while True:
+        try:
+            events.append(session.event_bus.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+        except Exception:
+            break
+    return events
 
 
 class CreateSessionRequest(BaseModel):
@@ -188,8 +203,14 @@ async def query_session(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     async def event_generator():
+        for queued in _drain_event_bus(session):
+            yield f"data: {json.dumps(queued)}\n\n"
         async for event in run_maestro_turn(session, data.message, db):
             yield f"data: {json.dumps(event)}\n\n"
+            for queued in _drain_event_bus(session):
+                yield f"data: {json.dumps(queued)}\n\n"
+        for queued in _drain_event_bus(session):
+            yield f"data: {json.dumps(queued)}\n\n"
 
     return StreamingResponse(
         event_generator(),

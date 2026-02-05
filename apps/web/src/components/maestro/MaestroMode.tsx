@@ -107,6 +107,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ projectId }) => {
                     knowledgeUpdate={turn.panels.knowledge_update}
                     isActive={turn.id === lastTurnId}
                     defaultExpanded={turn.id === lastTurnId}
+                    learningActive={turn.learningStarted && !turn.learningDone}
                   />
 
                   <div className="flex justify-end">

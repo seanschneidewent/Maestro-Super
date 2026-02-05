@@ -36,6 +36,13 @@ class LiveSession:
     # Learning queue — interactions waiting for Learning to process
     learning_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
 
+    # Event bus - forwards async Learning events to SSE clients
+    event_bus: asyncio.Queue = field(default_factory=asyncio.Queue)
+
+    # Background Learning worker task
+    learning_task: asyncio.Task | None = None
+    learning_task_loop: asyncio.AbstractEventLoop | None = None
+
     # Metadata
     dirty: bool = False
     last_active: float = 0.0

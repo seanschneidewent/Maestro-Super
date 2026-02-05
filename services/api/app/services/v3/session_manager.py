@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.database.session import SessionLocal
 from app.models.session import MaestroSession
+from app.services.v3.learning_agent import run_learning_worker
 from app.types.session import LiveSession, WorkspaceState
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,45 @@ class SessionManager:
 
     def __init__(self) -> None:
         self._sessions: dict[UUID, LiveSession] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def _spawn_learning_worker(self, session: LiveSession) -> None:
+        if session.learning_task and not session.learning_task.done():
+            return
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            logger.debug("Learning worker loop not available for session %s", session.session_id)
+            return
+
+        def _create_task() -> None:
+            if session.learning_task and not session.learning_task.done():
+                return
+            task = loop.create_task(run_learning_worker(session, SessionLocal))
+            session.learning_task = task
+            session.learning_task_loop = loop
+
+        try:
+            if asyncio.get_running_loop() is loop:
+                _create_task()
+            else:
+                loop.call_soon_threadsafe(_create_task)
+        except RuntimeError:
+            loop.call_soon_threadsafe(_create_task)
+
+    def _cancel_learning_worker(self, session: LiveSession) -> None:
+        task = session.learning_task
+        if not task or task.done():
+            return
+        loop = session.learning_task_loop or self._loop
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(task.cancel)
+        else:
+            task.cancel()
+        session.learning_task = None
+        session.learning_task_loop = None
 
     @classmethod
     def instance(cls) -> "SessionManager":
@@ -89,6 +129,7 @@ class SessionManager:
             last_active=time.time(),
         )
         self._sessions[live.session_id] = live
+        self._spawn_learning_worker(live)
         return live
 
     def get_session(self, session_id: str | UUID, db: DBSession) -> LiveSession | None:
@@ -120,6 +161,7 @@ class SessionManager:
             last_active=time.time(),
         )
         self._sessions[live.session_id] = live
+        self._spawn_learning_worker(live)
         return live
 
     def get_or_create_telegram_session(
@@ -202,6 +244,7 @@ class SessionManager:
                 last_active=time.time(),
             )
             self._sessions[session_uuid] = live
+            self._spawn_learning_worker(live)
             count += 1
         if count:
             logger.info("Rehydrated %d active sessions", count)
@@ -215,6 +258,7 @@ class SessionManager:
                 self.checkpoint_session(session, db)
             except Exception as exc:
                 logger.warning("Failed to checkpoint session %s on close: %s", session_uuid, exc)
+            self._cancel_learning_worker(session)
         row = (
             db.query(MaestroSession)
             .filter(MaestroSession.id == str(session_uuid))

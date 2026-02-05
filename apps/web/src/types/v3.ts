@@ -9,6 +9,7 @@ export interface V3ThinkingEvent {
   type: 'thinking'
   panel: V3ThinkingPanel
   content: string
+  turn_number?: number
 }
 
 export interface V3ToolCallEvent {
@@ -55,6 +56,11 @@ export interface V3DoneEvent {
   type: 'done'
 }
 
+export interface V3LearningDoneEvent {
+  type: 'learning_done'
+  turn_number?: number
+}
+
 export type V3Event =
   | V3TokenEvent
   | V3ThinkingEvent
@@ -62,6 +68,7 @@ export type V3Event =
   | V3ToolResultEvent
   | V3WorkspaceUpdateEvent
   | V3DoneEvent
+  | V3LearningDoneEvent
 
 export interface V3WorkspaceState {
   displayed_pages: string[]

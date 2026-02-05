@@ -7,11 +7,14 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 interface MaestroTurn {
   id: string
+  turnNumber: number
   user: string
   response: string
   panels: Record<V3ThinkingPanel, string>
   toolEvents: string[]
   done: boolean
+  learningStarted: boolean
+  learningDone: boolean
 }
 
 interface UseSessionResult {
@@ -137,7 +140,10 @@ export function useSession(): UseSessionResult {
   const handleEvent = useCallback((turnId: string, event: V3Event) => {
     setTurns((prev) => {
       const next = [...prev]
-      const index = next.findIndex((turn) => turn.id === turnId)
+      const turnNumber = 'turn_number' in event ? event.turn_number : undefined
+      const index = turnNumber
+        ? next.findIndex((turn) => turn.turnNumber === turnNumber)
+        : next.findIndex((turn) => turn.id === turnId)
       if (index === -1) return prev
       const turn = { ...next[index] }
 
@@ -147,6 +153,9 @@ export function useSession(): UseSessionResult {
           break
         case 'thinking':
           turn.panels[event.panel] = appendPanelText(turn.panels[event.panel], event.content)
+          if (event.panel === 'learning') {
+            turn.learningStarted = true
+          }
           break
         case 'tool_call':
           turn.toolEvents = [...turn.toolEvents, `Tool call: ${event.tool}`]
@@ -167,13 +176,17 @@ export function useSession(): UseSessionResult {
           break
         case 'done':
           turn.done = true
+          setIsStreaming(false)
+          break
+        case 'learning_done':
+          turn.learningDone = true
           break
       }
 
       next[index] = turn
       return next
     })
-  }, [applyWorkspaceUpdate])
+  }, [applyWorkspaceUpdate, setIsStreaming])
 
   const sendMessage = useCallback(async (message: string) => {
     if (!sessionId) return
@@ -183,11 +196,14 @@ export function useSession(): UseSessionResult {
       ...prev,
       {
         id: turnId,
+        turnNumber: prev.length ? prev[prev.length - 1].turnNumber + 1 : 1,
         user: message,
         response: '',
         panels: createEmptyPanels(),
         toolEvents: [],
         done: false,
+        learningStarted: false,
+        learningDone: false,
       },
     ])
 
