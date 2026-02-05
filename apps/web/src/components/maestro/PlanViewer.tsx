@@ -3,7 +3,6 @@ import * as pdfjs from 'pdfjs-dist';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { downloadFile, getPublicUrl } from '../../lib/storage';
-import { AgentSelectedPage } from '../../hooks/useQueryManager';
 import { MaestroText } from './MaestroText';
 
 // Set up PDF.js worker
@@ -19,7 +18,12 @@ interface PageImage {
 }
 
 interface PlanViewerProps {
-  selectedPages?: AgentSelectedPage[];
+  selectedPages?: Array<{
+    pageId: string;
+    pageName: string;
+    filePath: string;
+    disciplineId: string;
+  }>;
   onVisiblePageChange?: (pageId: string, disciplineId: string) => void;
   showPointers?: boolean; // Only show pointer overlays when viewing query results
   tutorialText?: string; // Override greeting with tutorial message
@@ -51,7 +55,7 @@ const WELCOME_GREETINGS = [
 ];
 
 // Reusable function to load a page image (used by both prefetch and current-page loading)
-async function loadPageImage(page: AgentSelectedPage): Promise<PageImage | null> {
+async function loadPageImage(page: PlanViewerProps['selectedPages'] extends Array<infer T> ? T : never): Promise<PageImage | null> {
   // Check cache first
   const cached = pageImageCache.get(page.pageId);
   if (cached) {

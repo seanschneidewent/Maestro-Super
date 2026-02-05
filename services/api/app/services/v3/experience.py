@@ -6,6 +6,7 @@ and reading Experience context for Maestro queries (Phase 2+).
 """
 
 import logging
+import re
 from uuid import uuid4
 
 from sqlalchemy.orm import Session as DBSession
@@ -122,3 +123,104 @@ def seed_default_experience(project_id: str, db: DBSession) -> int:
         )
 
     return created
+
+
+def _parse_routing_rules(content: str) -> list[tuple[list[str], list[str]]]:
+    """
+    Parse routing_rules.md into keyword -> paths rules.
+
+    Supports lines like:
+      - cooler, walk-in -> subs/walk_in_cooler.md
+      - concrete | slab => subs/concrete.md
+      - foundations: subs/structural.md
+    """
+    rules: list[tuple[list[str], list[str]]] = []
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(("-", "*")):
+            line = line[1:].strip()
+        splitter = None
+        for token in ("->", "=>", ":"):
+            if token in line:
+                splitter = token
+                break
+        if not splitter:
+            continue
+        left, right = line.split(splitter, 1)
+        keywords = [
+            kw.strip().strip('"').strip("'")
+            for kw in re.split(r",|\bor\b|\|", left, flags=re.IGNORECASE)
+            if kw.strip()
+        ]
+        paths = re.findall(r"[\w\-./]+\.md", right)
+        if not paths:
+            candidate = right.strip().strip('"').strip("'")
+            if candidate.endswith(".md"):
+                paths = [candidate]
+        if keywords and paths:
+            rules.append((keywords, paths))
+    return rules
+
+
+def read_experience_for_query(
+    project_id: str,
+    user_query: str,
+    db: DBSession,
+) -> tuple[str, list[str]]:
+    """
+    Read Experience context for a query.
+
+    Returns a formatted context string and list of paths read.
+    """
+    default_paths = list(DEFAULT_EXPERIENCE_FILES.keys())
+    files = (
+        db.query(ExperienceFile)
+        .filter(ExperienceFile.project_id == project_id)
+        .filter(ExperienceFile.path.in_(default_paths))
+        .all()
+    )
+    file_map = {f.path: f.content for f in files}
+
+    routing_content = file_map.get("routing_rules.md", "")
+    rules = _parse_routing_rules(routing_content)
+
+    matched_paths: list[str] = []
+    query_lower = (user_query or "").lower()
+    for keywords, paths in rules:
+        if any(keyword.lower() in query_lower for keyword in keywords):
+            matched_paths.extend(paths)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    ordered_paths: list[str] = []
+    for path in [*default_paths, *matched_paths]:
+        if path in seen:
+            continue
+        seen.add(path)
+        ordered_paths.append(path)
+
+    # Fetch matched extended files
+    extended_paths = [p for p in ordered_paths if p not in file_map]
+    if extended_paths:
+        extended_files = (
+            db.query(ExperienceFile)
+            .filter(ExperienceFile.project_id == project_id)
+            .filter(ExperienceFile.path.in_(extended_paths))
+            .all()
+        )
+        for f in extended_files:
+            file_map[f.path] = f.content
+
+    sections: list[str] = []
+    paths_read: list[str] = []
+    for path in ordered_paths:
+        content = file_map.get(path)
+        if content is None:
+            continue
+        paths_read.append(path)
+        sections.append(f"## {path}\n{content.strip()}")
+
+    context = "\n\n".join(sections).strip()
+    return context, paths_read

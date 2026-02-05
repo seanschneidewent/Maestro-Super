@@ -1,4 +1,4 @@
-"""Search schemas."""
+"""Search schemas for project pointer search."""
 
 from pydantic import BaseModel, ConfigDict, Field
 

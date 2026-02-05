@@ -1,12 +1,10 @@
 // Field/Query hooks
 export { useFieldStream } from './useFieldStream'
 export type { AgentSelectedPage, AgentSelectedPointer, CompletedQuery } from './useFieldStream'
-export { useQueryManager } from './useQueryManager'
-export type { QueryState, QueryStatus } from './useQueryManager'
+export { useSession } from './useSession'
 
 // Other hooks
 export { useAgentStream } from './useAgentStream'
-export { useConversation } from './useConversation'
 export { useGoogleDrivePicker } from './useGoogleDrivePicker'
 export { useHierarchy } from './useHierarchy'
 export { useKeyboardHeight } from './useKeyboardHeight'

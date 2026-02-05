@@ -12,13 +12,10 @@ USE_AGENTIC_VISION = True
 QUERY_VISION_MODEL = "gemini-2.0-flash"
 AGENT_QUERY_MODEL = "gemini-3-flash-preview"
 FAST_ROUTER_MODEL = "gemma-3-4b-it"
-FAST_RANKER_V2 = False
-FAST_SELECTOR_RERANK = False
-MED_MODE_REGIONS = True
-DEEP_MODE_VISION_V2 = True
-DEEP_MODE_V3_AGENTIC = True
-DEEP_MODE_V4_UNCONSTRAINED = True
-MAESTRO_ORCHESTRATOR = False
+
+# V3 Shell models
+MAESTRO_MODEL = "gemini-3-flash-preview"
+LEARNING_MODEL = "gemini-3-flash-preview"  # Placeholder for Phase 3
 
 # V3 Pass 2 Enrichment
 PASS2_MODEL = BRAIN_MODE_MODEL  # Same model as Brain Mode by default
@@ -62,13 +59,10 @@ class Settings(BaseSettings):
     brain_mode_thinking_level: str = BRAIN_MODE_THINKING_LEVEL
     use_agentic_vision: bool = USE_AGENTIC_VISION
     fast_router_model: str = FAST_ROUTER_MODEL
-    fast_ranker_v2: bool = FAST_RANKER_V2
-    fast_selector_rerank: bool = FAST_SELECTOR_RERANK
-    med_mode_regions: bool = MED_MODE_REGIONS
-    deep_mode_vision_v2: bool = DEEP_MODE_VISION_V2
-    deep_mode_v3_agentic: bool = DEEP_MODE_V3_AGENTIC
-    deep_mode_v4_unconstrained: bool = DEEP_MODE_V4_UNCONSTRAINED
-    maestro_orchestrator: bool = MAESTRO_ORCHESTRATOR
+
+    # V3 Shell models
+    maestro_model: str = MAESTRO_MODEL
+    learning_model: str = LEARNING_MODEL
 
     # V3 Pass 2 Enrichment
     pass2_model: str = PASS2_MODEL

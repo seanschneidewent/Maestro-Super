@@ -1,0 +1,355 @@
+"""Maestro agent for V3 sessions."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import asdict
+from typing import Any, AsyncIterator
+from uuid import uuid4
+
+from sqlalchemy.orm import Session as DBSession
+
+from app.config import get_settings
+from app.models.project import Project
+from app.services.v3.experience import read_experience_for_query
+from app.services.v3.providers import chat_completion
+from app.services.v3.tool_executor import execute_maestro_tool
+from app.types.session import LiveSession
+
+logger = logging.getLogger(__name__)
+
+
+WORKSPACE_TOOLS = [
+    {
+        "name": "search_knowledge",
+        "description": "Search the project's knowledge base of Pointers for relevant details.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_pointer",
+        "description": "Read a specific Pointer's rich description and cross-references.",
+        "parameters": {
+            "type": "object",
+            "properties": {"pointer_id": {"type": "string"}},
+            "required": ["pointer_id"],
+        },
+    },
+    {
+        "name": "read_experience",
+        "description": "Read a specific Experience file by path.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "list_experience",
+        "description": "List all Experience files for the current project.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_pages",
+        "description": "Add plan pages to the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["page_ids"],
+        },
+    },
+    {
+        "name": "remove_pages",
+        "description": "Remove plan pages from the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["page_ids"],
+        },
+    },
+    {
+        "name": "highlight_pointers",
+        "description": "Highlight pointers in the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pointer_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["pointer_ids"],
+        },
+    },
+    {
+        "name": "pin_page",
+        "description": "Pin a page to keep it at the top of the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {"page_id": {"type": "string"}},
+            "required": ["page_id"],
+        },
+    },
+]
+
+
+TELEGRAM_TOOLS = [
+    {
+        "name": "search_knowledge",
+        "description": "Search the project's knowledge base of Pointers for relevant details.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_pointer",
+        "description": "Read a specific Pointer's rich description and cross-references.",
+        "parameters": {
+            "type": "object",
+            "properties": {"pointer_id": {"type": "string"}},
+            "required": ["pointer_id"],
+        },
+    },
+    {
+        "name": "read_experience",
+        "description": "Read a specific Experience file by path.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "list_experience",
+        "description": "List all Experience files for the current project.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_workspaces",
+        "description": "List active workspaces for the current project.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "workspace_action",
+        "description": "Trigger a workspace action (add/remove pages, highlight pointers, pin page).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "session_id": {"type": "string"},
+                "page_ids": {"type": "array", "items": {"type": "string"}},
+                "pointer_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["action", "session_id"],
+        },
+    },
+]
+
+
+def build_maestro_system_prompt(
+    session_type: str,
+    workspace_state: dict[str, Any] | None,
+    experience_context: str,
+    project_name: str | None,
+) -> str:
+    channel_line = (
+        "You are chatting in the web workspace. You can assemble plan pages on screen using tools."
+        if session_type == "workspace"
+        else "You are chatting over Telegram with a superintendent in the field. Keep responses short and direct."
+    )
+
+    workspace_line = ""
+    if session_type == "workspace" and workspace_state is not None:
+        workspace_line = f"Current workspace state: {json.dumps(workspace_state)}"
+
+    experience_block = experience_context or "(No Experience context available.)"
+
+    project_line = f"Project: {project_name}" if project_name else ""
+
+    return "\n\n".join(
+        [
+            "You are Maestro, a construction plan analysis partner for superintendents.",
+            "Be honest about uncertainty. If you are unsure, say so and ask a clarifying question.",
+            channel_line,
+            project_line,
+            workspace_line,
+            "Experience context (read-only):",
+            experience_block,
+            "Use tools to search knowledge, read pointers, and update the workspace when needed.",
+        ]
+    ).strip()
+
+
+def _workspace_state_payload(session: LiveSession) -> dict[str, Any] | None:
+    if session.workspace_state is None:
+        return None
+    return asdict(session.workspace_state)
+
+
+def _workspace_update_event(
+    action: str,
+    result: dict[str, Any] | list[dict[str, Any]],
+    session: LiveSession,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": "workspace_update",
+        "action": action,
+        "workspace_state": _workspace_state_payload(session),
+    }
+
+    if isinstance(result, dict):
+        if result.get("page_ids"):
+            payload["page_ids"] = result.get("page_ids")
+        if result.get("pointer_ids"):
+            payload["pointer_ids"] = result.get("pointer_ids")
+        if result.get("pages"):
+            payload["pages"] = result.get("pages")
+        if result.get("pointers"):
+            payload["pointers"] = result.get("pointers")
+        if result.get("pinned_pages"):
+            payload["pinned_pages"] = result.get("pinned_pages")
+        if result.get("page_id") and "page_ids" not in payload:
+            payload["page_ids"] = [result.get("page_id")]
+    return payload
+
+
+async def run_maestro_turn(
+    session: LiveSession,
+    user_message: str,
+    db: DBSession,
+) -> AsyncIterator[dict[str, Any]]:
+    session.maestro_messages.append({"role": "user", "content": user_message})
+    session.last_active = time.time()
+
+    experience_context, paths_read = read_experience_for_query(
+        project_id=str(session.project_id),
+        user_query=user_message,
+        db=db,
+    )
+
+    project_name = None
+    project = db.query(Project).filter(Project.id == str(session.project_id)).first()
+    if project:
+        project_name = project.name
+
+    system_prompt = build_maestro_system_prompt(
+        session_type=session.session_type,
+        workspace_state=_workspace_state_payload(session),
+        experience_context=experience_context,
+        project_name=project_name,
+    )
+
+    tools = WORKSPACE_TOOLS if session.session_type == "workspace" else TELEGRAM_TOOLS
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        *session.maestro_messages,
+    ]
+
+    settings = get_settings()
+    model = settings.maestro_model
+
+    while True:
+        iteration_text = ""
+        tool_calls: list[dict[str, Any]] = []
+
+        async for chunk in chat_completion(messages, tools, model=model, stream=True):
+            event_type = chunk.get("type")
+            if event_type == "token":
+                content = chunk.get("content") or ""
+                iteration_text += content
+                yield {"type": "token", "content": content}
+            elif event_type == "thinking":
+                content = chunk.get("content") or ""
+                if content:
+                    yield {
+                        "type": "thinking",
+                        "panel": "workspace_assembly",
+                        "content": content,
+                    }
+            elif event_type == "tool_call":
+                tool_calls.append(
+                    {
+                        "id": chunk.get("id") or str(uuid4()),
+                        "name": chunk.get("name"),
+                        "arguments": chunk.get("arguments") or {},
+                    }
+                )
+                yield {
+                    "type": "tool_call",
+                    "tool": chunk.get("name"),
+                    "arguments": chunk.get("arguments") or {},
+                }
+            elif event_type == "done":
+                break
+
+        if tool_calls:
+            assistant_message = {
+                "role": "assistant",
+                "content": iteration_text,
+                "tool_calls": tool_calls,
+            }
+            messages.append(assistant_message)
+
+            for call in tool_calls:
+                result = await execute_maestro_tool(
+                    call["name"],
+                    call["arguments"],
+                    session,
+                    db,
+                )
+                session.dirty = True
+                session.last_active = time.time()
+
+                yield {
+                    "type": "tool_result",
+                    "tool": call["name"],
+                    "result": result,
+                }
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "name": call["name"],
+                        "content": result,
+                    }
+                )
+
+                if call["name"] in {"add_pages", "remove_pages", "highlight_pointers", "pin_page"}:
+                    yield _workspace_update_event(call["name"], result, session)
+
+            continue
+
+        # Final response
+        session.maestro_messages.append({"role": "assistant", "content": iteration_text})
+        session.dirty = True
+        session.last_active = time.time()
+
+        interaction_package = {
+            "query": user_message,
+            "response": iteration_text,
+            "paths_read": paths_read,
+            "workspace_state": _workspace_state_payload(session),
+        }
+        try:
+            session.learning_queue.put_nowait(interaction_package)
+        except Exception:
+            logger.debug("Learning queue unavailable for session %s", session.session_id)
+
+        yield {"type": "done"}
+        break

@@ -20,7 +20,9 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.database.session import SessionLocal
 from app.services.core.pass2_worker import run_pass2_worker
+from app.services.v3.session_manager import SessionManager, run_checkpoint_loop
 
 logger = logging.getLogger(__name__)
 from app.routers import (
@@ -31,7 +33,7 @@ from app.routers import (
     pointers,
     processing,
     projects,
-    queries,
+    v3_sessions,
 )
 
 settings = get_settings()
@@ -40,18 +42,33 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle — start background workers on startup."""
+    # Rehydrate active V3 sessions
+    db = SessionLocal()
+    try:
+        SessionManager.instance().rehydrate_active_sessions(db)
+    finally:
+        db.close()
+
     # Start Pass 2 enrichment worker
     pass2_task = asyncio.create_task(run_pass2_worker())
     logger.info("Pass 2 enrichment worker launched")
+
+    checkpoint_task = asyncio.create_task(run_checkpoint_loop())
+    logger.info("Session checkpoint loop launched")
 
     yield
 
     # Shutdown: cancel the worker
     pass2_task.cancel()
+    checkpoint_task.cancel()
     try:
         await pass2_task
     except asyncio.CancelledError:
         logger.info("Pass 2 enrichment worker stopped")
+    try:
+        await checkpoint_task
+    except asyncio.CancelledError:
+        logger.info("Session checkpoint loop stopped")
 
 
 app = FastAPI(
@@ -95,9 +112,9 @@ app.include_router(projects.router)
 app.include_router(disciplines.router)
 app.include_router(pages.router)
 app.include_router(pointers.router)
-app.include_router(queries.router)
 app.include_router(conversations.router)
 app.include_router(processing.router)
+app.include_router(v3_sessions.router)
 
 
 # Global exception handlers

@@ -17,7 +17,7 @@ from app.models.page import Page
 from app.models.pointer import Pointer
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
-from app.schemas.search import SearchResponse, SearchResult
+from app.schemas.project_search import SearchResponse, SearchResult
 from app.services.voyage import embed_pointer as generate_embedding
 from app.services.search import search_pointers
 
