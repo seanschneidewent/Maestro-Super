@@ -16,3 +16,4 @@ class InteractionPackage:
     workspace_actions: list[dict]
     turn_number: int
     timestamp: float
+    is_heartbeat: bool = False

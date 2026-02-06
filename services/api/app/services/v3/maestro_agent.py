@@ -19,6 +19,8 @@ from app.services.v3.tool_executor import execute_maestro_tool
 from app.types.learning import InteractionPackage
 from app.types.session import LiveSession
 
+HEARTBEAT_TRIGGER_PREFIX = "[HEARTBEAT TRIGGER"
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,12 +192,27 @@ TELEGRAM_TOOLS = [
 ]
 
 
+HEARTBEAT_INSTRUCTIONS = """This is your scheduled proactive turn. The superintendent did NOT message you.
+
+Your options:
+- TELL: Share a proactive insight (upcoming activity × plan detail = actionable info)
+- ASK: Ask a calculated scheduling question that fills a gap in your understanding
+
+Requirements:
+- Ground everything in Knowledge (use search_knowledge tool) and Experience (read schedule.md)
+- Be concise. One insight or one question per heartbeat. Not both.
+- If you have nothing valuable to share, say so briefly: "All clear on my end. Let me know if anything changes."
+- Never repeat a question you already asked (check your conversation history)
+- Your message should read like a text from a knowledgeable colleague, not software."""
+
+
 def build_maestro_system_prompt(
     session_type: str,
     workspace_state: dict[str, Any] | None,
     experience_context: str,
     project_name: str | None,
     workspace_list: list[dict[str, Any]] | None = None,
+    is_heartbeat: bool = False,
 ) -> str:
     if session_type == "workspace":
         channel_block = (
@@ -225,18 +242,21 @@ Communication style for Telegram:
 
     project_line = f"Project: {project_name}" if project_name else ""
 
-    return "\n\n".join(
-        [
-            "You are Maestro, a construction plan analysis partner for superintendents.",
-            "Be honest about uncertainty. If you are unsure, say so and ask a clarifying question.",
-            channel_block,
-            project_line,
-            workspace_line,
-            "Experience context (read-only):",
-            experience_block,
-            "Use tools to search knowledge, read pointers, and update the workspace when needed.",
-        ]
-    ).strip()
+    heartbeat_block = HEARTBEAT_INSTRUCTIONS if is_heartbeat else ""
+
+    parts = [
+        "You are Maestro, a construction plan analysis partner for superintendents.",
+        "Be honest about uncertainty. If you are unsure, say so and ask a clarifying question.",
+        channel_block,
+        project_line,
+        workspace_line,
+        heartbeat_block,
+        "Experience context (read-only):",
+        experience_block,
+        "Use tools to search knowledge, read pointers, and update the workspace when needed.",
+    ]
+
+    return "\n\n".join(p for p in parts if p).strip()
 
 
 def _workspace_state_payload(session: LiveSession) -> dict[str, Any] | None:
@@ -277,6 +297,9 @@ async def run_maestro_turn(
     user_message: str,
     db: DBSession,
 ) -> AsyncIterator[dict[str, Any]]:
+    # Detect if this is a heartbeat turn
+    is_heartbeat = user_message.startswith(HEARTBEAT_TRIGGER_PREFIX)
+
     turn_number = (
         sum(1 for message in session.maestro_messages if message.get("role") == "user")
         + 1
@@ -308,6 +331,7 @@ async def run_maestro_turn(
         workspace_state=_workspace_state_payload(session),
         experience_context=experience_context,
         project_name=project_name,
+        is_heartbeat=is_heartbeat,
     )
 
     tools = WORKSPACE_TOOLS if session.session_type == "workspace" else TELEGRAM_TOOLS
@@ -466,6 +490,7 @@ async def run_maestro_turn(
             workspace_actions=workspace_actions,
             turn_number=turn_number,
             timestamp=time.time(),
+            is_heartbeat=is_heartbeat,
         )
         try:
             session.learning_queue.put_nowait(interaction_package)

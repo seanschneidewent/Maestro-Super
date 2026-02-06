@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import get_settings
 from app.database.session import SessionLocal
 from app.services.core.pass2_worker import run_pass2_worker
+from app.services.v3.heartbeat import run_heartbeat_scheduler
 from app.services.v3.session_manager import SessionManager, run_checkpoint_loop
 
 logger = logging.getLogger(__name__)
@@ -59,11 +60,16 @@ async def lifespan(app: FastAPI):
     checkpoint_task = asyncio.create_task(run_checkpoint_loop())
     logger.info("Session checkpoint loop launched")
 
+    # Start Heartbeat scheduler (if enabled)
+    heartbeat_task = asyncio.create_task(run_heartbeat_scheduler(SessionLocal))
+    logger.info("Heartbeat scheduler launched")
+
     yield
 
-    # Shutdown: cancel the worker
+    # Shutdown: cancel the workers
     pass2_task.cancel()
     checkpoint_task.cancel()
+    heartbeat_task.cancel()
     try:
         await pass2_task
     except asyncio.CancelledError:
@@ -72,6 +78,10 @@ async def lifespan(app: FastAPI):
         await checkpoint_task
     except asyncio.CancelledError:
         logger.info("Session checkpoint loop stopped")
+    try:
+        await heartbeat_task
+    except asyncio.CancelledError:
+        logger.info("Heartbeat scheduler stopped")
 
 
 app = FastAPI(

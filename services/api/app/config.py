@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str | None = None
     telegram_default_project_id: str | None = None  # v1 shortcut for single-project
 
+    # Heartbeat System
+    heartbeat_enabled: bool = False
+    heartbeat_schedule: str = "06:30,12:00"  # comma-separated HH:MM
+    heartbeat_timezone: str = "America/Chicago"
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""
