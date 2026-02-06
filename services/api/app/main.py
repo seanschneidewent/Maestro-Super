@@ -1,7 +1,9 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import sys
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 # Configure logging to output to stdout (Railway captures this)
@@ -18,6 +20,10 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.database.session import SessionLocal
+from app.services.core.pass2_worker import run_pass2_worker
+from app.services.v3.heartbeat import run_heartbeat_scheduler
+from app.services.v3.session_manager import SessionManager, run_checkpoint_loop
 
 logger = logging.getLogger(__name__)
 from app.routers import (
@@ -28,16 +34,62 @@ from app.routers import (
     pointers,
     processing,
     projects,
-    queries,
+    v3_sessions,
+    v3_telegram,
 )
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle — start background workers on startup."""
+    SessionManager.instance().set_event_loop(asyncio.get_running_loop())
+
+    # Rehydrate active V3 sessions
+    db = SessionLocal()
+    try:
+        SessionManager.instance().rehydrate_active_sessions(db)
+    finally:
+        db.close()
+
+    # Start Pass 2 enrichment worker
+    pass2_task = asyncio.create_task(run_pass2_worker())
+    logger.info("Pass 2 enrichment worker launched")
+
+    checkpoint_task = asyncio.create_task(run_checkpoint_loop())
+    logger.info("Session checkpoint loop launched")
+
+    # Start Heartbeat scheduler (if enabled)
+    heartbeat_task = asyncio.create_task(run_heartbeat_scheduler(SessionLocal))
+    logger.info("Heartbeat scheduler launched")
+
+    yield
+
+    # Shutdown: cancel the workers
+    pass2_task.cancel()
+    checkpoint_task.cancel()
+    heartbeat_task.cancel()
+    try:
+        await pass2_task
+    except asyncio.CancelledError:
+        logger.info("Pass 2 enrichment worker stopped")
+    try:
+        await checkpoint_task
+    except asyncio.CancelledError:
+        logger.info("Session checkpoint loop stopped")
+    try:
+        await heartbeat_task
+    except asyncio.CancelledError:
+        logger.info("Heartbeat scheduler stopped")
+
 
 app = FastAPI(
     title="Maestro Super API",
     description="Construction plan analysis for superintendents",
     version="0.1.0",
     redirect_slashes=False,  # Prevent 307 redirects that break HTTPS through proxies
+    lifespan=lifespan,
 )
 
 # CORS for frontend
@@ -73,9 +125,14 @@ app.include_router(projects.router)
 app.include_router(disciplines.router)
 app.include_router(pages.router)
 app.include_router(pointers.router)
-app.include_router(queries.router)
 app.include_router(conversations.router)
 app.include_router(processing.router)
+app.include_router(v3_sessions.router)
+
+# Telegram bot webhook (only mount if configured)
+if settings.telegram_bot_token:
+    app.include_router(v3_telegram.router)
+    logger.info("Telegram webhook router mounted")
 
 
 # Global exception handlers

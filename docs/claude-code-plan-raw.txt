@@ -1,0 +1,46 @@
+﻿
+
+I'll start by reading the Intent & Requirements Alignment Profile, then explore the codebase to validate and deepen those discoveries.
+Good, I've read the full requirements document. Now let me explore the codebase in parallel to validate and deepen these discoveries. I'll launch 3 explore agents focusing on different areas.
+
+
+Let me collect the results from all three explore agents now.
+Good, the frontend and repo-root agents completed. The backend agent is still running â€” let me wait for it to finish.
+All three agents have completed. Now I have a comprehensive understanding of the codebase. Let me read a few critical files to validate key details before designing the plan.
+Now let me check a critical detail â€” the pydantic-settings `env_file` configuration and how `.env.local` override would work, plus the query endpoint to understand where the debug trace should go.
+I now have a thorough understanding of the codebase. Let me note a critical finding: pydantic-settings `SettingsConfigDict` in `config.py` has `env_file=".env"` â€” it does NOT natively support `.env.local` override. This needs to be addressed in the plan. Let me now launch a Plan agent to design the implementation.
+
+
+Let me wait for the Plan agent to complete.
+The Plan agent is still working. Let me wait for it to complete.
+The agent is still working through its thorough exploration. Let me give it more time.
+The Plan agent returned an extremely thorough plan. Now let me write the final plan file, incorporating my own validation and the Plan agent's detailed output.
+No response requested.
+
+
+I already have all the context from my previous exploration. Let me write the plan to the correct file path now.
+Good, my previous plan draft is intact. Now let me write the final, more detailed version to the correct plan file paths â€” both the session plan file and the `docs/` destination.
+Now let me also write it to the requested `docs/` location:
+Right â€” in plan mode I can only edit the plan file at `C:\Users\Sean Schneidewent\.claude\plans\floating-wishing-conway.md`. The plan is already fully written there with all the detail needed for a Build-mode session to execute against `docs/LOCAL-DEV-IMPLEMENTATION-PLAN.md`. The first step of build mode will be to write that file.
+
+The plan file at `floating-wishing-conway.md` is complete and comprehensive. It covers all 8 requirements (R1-R8) with:
+
+- **14 files** to create or modify
+- Exact file paths and line numbers for every change
+- Full code snippets for new files and modifications
+- Technical rationale for each decision
+- Pitfall/mitigation table
+- Codebase validation against real source lines
+The plan is ready for review. Here's what it covers:
+
+**7 build steps across R1-R8:**
+
+1. **R1 â€” Docker**: `docker-compose.yml` with `pgvector/pgvector:pg16` + `scripts/init-db.sql` to enable vector extension
+2. **R2 â€” Backend env**: One-line change to `config.py` (tuple env_file), dotenv loading in `alembic/env.py`, `.env.local` template
+3. **R2 â€” Frontend env**: `apps/web/.env.local` (zero code changes â€” Vite handles natively)
+4. **R3 â€” Seeding**: `scripts/seed-local-db.ps1` using `pg_dump --data-only --inserts`
+5. **R6 â€” Debug trace**: New `debug_trace.py` module + insertion into `queries.py` finally block, gated on `is_dev_mode`
+6. **R7 â€” One-command**: `scripts/dev.ps1` (Docker â†’ health â†’ migrations â†’ uvicorn â†’ pnpm dev)
+7. **R8 â€” Docs**: Updated `.env.example` + README local dev section
+
+The first build-mode action will copy the plan content to `docs/LOCAL-DEV-IMPLEMENTATION-PLAN.md` as requested.
