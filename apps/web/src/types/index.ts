@@ -48,18 +48,6 @@ export {
   type AgentMessage,
 } from './query';
 
-// V3 Session Events
-export {
-  type V3Event,
-  type V3WorkspaceState,
-  type V3WorkspaceUpdateEvent,
-  type V3ThinkingEvent,
-  type V3TokenEvent,
-  type V3ToolCallEvent,
-  type V3ToolResultEvent,
-  type V3DoneEvent,
-} from './v3';
-
 // Field Mode
 export {
   type FieldViewMode,

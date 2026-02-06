@@ -1,155 +1,475 @@
-import React, { useMemo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { V3ThinkingPanel } from '../../types/v3'
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, Hammer, CheckCircle2, Loader2, Sparkles, FileText } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import type { AgentTraceStep } from '../../types';
+import type { PageAgentState } from '../../hooks/useQueryManager';
+import { ConstellationAnimation } from './ConstellationAnimation';
 
-interface CognitionPanelProps {
-  title: string
-  color: 'cyan' | 'yellow' | 'purple'
-  content: string
-  isActive?: boolean
-  defaultExpanded?: boolean
-  emptyLabel?: string
+interface ThinkingSectionProps {
+  isStreaming: boolean;
+  thinkingText?: string;
+  autoCollapse?: boolean;
+  trace?: AgentTraceStep[];
+  initialElapsedTime?: number; // For completed responses - time in ms
+  onNavigateToPage?: (pageId: string) => void;
+  onOpenPointer?: (pointerId: string) => void;
+  /** Orchestrator per-page agent states */
+  pageAgentStates?: PageAgentState[];
 }
 
-const COLOR_CLASSES: Record<CognitionPanelProps['color'], string> = {
-  cyan: 'border-cyan-200 bg-cyan-50/60 text-cyan-700',
-  yellow: 'border-amber-200 bg-amber-50/60 text-amber-700',
-  purple: 'border-purple-200 bg-purple-50/60 text-purple-700',
+// Generate human-readable text for a completed tool action
+function formatCompletedAction(toolCall: AgentTraceStep, toolResult: AgentTraceStep): string {
+  const tool = toolCall.tool;
+  const input = toolCall.input || {};
+  const result = toolResult.result || {};
+
+  switch (tool) {
+    case 'search_pointers': {
+      const query = input.query as string;
+      const pointers = result.pointers as unknown[];
+      const count = Array.isArray(pointers) ? pointers.length : 0;
+      if (query) {
+        return `Searched for "${query}" → Found ${count} area${count !== 1 ? 's' : ''}`;
+      }
+      return `Found ${count} relevant area${count !== 1 ? 's' : ''}`;
+    }
+    case 'search_pages': {
+      const query = input.query as string;
+      const pages = result.pages as unknown[];
+      const count = Array.isArray(pages) ? pages.length : 0;
+      if (query) {
+        return `Searched pages for "${query}" → Found ${count}`;
+      }
+      return `Found ${count} page${count !== 1 ? 's' : ''}`;
+    }
+    case 'get_pointer': {
+      const title = result.title as string;
+      if (title) {
+        const truncated = title.length > 40 ? title.slice(0, 40) + '...' : title;
+        return `Read "${truncated}"`;
+      }
+      return 'Read pointer details';
+    }
+    case 'get_page_context': {
+      const sheetNumber = result.sheet_number as string;
+      const pageName = result.page_name as string;
+      if (sheetNumber) {
+        return `Reviewed page ${sheetNumber}`;
+      }
+      if (pageName) {
+        return `Reviewed "${pageName}"`;
+      }
+      return 'Reviewed page context';
+    }
+    case 'get_discipline_overview': {
+      const name = result.name as string;
+      if (name) {
+        return `Reviewed ${name} overview`;
+      }
+      return 'Reviewed discipline';
+    }
+    case 'get_references_to_page': {
+      const references = result.references as unknown[];
+      const count = Array.isArray(references) ? references.length : 0;
+      return `Found ${count} page${count !== 1 ? 's' : ''} referencing this`;
+    }
+    case 'select_pages': {
+      const pages = result.pages as unknown[];
+      const count = Array.isArray(pages) ? pages.length : 0;
+      return `Selected ${count} page${count !== 1 ? 's' : ''} to show`;
+    }
+    case 'select_pointers': {
+      const pointers = result.pointers as unknown[];
+      const count = Array.isArray(pointers) ? pointers.length : 0;
+      return `Highlighted ${count} area${count !== 1 ? 's' : ''}`;
+    }
+    default:
+      return tool?.replace(/_/g, ' ') || 'Completed action';
+  }
 }
 
-const PANEL_META: Array<{
-  key: V3ThinkingPanel
-  label: string
-  color: string
-}> = [
-  { key: 'workspace_assembly', label: 'Assembly', color: 'bg-cyan-500' },
-  { key: 'learning', label: 'Learning', color: 'bg-amber-500' },
-  { key: 'knowledge_update', label: 'Knowledge', color: 'bg-purple-500' },
-]
-
-interface CognitionIndicatorProps {
-  panels: Record<V3ThinkingPanel, string>
-  learningActive?: boolean
-  className?: string
+// Process trace into human-readable actions
+interface ProcessedAction {
+  type: 'action' | 'thinking';
+  text: string;
+  isComplete: boolean;
+  expandedContent?: string;
 }
 
-export const CognitionIndicator: React.FC<CognitionIndicatorProps> = ({
-  panels,
-  learningActive = false,
-  className,
-}) => {
-  const dots = useMemo(() => {
-    return PANEL_META.map((panel) => {
-      const hasContent = panels[panel.key]?.trim().length > 0
-      const isActive = panel.key === 'learning' ? hasContent || learningActive : hasContent
-      return { ...panel, isActive }
-    })
-  }, [panels, learningActive])
+function processTraceForDisplay(trace: AgentTraceStep[], isStreaming: boolean): ProcessedAction[] {
+  const actions: ProcessedAction[] = [];
+
+  // Find the last tool_result index to filter out intermediate reasoning
+  let lastToolResultIndex = -1;
+  for (let j = trace.length - 1; j >= 0; j--) {
+    if (trace[j].type === 'tool_result') {
+      lastToolResultIndex = j;
+      break;
+    }
+  }
+
+  let i = 0;
+  while (i < trace.length) {
+    const step = trace[i];
+
+    if (step.type === 'thinking') {
+      const content = step.content?.trim() || '';
+      if (content.length > 0) {
+        const truncated = content.length > 80 ? content.slice(0, 80) + '...' : content;
+        actions.push({
+          type: 'thinking',
+          text: truncated,
+          isComplete: !isStreaming,
+          expandedContent: content.length > 80 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'reasoning') {
+      // Only show reasoning if it's AFTER the last tool_result (i.e., it's the final answer)
+      // Skip intermediate reasoning that came before/between tool calls
+      const content = step.content?.trim() || '';
+      if (content.length > 20 && i > lastToolResultIndex) {
+        const truncated = content.length > 60 ? content.slice(0, 60) + '...' : content;
+        actions.push({
+          type: 'thinking',
+          text: truncated,
+          isComplete: true,
+          expandedContent: content.length > 60 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'tool_call') {
+      // Search forward for matching tool_result (may not be immediately next due to interleaved reasoning)
+      let matchingResultIndex = -1;
+      for (let j = i + 1; j < trace.length; j++) {
+        if (trace[j].type === 'tool_result' && trace[j].tool === step.tool) {
+          matchingResultIndex = j;
+          break;
+        }
+        // Stop searching if we hit another tool_call (means this one has no result yet)
+        if (trace[j].type === 'tool_call') break;
+      }
+
+      if (matchingResultIndex !== -1) {
+        // Completed action
+        actions.push({
+          type: 'action',
+          text: formatCompletedAction(step, trace[matchingResultIndex]),
+          isComplete: true,
+        });
+        // Skip to after the result (don't re-process steps in between)
+        i = matchingResultIndex + 1;
+      } else {
+        // In-progress tool call (no result yet)
+        if (isStreaming) {
+          actions.push({
+            type: 'action',
+            text: step.tool?.replace(/_/g, ' ') || 'Working...',
+            isComplete: false,
+          });
+        }
+        i++;
+      }
+    } else if (step.type === 'code_execution') {
+      const content = step.content?.trim() || '';
+      if (content.length > 0) {
+        const truncated = content.length > 80 ? content.slice(0, 80) + '...' : content;
+        actions.push({
+          type: 'action',
+          text: `🔍 ${truncated}`,
+          isComplete: true,
+          expandedContent: content.length > 80 ? content : undefined,
+        });
+      }
+      i++;
+    } else if (step.type === 'code_result') {
+      // Code execution results are part of the investigation - skip in display
+      i++;
+    } else if (step.type === 'tool_result') {
+      // Orphan result without call (shouldn't happen, but handle it)
+      i++;
+    } else {
+      i++;
+    }
+  }
+
+  return actions;
+}
+
+// Individual action item component
+const ActionItem: React.FC<{
+  action: ProcessedAction;
+  index: number;
+}> = ({ action, index }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className={`flex items-center gap-1.5 ${className ?? ''}`}>
-      {dots.map((dot) => (
-        <span key={dot.key} className="flex items-center gap-1">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${dot.isActive ? dot.color : 'bg-slate-300'}`}
-            title={dot.label}
-          />
-        </span>
-      ))}
-    </div>
-  )
-}
-
-export const CognitionPanel: React.FC<CognitionPanelProps> = ({
-  title,
-  color,
-  content,
-  isActive = false,
-  defaultExpanded = false,
-  emptyLabel = 'No activity yet.',
-}) => {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  const hasContent = content.trim().length > 0
-
-  return (
-    <div className={`rounded-xl border ${COLOR_CLASSES[color]} overflow-hidden transition-all duration-300`}>
+    <div className="group">
       <button
-        onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        onClick={() => action.expandedContent && setIsExpanded(!isExpanded)}
+        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+          action.expandedContent ? 'hover:bg-slate-100 cursor-pointer' : 'cursor-default'
+        }`}
       >
-        {expanded ? (
-          <ChevronDown size={14} className="text-slate-400" />
-        ) : (
-          <ChevronRight size={14} className="text-slate-400" />
-        )}
-        <div className="flex-1 text-xs font-semibold uppercase tracking-wide">
-          {title}
+        {/* Status icon */}
+        <div className="flex-shrink-0 w-4">
+          {action.type === 'thinking' ? (
+            <Sparkles
+              size={14}
+              className={`text-cyan-500 ${action.isComplete ? '' : 'animate-pulse'}`}
+            />
+          ) : action.isComplete ? (
+            <CheckCircle2 size={14} className="text-green-500" />
+          ) : (
+            <Loader2 size={14} className="text-cyan-500 animate-spin" />
+          )}
         </div>
-        {isActive && <span className="text-[11px] text-slate-500">active</span>}
-      </button>
-      {expanded && (
-        <div className="px-3 pb-3 max-h-64 overflow-y-auto text-xs text-slate-700">
-          {hasContent ? (
+
+        {/* Action text */}
+        <span className={`text-xs flex-1 text-left ${
+          action.type === 'thinking' ? 'text-cyan-700' : 'text-slate-600'
+        }`}>
+          {action.type === 'thinking' ? (
             <ReactMarkdown
               components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc ml-5 mb-2">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal ml-5 mb-2">{children}</ol>,
+                p: ({ children }) => <>{children}</>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                em: ({ children }) => <em>{children}</em>,
               }}
+              allowedElements={['p', 'strong', 'em']}
+              unwrapDisallowed
             >
-              {content}
+              {action.text}
             </ReactMarkdown>
           ) : (
-            <div className="text-slate-400">{emptyLabel}</div>
+            action.text
+          )}
+        </span>
+
+        {/* Expand indicator for thinking with more content */}
+        {action.expandedContent && (
+          <div className="flex-shrink-0">
+            {isExpanded ? (
+              <ChevronDown size={12} className="text-slate-400" />
+            ) : (
+              <ChevronRight size={12} className="text-slate-400" />
+            )}
+          </div>
+        )}
+      </button>
+
+      {/* Expanded content */}
+      {isExpanded && action.expandedContent && (
+        <div className="ml-6 mr-2 mt-1 mb-2 p-2 rounded-lg bg-slate-100 border border-slate-200">
+          <div className="text-xs text-slate-600 leading-relaxed">
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
+                strong: ({ children }) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                em: ({ children }) => <em>{children}</em>,
+                ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
+                ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
+                li: ({ children }) => <li className="my-0.5">{children}</li>,
+              }}
+            >
+              {action.expandedContent}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
+  isStreaming,
+  thinkingText = '',
+  autoCollapse = true,
+  trace = [],
+  initialElapsedTime,
+  onNavigateToPage,
+  onOpenPointer,
+  pageAgentStates = [],
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number>(initialElapsedTime || 0);
+  const wasStreamingRef = useRef(isStreaming);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const timerIntervalRef = useRef<number | null>(null);
+
+  // Format elapsed time as seconds with 1 decimal
+  const formatTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+  // Timer: track elapsed time during streaming
+  useEffect(() => {
+    if (isStreaming && !startTime) {
+      setStartTime(Date.now());
+    }
+
+    if (isStreaming) {
+      timerIntervalRef.current = window.setInterval(() => {
+        if (startTime) {
+          setElapsedTime(Date.now() - startTime);
+        }
+      }, 100);
+      return () => {
+        if (timerIntervalRef.current) {
+          clearInterval(timerIntervalRef.current);
+        }
+      };
+    } else if (startTime) {
+      // Streaming ended - keep final time
+      setElapsedTime(Date.now() - startTime);
+    }
+  }, [isStreaming, startTime]);
+
+  // Reset timer when trace is cleared (new query)
+  useEffect(() => {
+    if (trace.length === 0 && !isStreaming) {
+      setStartTime(null);
+      setElapsedTime(0);
+    }
+  }, [trace.length, isStreaming]);
+
+  // Auto-scroll to bottom when trace updates during streaming
+  useEffect(() => {
+    if (isStreaming && isExpanded && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [trace, isStreaming, isExpanded]);
+
+  // Auto-collapse only when streaming transitions from true to false
+  useEffect(() => {
+    const wasStreaming = wasStreamingRef.current;
+    wasStreamingRef.current = isStreaming;
+
+    if (autoCollapse && wasStreaming && !isStreaming && isExpanded) {
+      const timer = setTimeout(() => {
+        setIsExpanded(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, autoCollapse, isExpanded]);
+
+  // Don't render if no trace and not streaming
+  if (trace.length === 0 && !isStreaming) {
+    return null;
+  }
+
+  // Process trace into human-readable actions
+  const processedActions = processTraceForDisplay(trace, isStreaming);
+
+  return (
+    <div className="w-full max-w-3xl mx-auto rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden transition-all duration-200 min-w-0 relative" data-tutorial="thinking-section">
+      {/* Constellation animation background */}
+      <ConstellationAnimation isActive={isStreaming} />
+
+      {/* Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="relative z-10 w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100/50 transition-colors"
+      >
+        <div className="flex-shrink-0">
+          {isExpanded ? (
+            <ChevronDown size={14} className="text-slate-400" />
+          ) : (
+            <ChevronRight size={14} className="text-slate-400" />
+          )}
+        </div>
+
+        {isStreaming ? (
+          /* Streaming: live thinking + timer */
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Sparkles size={12} className="text-cyan-500 animate-pulse" />
+            <span className="text-xs font-medium text-cyan-700 truncate">
+              {thinkingText ? (
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <>{children}</>,
+                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                    em: ({ children }) => <em>{children}</em>,
+                  }}
+                  allowedElements={['p', 'strong', 'em']}
+                  unwrapDisallowed
+                >
+                  {thinkingText}
+                </ReactMarkdown>
+              ) : (
+                'Thinking...'
+              )}
+            </span>
+            <span className="text-xs font-mono text-slate-400 flex-shrink-0">
+              {formatTime(elapsedTime)}
+            </span>
+          </div>
+        ) : (
+          /* Completed: hammer icon + "Completed in X.Xs" (or just "Completed" if no time) */
+          <>
+            <Hammer size={14} className="flex-shrink-0 text-cyan-500" />
+            <span className="text-xs font-medium text-slate-600 flex-1 text-left">
+              {elapsedTime > 0 ? `Completed in ${formatTime(elapsedTime)}` : 'Completed'}
+            </span>
+          </>
+        )}
+      </button>
+
+      {/* Processed actions */}
+      {isExpanded && (
+        <div ref={scrollContainerRef} className="relative z-10 px-2 pb-2 animate-fade-in max-h-80 overflow-y-auto overflow-x-hidden">
+          {processedActions.length === 0 && isStreaming && (
+            <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-400">
+              <Loader2 size={12} className="animate-spin" />
+              Starting to think...
+            </div>
+          )}
+
+          {processedActions.map((action, index) => (
+            <ActionItem
+              key={index}
+              action={action}
+              index={index}
+            />
+          ))}
+
+          {/* Per-page agent progress (orchestrator mode) */}
+          {pageAgentStates.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
+              <div className="px-2 text-xs font-medium text-slate-500 mb-1">Page Agents</div>
+              {pageAgentStates.map((page) => (
+                <div
+                  key={page.pageId}
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg"
+                >
+                  <div className="flex-shrink-0 w-4">
+                    {page.state === 'done' ? (
+                      <CheckCircle2 size={14} className="text-green-500" />
+                    ) : page.state === 'processing' ? (
+                      <Loader2 size={14} className="text-cyan-500 animate-spin" />
+                    ) : (
+                      <FileText size={14} className="text-slate-400" />
+                    )}
+                  </div>
+                  <span className={`text-xs truncate ${
+                    page.state === 'done' ? 'text-slate-600' :
+                    page.state === 'processing' ? 'text-cyan-700 font-medium' :
+                    'text-slate-400'
+                  }`}>
+                    {page.pageName}
+                  </span>
+                  <span className={`text-[10px] ml-auto flex-shrink-0 ${
+                    page.state === 'done' ? 'text-green-500' :
+                    page.state === 'processing' ? 'text-cyan-500' :
+                    'text-slate-300'
+                  }`}>
+                    {page.state}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
     </div>
-  )
-}
-
-interface ThinkingSectionProps {
-  workspaceAssembly: string
-  learning?: string
-  knowledgeUpdate?: string
-  isActive?: boolean
-  defaultExpanded?: boolean
-  learningActive?: boolean
-}
-
-export const ThinkingSection: React.FC<ThinkingSectionProps> = ({
-  workspaceAssembly,
-  learning = '',
-  knowledgeUpdate = '',
-  isActive = false,
-  defaultExpanded = false,
-  learningActive = false,
-}) => {
-  return (
-    <div className="space-y-2">
-      <CognitionPanel
-        title="Workspace Assembly"
-        color="cyan"
-        content={workspaceAssembly}
-        isActive={isActive}
-        defaultExpanded={defaultExpanded}
-      />
-      <CognitionPanel
-        title="Learning"
-        color="yellow"
-        content={learning}
-        isActive={learningActive}
-        defaultExpanded={false}
-        emptyLabel={learningActive ? 'Learning in progress...' : 'No activity yet.'}
-      />
-      <CognitionPanel
-        title="Knowledge Update"
-        color="purple"
-        content={knowledgeUpdate}
-        isActive={false}
-        defaultExpanded={false}
-      />
-    </div>
-  )
-}
+  );
+};
