@@ -34,6 +34,7 @@ from app.routers import (
     processing,
     projects,
     v3_sessions,
+    v3_telegram,
 )
 
 settings = get_settings()
@@ -117,6 +118,11 @@ app.include_router(pointers.router)
 app.include_router(conversations.router)
 app.include_router(processing.router)
 app.include_router(v3_sessions.router)
+
+# Telegram bot webhook (only mount if configured)
+if settings.telegram_bot_token:
+    app.include_router(v3_telegram.router)
+    logger.info("Telegram webhook router mounted")
 
 
 # Global exception handlers

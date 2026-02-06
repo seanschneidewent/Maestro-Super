@@ -80,10 +80,20 @@ class Settings(BaseSettings):
     # Demo Project (for anonymous landing page demo)
     demo_project_id: str | None = None
 
+    # Telegram Bot
+    telegram_bot_token: str | None = None
+    telegram_webhook_secret: str | None = None
+    telegram_default_project_id: str | None = None  # v1 shortcut for single-project
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""
         return self.dev_user_id is not None
+
+    @property
+    def telegram_enabled(self) -> bool:
+        """Check if Telegram bot is configured."""
+        return self.telegram_bot_token is not None
 
 
 @lru_cache

@@ -195,12 +195,27 @@ def build_maestro_system_prompt(
     workspace_state: dict[str, Any] | None,
     experience_context: str,
     project_name: str | None,
+    workspace_list: list[dict[str, Any]] | None = None,
 ) -> str:
-    channel_line = (
-        "You are chatting in the web workspace. You can assemble plan pages on screen using tools."
-        if session_type == "workspace"
-        else "You are chatting over Telegram with a superintendent in the field. Keep responses short and direct."
-    )
+    if session_type == "workspace":
+        channel_block = (
+            "You are chatting in the web workspace. You can assemble plan pages on screen using tools."
+        )
+    else:
+        # Telegram-specific prompt
+        channel_block = """You're on Telegram. The superintendent is on the jobsite, phone in pocket.
+
+Communication style for Telegram:
+- Keep responses mobile-friendly: short paragraphs, no markdown tables, concise.
+- Don't tell them to 'open the workspace' unless they need to see plans. Answer from Knowledge when you can.
+- When the super shares schedule info, corrections, or field conditions — acknowledge what they told you.
+- You can take actions in workspaces remotely using the workspace_action tool."""
+
+        # Add workspace awareness if available
+        if workspace_list:
+            workspace_names = [w.get("workspace_name", "Unnamed") for w in workspace_list if w.get("workspace_name")]
+            if workspace_names:
+                channel_block += f"\n\nActive workspaces: {', '.join(workspace_names)}"
 
     workspace_line = ""
     if session_type == "workspace" and workspace_state is not None:
@@ -214,7 +229,7 @@ def build_maestro_system_prompt(
         [
             "You are Maestro, a construction plan analysis partner for superintendents.",
             "Be honest about uncertainty. If you are unsure, say so and ask a clarifying question.",
-            channel_line,
+            channel_block,
             project_line,
             workspace_line,
             "Experience context (read-only):",
