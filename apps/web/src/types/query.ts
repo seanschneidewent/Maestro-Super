@@ -51,15 +51,23 @@ export interface AgentTextEvent {
   content: string;
 }
 
+export interface AgentTokenEvent {
+  type: 'token';
+  content: string;
+}
+
 export interface AgentThinkingEvent {
   type: 'thinking';
   content: string;
+  panel?: 'workspace_assembly' | 'learning' | 'knowledge_update';
+  turn_number?: number;
 }
 
 export interface AgentToolCallEvent {
   type: 'tool_call';
   tool: string;
   input: Record<string, unknown>;
+  arguments?: Record<string, unknown>;
 }
 
 export interface AgentToolResultEvent {
@@ -74,6 +82,7 @@ export interface AgentTraceStep {
   tool?: string;
   input?: Record<string, unknown>;
   result?: Record<string, unknown>;
+  panel?: 'workspace_assembly' | 'learning' | 'knowledge_update';
 }
 
 export interface AnnotatedImage {
@@ -99,6 +108,33 @@ export interface AgentErrorEvent {
   message: string;
 }
 
+export interface AgentWorkspaceUpdateEvent {
+  type: 'workspace_update';
+  action: 'add_pages' | 'remove_pages' | 'highlight_pointers' | 'pin_page' | string;
+  page_ids?: string[];
+  pointer_ids?: string[];
+  pages?: Array<{
+    page_id: string;
+    page_name?: string;
+    file_path?: string;
+    discipline_id?: string;
+  }>;
+  pointers?: Array<{
+    pointer_id: string;
+    title?: string;
+    page_id: string;
+    bbox_x?: number;
+    bbox_y?: number;
+    bbox_width?: number;
+    bbox_height?: number;
+  }>;
+  workspace_state?: {
+    displayed_pages?: string[];
+    highlighted_pointers?: string[];
+    pinned_pages?: string[];
+  } | null;
+}
+
 export interface AgentPageStateEvent {
   type: 'page_state';
   page_id: string;
@@ -120,10 +156,12 @@ export interface AgentLearningEvent {
 }
 
 export type AgentEvent =
+  | AgentTokenEvent
   | AgentTextEvent
   | AgentThinkingEvent
   | AgentToolCallEvent
   | AgentToolResultEvent
+  | AgentWorkspaceUpdateEvent
   | AgentDoneEvent
   | AgentErrorEvent
   | AgentPageStateEvent
@@ -153,6 +191,25 @@ export interface AgentConceptResponse {
   findings?: AgentFinding[];
   crossReferences?: AgentCrossReference[];
   gaps?: string[];
+}
+
+export interface V3WorkspaceState {
+  displayedPages: string[];
+  highlightedPointers: string[];
+  pinnedPages: string[];
+}
+
+export interface V3SessionSummary {
+  sessionId: string;
+  sessionType: 'workspace' | 'telegram';
+  workspaceName: string | null;
+  status?: string;
+  lastActiveAt?: string | null;
+  lastMessagePreview?: string | null;
+}
+
+export interface V3SessionDetails extends V3SessionSummary {
+  workspaceState: V3WorkspaceState | null;
 }
 
 // Agent message state (built from events)

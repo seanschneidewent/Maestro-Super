@@ -32,9 +32,11 @@ export {
   type QueryWithPages,
   type ConversationWithQueries,
   type AgentTextEvent,
+  type AgentTokenEvent,
   type AgentThinkingEvent,
   type AgentToolCallEvent,
   type AgentToolResultEvent,
+  type AgentWorkspaceUpdateEvent,
   type AgentTraceStep,
   type AnnotatedImage,
   type AgentDoneEvent,
@@ -46,6 +48,9 @@ export {
   type ToolCallState,
   type PageVisit,
   type AgentMessage,
+  type V3WorkspaceState,
+  type V3SessionSummary,
+  type V3SessionDetails,
 } from './query';
 
 // Field Mode

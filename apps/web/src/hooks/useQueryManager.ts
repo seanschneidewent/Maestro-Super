@@ -14,7 +14,19 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { FieldResponse, ContextPointer, AgentTraceStep, OcrWord, AgentConceptResponse, AgentFinding, AnnotatedImage } from '../types'
+import { api } from '../lib/api'
+import {
+  FieldResponse,
+  ContextPointer,
+  AgentTraceStep,
+  OcrWord,
+  AgentConceptResponse,
+  AgentFinding,
+  AnnotatedImage,
+  V3SessionSummary,
+  V3SessionDetails,
+  V3WorkspaceState,
+} from '../types'
 import { transformAgentResponse, extractLatestThinking } from '../components/maestro/transformResponse'
 import { useAgentToast } from '../contexts/AgentToastContext'
 import type { BoundingBox } from '../components/maestro/PageWorkspace'
@@ -84,6 +96,7 @@ export interface QueryState {
   id: string
   queryText: string
   mode: QueryMode
+  sessionId: string | null
   conversationId: string | null
   viewingPageId: string | null
   toastId: string
@@ -152,12 +165,86 @@ interface UseQueryManagerReturn {
 
   // Load pages directly (for restoring from QueryStack)
   loadPages: (pages: AgentSelectedPage[]) => void
+
+  // V3 workspace/session state
+  sessionId: string | null
+  workspaceState: V3WorkspaceState | null
+  workspaces: V3SessionSummary[]
+  workspacePages: AgentSelectedPage[]
+  isSessionLoading: boolean
+  sessionError: string | null
+  createWorkspace: (name?: string) => Promise<string | null>
+  switchWorkspace: (nextSessionId: string) => Promise<boolean>
+  refreshWorkspaces: () => Promise<void>
 }
 
 // Internal type for tracking abort controllers
 interface QueryController {
   abortController: AbortController
   timeoutId: NodeJS.Timeout
+}
+
+interface RawWorkspaceState {
+  displayed_pages?: string[]
+  highlighted_pointers?: string[]
+  pinned_pages?: string[]
+}
+
+interface RawSessionSummary {
+  session_id: string
+  session_type: 'workspace' | 'telegram'
+  workspace_name?: string | null
+  status?: string
+  last_active_at?: string | null
+  last_message_preview?: string | null
+}
+
+interface RawSessionDetails extends RawSessionSummary {
+  workspace_state?: RawWorkspaceState | null
+}
+
+interface RawCreateSessionResponse {
+  session_id: string
+  session_type: 'workspace' | 'telegram'
+  workspace_name?: string | null
+  workspace_state?: RawWorkspaceState | null
+}
+
+function normalizeWorkspaceState(
+  state: RawWorkspaceState | null | undefined,
+): V3WorkspaceState | null {
+  if (!state) return null
+  return {
+    displayedPages: Array.isArray(state.displayed_pages) ? state.displayed_pages : [],
+    highlightedPointers: Array.isArray(state.highlighted_pointers) ? state.highlighted_pointers : [],
+    pinnedPages: Array.isArray(state.pinned_pages) ? state.pinned_pages : [],
+  }
+}
+
+function toSessionSummary(raw: RawSessionSummary): V3SessionSummary {
+  return {
+    sessionId: raw.session_id,
+    sessionType: raw.session_type,
+    workspaceName: raw.workspace_name ?? null,
+    status: raw.status,
+    lastActiveAt: raw.last_active_at ?? null,
+    lastMessagePreview: raw.last_message_preview ?? null,
+  }
+}
+
+function toSessionDetails(raw: RawSessionDetails): V3SessionDetails {
+  return {
+    ...toSessionSummary(raw),
+    workspaceState: normalizeWorkspaceState(raw.workspace_state),
+  }
+}
+
+function cloneSelectedPages(pages: AgentSelectedPage[]): AgentSelectedPage[] {
+  return pages.map((page) => ({
+    ...page,
+    pointers: page.pointers.map((pointer) => ({ ...pointer })),
+    highlights: page.highlights ? [...page.highlights] : undefined,
+  }))
 }
 
 export function useQueryManager(options: UseQueryManagerOptions): UseQueryManagerReturn {
@@ -167,6 +254,12 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
   // State: Map of query ID -> query state
   const [queries, setQueries] = useState<Map<string, QueryState>>(new Map())
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [workspaceState, setWorkspaceState] = useState<V3WorkspaceState | null>(null)
+  const [workspaces, setWorkspaces] = useState<V3SessionSummary[]>([])
+  const [workspacePages, setWorkspacePages] = useState<AgentSelectedPage[]>([])
+  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(true)
+  const [sessionError, setSessionError] = useState<string | null>(null)
 
   // Refs for abort controllers (don't need to be in state)
   const controllersRef = useRef<Map<string, QueryController>>(new Map())
@@ -176,16 +269,431 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
   // Cache for page data from search results
   const pageDataCacheRef = useRef<Map<string, { filePath: string; pageName: string; disciplineId: string }>>(new Map())
 
+  const getAuthHeaders = useCallback(async () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+
+    if (import.meta.env.VITE_DEV_MODE !== 'true') {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`
+      }
+    }
+
+    return headers
+  }, [])
+
+  const fetchWorkspaceSessions = useCallback(async (): Promise<V3SessionSummary[]> => {
+    const headers = await getAuthHeaders()
+    const params = new URLSearchParams({
+      project_id: projectId,
+      session_type: 'workspace',
+      status: 'active',
+    })
+
+    const response = await fetch(`${API_URL}/v3/sessions?${params.toString()}`, {
+      method: 'GET',
+      headers,
+    })
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({ detail: 'Failed to load workspaces' }))
+      throw new Error(detail.detail || `HTTP ${response.status}`)
+    }
+
+    const data = (await response.json()) as RawSessionSummary[]
+    return data.map(toSessionSummary)
+  }, [getAuthHeaders, projectId])
+
+  const createWorkspaceSession = useCallback(async (name?: string): Promise<V3SessionDetails> => {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/v3/sessions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        project_id: projectId,
+        session_type: 'workspace',
+        workspace_name: name && name.trim().length > 0 ? name.trim() : undefined,
+      }),
+    })
+
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({ detail: 'Failed to create workspace' }))
+      throw new Error(detail.detail || `HTTP ${response.status}`)
+    }
+
+    const data = (await response.json()) as RawCreateSessionResponse
+    return {
+      sessionId: data.session_id,
+      sessionType: data.session_type,
+      workspaceName: data.workspace_name ?? null,
+      status: 'active',
+      workspaceState: normalizeWorkspaceState(data.workspace_state),
+    }
+  }, [getAuthHeaders, projectId])
+
+  const getSessionDetails = useCallback(async (targetSessionId: string): Promise<V3SessionDetails> => {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/v3/sessions/${targetSessionId}`, {
+      method: 'GET',
+      headers,
+    })
+
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({ detail: 'Failed to load workspace' }))
+      throw new Error(detail.detail || `HTTP ${response.status}`)
+    }
+
+    const data = (await response.json()) as RawSessionDetails
+    return toSessionDetails(data)
+  }, [getAuthHeaders])
+
+  const getPageMeta = useCallback(async (pageId: string) => {
+    const cached = pageDataCacheRef.current.get(pageId)
+    if (cached) return cached
+
+    try {
+      const page = await api.pages.get(pageId)
+      const pageMeta = {
+        filePath: page.pageImagePath || page.filePath || '',
+        pageName: page.pageName || 'Unknown',
+        disciplineId: page.disciplineId || '',
+      }
+      if (pageMeta.filePath) {
+        pageDataCacheRef.current.set(pageId, pageMeta)
+      }
+      return pageMeta
+    } catch (error) {
+      console.warn(`Failed to resolve page ${pageId}:`, error)
+      return null
+    }
+  }, [])
+
+  const applyWorkspacePageAdditions = useCallback(async (
+    pages: Array<{
+      page_id: string
+      page_name?: string
+      file_path?: string
+      discipline_id?: string
+    }>,
+    currentPages: AgentSelectedPage[],
+  ): Promise<AgentSelectedPage[]> => {
+    if (pages.length === 0) return currentPages
+
+    const next = cloneSelectedPages(currentPages)
+    const existingById = new Map(next.map((page) => [page.pageId, page]))
+
+    for (const page of pages) {
+      const pageId = page.page_id
+      if (!pageId) continue
+
+      let filePath = page.file_path || ''
+      let pageName = page.page_name || 'Unknown'
+      let disciplineId = page.discipline_id || ''
+
+      if (!filePath || !disciplineId) {
+        const resolved = await getPageMeta(pageId)
+        if (resolved) {
+          filePath = filePath || resolved.filePath
+          pageName = page.page_name || resolved.pageName
+          disciplineId = disciplineId || resolved.disciplineId
+        }
+      }
+
+      const existing = existingById.get(pageId)
+      if (existing) {
+        existing.pageName = pageName || existing.pageName
+        existing.filePath = filePath || existing.filePath
+        existing.disciplineId = disciplineId || existing.disciplineId
+      } else {
+        const nextPage: AgentSelectedPage = {
+          pageId,
+          pageName: pageName || 'Unknown',
+          filePath,
+          disciplineId,
+          pointers: [],
+          highlights: [],
+        }
+        next.push(nextPage)
+        existingById.set(pageId, nextPage)
+      }
+
+      if (filePath && disciplineId) {
+        pageDataCacheRef.current.set(pageId, { filePath, pageName, disciplineId })
+      }
+    }
+
+    return next
+  }, [getPageMeta])
+
+  const applyPointerHighlights = useCallback(async (
+    pointers: Array<{
+      pointer_id: string
+      title?: string
+      page_id: string
+      page_name?: string
+      file_path?: string
+      discipline_id?: string
+      bbox_x?: number
+      bbox_y?: number
+      bbox_width?: number
+      bbox_height?: number
+    }>,
+    currentPages: AgentSelectedPage[],
+  ): Promise<AgentSelectedPage[]> => {
+    if (pointers.length === 0) return currentPages
+
+    const next = cloneSelectedPages(currentPages)
+    const pageMap = new Map(next.map((page) => [page.pageId, page]))
+
+    for (const pointer of pointers) {
+      if (!pointer.pointer_id || !pointer.page_id) continue
+
+      let page = pageMap.get(pointer.page_id)
+      if (!page) {
+        const resolved = await getPageMeta(pointer.page_id)
+        page = {
+          pageId: pointer.page_id,
+          pageName: pointer.page_name || resolved?.pageName || 'Unknown',
+          filePath: pointer.file_path || resolved?.filePath || '',
+          disciplineId: pointer.discipline_id || resolved?.disciplineId || '',
+          pointers: [],
+          highlights: [],
+        }
+        next.push(page)
+        pageMap.set(pointer.page_id, page)
+      } else {
+        if (pointer.page_name && !page.pageName) {
+          page.pageName = pointer.page_name
+        }
+        if (pointer.file_path && !page.filePath) {
+          page.filePath = pointer.file_path
+        }
+        if (pointer.discipline_id && !page.disciplineId) {
+          page.disciplineId = pointer.discipline_id
+        }
+      }
+
+      if (page.filePath && page.disciplineId) {
+        pageDataCacheRef.current.set(page.pageId, {
+          filePath: page.filePath,
+          pageName: page.pageName,
+          disciplineId: page.disciplineId,
+        })
+      }
+
+      const alreadyExists = page.pointers.some((existing) => existing.pointerId === pointer.pointer_id)
+      if (alreadyExists) continue
+
+      page.pointers.push({
+        pointerId: pointer.pointer_id,
+        title: pointer.title || '',
+        bboxX: typeof pointer.bbox_x === 'number' ? pointer.bbox_x : 0,
+        bboxY: typeof pointer.bbox_y === 'number' ? pointer.bbox_y : 0,
+        bboxWidth: typeof pointer.bbox_width === 'number' ? pointer.bbox_width : 0,
+        bboxHeight: typeof pointer.bbox_height === 'number' ? pointer.bbox_height : 0,
+      })
+    }
+
+    return next
+  }, [getPageMeta])
+
+  const removeWorkspacePages = useCallback((
+    pageIds: string[],
+    currentPages: AgentSelectedPage[],
+  ): AgentSelectedPage[] => {
+    if (pageIds.length === 0) return currentPages
+    const toRemove = new Set(pageIds)
+    return currentPages.filter((page) => !toRemove.has(page.pageId))
+  }, [])
+
+  const hydrateWorkspacePages = useCallback(async (
+    state: V3WorkspaceState | null,
+  ): Promise<AgentSelectedPage[]> => {
+    if (!state || state.displayedPages.length === 0) return []
+
+    const seedPages = state.displayedPages.map((pageId) => ({ page_id: pageId }))
+    let nextPages = await applyWorkspacePageAdditions(seedPages, [])
+
+    if (state.highlightedPointers.length > 0) {
+      const pointerResults = await Promise.all(
+        state.highlightedPointers.map(async (pointerId) => {
+          try {
+            const pointer = await api.pointers.get(pointerId)
+            return {
+              pointer_id: pointer.id,
+              title: pointer.title,
+              page_id: pointer.pageId,
+              bbox_x: pointer.bboxX,
+              bbox_y: pointer.bboxY,
+              bbox_width: pointer.bboxWidth,
+              bbox_height: pointer.bboxHeight,
+            }
+          } catch {
+            return null
+          }
+        }),
+      )
+
+      const validPointers = pointerResults.filter((pointer): pointer is NonNullable<typeof pointer> => pointer !== null)
+      nextPages = await applyPointerHighlights(validPointers, nextPages)
+    }
+
+    return nextPages
+  }, [applyPointerHighlights, applyWorkspacePageAdditions])
+
+  const abortAllQueries = useCallback(() => {
+    controllersRef.current.forEach((controller) => {
+      controller.abortController.abort()
+      clearTimeout(controller.timeoutId)
+    })
+    controllersRef.current.clear()
+  }, [])
+
+  const clearAllQueriesState = useCallback(() => {
+    abortAllQueries()
+    setQueries((prev) => {
+      prev.forEach((query) => {
+        if (query.toastId) {
+          dismissToast(query.toastId)
+        }
+      })
+      return new Map()
+    })
+    setActiveQueryId(null)
+  }, [abortAllQueries, dismissToast])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // Abort all running queries
-      controllersRef.current.forEach((controller) => {
-        controller.abortController.abort()
-        clearTimeout(controller.timeoutId)
-      })
+      abortAllQueries()
     }
-  }, [])
+  }, [abortAllQueries])
+
+  const refreshWorkspaces = useCallback(async () => {
+    setIsSessionLoading(true)
+    setSessionError(null)
+    try {
+      const sessions = await fetchWorkspaceSessions()
+      setWorkspaces(sessions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to refresh workspaces'
+      setSessionError(message)
+    } finally {
+      setIsSessionLoading(false)
+    }
+  }, [fetchWorkspaceSessions])
+
+  const switchWorkspace = useCallback(async (nextSessionId: string): Promise<boolean> => {
+    if (!nextSessionId) return false
+
+    setIsSessionLoading(true)
+    setSessionError(null)
+
+    try {
+      const details = await getSessionDetails(nextSessionId)
+      const hydratedPages = await hydrateWorkspacePages(details.workspaceState)
+
+      clearAllQueriesState()
+      setSessionId(details.sessionId)
+      setWorkspaceState(details.workspaceState)
+      setWorkspacePages(hydratedPages)
+      setWorkspaces((prev) => {
+        const existing = prev.find((session) => session.sessionId === details.sessionId)
+        if (existing) return prev
+        return [{
+          sessionId: details.sessionId,
+          sessionType: details.sessionType,
+          workspaceName: details.workspaceName,
+          status: details.status,
+          lastActiveAt: details.lastActiveAt,
+          lastMessagePreview: details.lastMessagePreview,
+        }, ...prev]
+      })
+
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to switch workspace'
+      setSessionError(message)
+      return false
+    } finally {
+      setIsSessionLoading(false)
+    }
+  }, [clearAllQueriesState, getSessionDetails, hydrateWorkspacePages])
+
+  const createWorkspace = useCallback(async (name?: string): Promise<string | null> => {
+    try {
+      setIsSessionLoading(true)
+      setSessionError(null)
+
+      const created = await createWorkspaceSession(name)
+      const summary: V3SessionSummary = {
+        sessionId: created.sessionId,
+        sessionType: created.sessionType,
+        workspaceName: created.workspaceName,
+        status: 'active',
+      }
+      setWorkspaces((prev) => [summary, ...prev.filter((session) => session.sessionId !== summary.sessionId)])
+
+      const hydratedPages = await hydrateWorkspacePages(created.workspaceState)
+      clearAllQueriesState()
+      setSessionId(created.sessionId)
+      setWorkspaceState(created.workspaceState)
+      setWorkspacePages(hydratedPages)
+
+      return created.sessionId
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create workspace'
+      setSessionError(message)
+      return null
+    } finally {
+      setIsSessionLoading(false)
+    }
+  }, [clearAllQueriesState, createWorkspaceSession, hydrateWorkspacePages])
+
+  // Initialize V3 workspace session when project changes.
+  useEffect(() => {
+    let cancelled = false
+
+    const initializeSession = async () => {
+      setIsSessionLoading(true)
+      setSessionError(null)
+
+      try {
+        const sessions = await fetchWorkspaceSessions()
+        if (cancelled) return
+
+        setWorkspaces(sessions)
+
+        const preferredSession = sessions[0]
+        if (preferredSession) {
+          const switched = await switchWorkspace(preferredSession.sessionId)
+          if (!switched) throw new Error('Failed to restore existing workspace')
+          return
+        }
+
+        const defaultName = 'Workspace 1'
+        const createdSessionId = await createWorkspace(defaultName)
+        if (!createdSessionId) {
+          throw new Error('Failed to create initial workspace')
+        }
+      } catch (error) {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : 'Failed to initialize workspace session'
+        setSessionError(message)
+      } finally {
+        if (!cancelled) {
+          setIsSessionLoading(false)
+        }
+      }
+    }
+
+    initializeSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, fetchWorkspaceSessions, createWorkspace, switchWorkspace])
 
   // Helper to update a specific query's state
   const updateQuery = useCallback((queryId: string, updates: Partial<QueryState>) => {
@@ -248,29 +756,24 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     const accumulator = {
       reasoning: [] as string[],
       trace: [] as AgentTraceStep[],
-      selectedPages: [] as AgentSelectedPage[],
+      selectedPages: cloneSelectedPages(queryState.selectedPages),
       annotatedImages: [] as AnnotatedImage[],
       codeBboxes: {} as Record<string, BoundingBox[]>,
       lastToolResultIndex: -1,
     }
 
     try {
-      // Get auth token
-      const { data: { session } } = await supabase.auth.getSession()
+      if (!queryState.sessionId) {
+        throw new Error('No active V3 workspace session')
+      }
 
-      const res = await fetch(`${API_URL}/projects/${projectId}/queries/stream`, {
+      const headers = await getAuthHeaders()
+
+      const res = await fetch(`${API_URL}/v3/sessions/${queryState.sessionId}/query`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token && {
-            Authorization: `Bearer ${session.access_token}`,
-          }),
-        },
+        headers,
         body: JSON.stringify({
-          query: queryState.queryText,
-          conversationId: queryState.conversationId,
-          viewingPageId: queryState.viewingPageId,
-          mode: queryState.mode,
+          message: queryState.queryText,
         }),
         signal: abortController.signal,
       })
@@ -308,7 +811,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
               if (jsonStr) {
                 try {
                   const data = JSON.parse(jsonStr)
-                  processEvent(queryId, data, accumulator)
+                  await processEvent(queryId, data, accumulator)
                 } catch {
                   console.warn('Failed to parse SSE event:', jsonStr)
                 }
@@ -327,7 +830,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             if (jsonStr) {
               try {
                 const data = JSON.parse(jsonStr)
-                processEvent(queryId, data, accumulator)
+                await processEvent(queryId, data, accumulator)
               } catch {
                 console.warn('Failed to parse remaining SSE event:', jsonStr)
               }
@@ -357,10 +860,10 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       clearTimeout(timeoutId)
       controllersRef.current.delete(queryId)
     }
-  }, [projectId, queries, updateQuery, dismissToast])
+  }, [queries, updateQuery, dismissToast, getAuthHeaders])
 
   // Process SSE events for a specific query
-  const processEvent = useCallback((
+  const processEvent = useCallback(async (
     queryId: string,
     data: Record<string, unknown>,
     accumulator: {
@@ -375,15 +878,27 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     switch (data.type) {
       case 'thinking': {
         if (typeof data.content === 'string') {
-          accumulator.trace.push({ type: 'thinking', content: data.content })
-          updateQuery(queryId, {
-            trace: [...accumulator.trace],
-            thinkingText: data.content,
-          })
+          const panel = data.panel === 'learning' || data.panel === 'knowledge_update'
+            ? data.panel
+            : 'workspace_assembly'
+
+          accumulator.trace.push({ type: 'thinking', content: data.content, panel })
+
+          if (panel === 'workspace_assembly') {
+            updateQuery(queryId, {
+              trace: [...accumulator.trace],
+              thinkingText: data.content,
+            })
+          } else {
+            updateQuery(queryId, {
+              trace: [...accumulator.trace],
+            })
+          }
         }
         break
       }
 
+      case 'token':
       case 'text': {
         if (typeof data.content === 'string') {
           accumulator.reasoning.push(data.content)
@@ -405,10 +920,15 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
       case 'tool_call': {
         if (typeof data.tool === 'string') {
+          const toolInput = (
+            (data.input as Record<string, unknown> | undefined)
+            || (data.arguments as Record<string, unknown> | undefined)
+            || {}
+          )
           const newStep: AgentTraceStep = {
             type: 'tool_call',
             tool: data.tool,
-            input: data.input as Record<string, unknown>,
+            input: toolInput,
           }
           accumulator.trace.push(newStep)
 
@@ -418,8 +938,8 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
           })
 
           // Cache page data from search_pages for prefetching
-          if (data.tool === 'select_pages') {
-            const input = data.input as { page_ids?: string[] }
+          if (data.tool === 'select_pages' || data.tool === 'add_pages') {
+            const input = toolInput as { page_ids?: string[] }
             if (input?.page_ids) {
               const pagesToPrefetch: AgentSelectedPage[] = []
               for (const pageId of input.page_ids) {
@@ -476,156 +996,88 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             }
           }
 
-          // Process select_pages results
-          if (data.tool === 'select_pages') {
+          // Process page additions from legacy + V3 tool results.
+          if (data.tool === 'select_pages' || data.tool === 'add_pages') {
             const result = data.result as {
               pages?: Array<{
                 page_id: string
-                page_name: string
-                file_path: string
-                discipline_id: string
-                semantic_index?: {
-                  image_width?: number
-                  image_height?: number
-                }
+                page_name?: string
+                file_path?: string
+                discipline_id?: string
               }>
             }
 
-            if (result?.pages) {
-              // Find ordered page IDs from the tool_call
-              let orderedPageIds: string[] | null = null
+            if (result?.pages && result.pages.length > 0) {
+              const pageDataMap = new Map(result.pages.map((page) => [page.page_id, page]))
+              let orderedPageIds: string[] = []
+
               for (let i = accumulator.trace.length - 1; i >= 0; i--) {
                 const step = accumulator.trace[i]
-                if (step.type === 'tool_call' && step.tool === 'select_pages') {
-                  const input = step.input as { page_ids?: string[] }
-                  orderedPageIds = input?.page_ids || null
+                if (
+                  step.type === 'tool_call'
+                  && step.tool === data.tool
+                  && Array.isArray((step.input as { page_ids?: unknown })?.page_ids)
+                ) {
+                  orderedPageIds = (step.input as { page_ids: string[] }).page_ids
                   break
                 }
               }
 
-              const pageDataMap = new Map(result.pages.map(p => [p.page_id, p]))
-              const pageOrder = orderedPageIds || result.pages.map(p => p.page_id)
-              const newPages: AgentSelectedPage[] = []
+              const orderedPages = (orderedPageIds.length > 0 ? orderedPageIds : result.pages.map((page) => page.page_id))
+                .map((pageId) => pageDataMap.get(pageId))
+                .filter((page): page is NonNullable<typeof page> => Boolean(page))
 
-              for (const pageId of pageOrder) {
-                const p = pageDataMap.get(pageId)
-                if (p) {
-                  newPages.push({
-                    pageId: p.page_id,
-                    pageName: p.page_name || 'Unknown',
-                    filePath: p.file_path,
-                    disciplineId: p.discipline_id || '',
-                    pointers: [],
-                    highlights: [],
-                    imageWidth: p.semantic_index?.image_width,
-                    imageHeight: p.semantic_index?.image_height,
-                  })
-                }
-              }
-
-              // Merge with existing
-              const existingIds = new Set(accumulator.selectedPages.map(p => p.pageId))
-              const uniqueNew = newPages.filter(p => !existingIds.has(p.pageId))
-              if (uniqueNew.length > 0) {
-                accumulator.selectedPages = [...accumulator.selectedPages, ...uniqueNew]
-                updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
-              }
+              accumulator.selectedPages = await applyWorkspacePageAdditions(orderedPages, accumulator.selectedPages)
+              updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
+              setWorkspacePages(cloneSelectedPages(accumulator.selectedPages))
             }
           }
 
-          // Process select_pointers results
-          if (data.tool === 'select_pointers') {
+          // Process pointer highlights from legacy + V3 tool results.
+          if (data.tool === 'select_pointers' || data.tool === 'highlight_pointers') {
             const result = data.result as {
               pointers?: Array<{
                 pointer_id: string
-                title: string
+                title?: string
                 page_id: string
-                page_name: string
-                file_path: string
-                discipline_id: string
-                bbox_x: number
-                bbox_y: number
-                bbox_width: number
-                bbox_height: number
+                page_name?: string
+                file_path?: string
+                discipline_id?: string
+                bbox_x?: number
+                bbox_y?: number
+                bbox_width?: number
+                bbox_height?: number
               }>
             }
 
-            if (result?.pointers) {
-              // Find ordered pointer IDs from tool_call
-              let orderedPointerIds: string[] | null = null
+            if (result?.pointers && result.pointers.length > 0) {
+              const pointerDataMap = new Map(result.pointers.map((pointer) => [pointer.pointer_id, pointer]))
+              let orderedPointerIds: string[] = []
+
               for (let i = accumulator.trace.length - 1; i >= 0; i--) {
                 const step = accumulator.trace[i]
-                if (step.type === 'tool_call' && step.tool === 'select_pointers') {
-                  const input = step.input as { pointer_ids?: string[] }
-                  orderedPointerIds = input?.pointer_ids || null
+                if (
+                  step.type === 'tool_call'
+                  && step.tool === data.tool
+                  && Array.isArray((step.input as { pointer_ids?: unknown })?.pointer_ids)
+                ) {
+                  orderedPointerIds = (step.input as { pointer_ids: string[] }).pointer_ids
                   break
                 }
               }
 
-              const pointerDataMap = new Map(result.pointers.map(p => [p.pointer_id, p]))
-              const pointerOrder = orderedPointerIds || result.pointers.map(p => p.pointer_id)
+              const orderedPointers = (orderedPointerIds.length > 0 ? orderedPointerIds : result.pointers.map((pointer) => pointer.pointer_id))
+                .map((pointerId) => pointerDataMap.get(pointerId))
+                .filter((pointer): pointer is NonNullable<typeof pointer> => Boolean(pointer))
 
-              // Group by page
-              const pageMap = new Map<string, AgentSelectedPage>()
-              const pageOrder: string[] = []
-
-              for (const pointerId of pointerOrder) {
-                const p = pointerDataMap.get(pointerId)
-                if (!p) continue
-
-                let page = pageMap.get(p.page_id)
-                if (!page) {
-                  page = {
-                    pageId: p.page_id,
-                    pageName: p.page_name || 'Unknown',
-                    filePath: p.file_path,
-                    disciplineId: p.discipline_id || '',
-                    pointers: [],
-                  }
-                  pageMap.set(p.page_id, page)
-                  pageOrder.push(p.page_id)
-                }
-
-                page.pointers.push({
-                  pointerId: p.pointer_id,
-                  title: p.title,
-                  bboxX: p.bbox_x,
-                  bboxY: p.bbox_y,
-                  bboxWidth: p.bbox_width,
-                  bboxHeight: p.bbox_height,
-                })
-              }
-
-              // Merge pointers into existing pages or add new
-              const existingPageMap = new Map(accumulator.selectedPages.map(p => [p.pageId, p]))
-              let hasChanges = false
-
-              for (const pageId of pageOrder) {
-                const newPageData = pageMap.get(pageId)!
-                const existingPage = existingPageMap.get(pageId)
-
-                if (existingPage) {
-                  const existingPointerIds = new Set(existingPage.pointers.map(p => p.pointerId))
-                  for (const pointer of newPageData.pointers) {
-                    if (!existingPointerIds.has(pointer.pointerId)) {
-                      existingPage.pointers.push(pointer)
-                      hasChanges = true
-                    }
-                  }
-                } else {
-                  accumulator.selectedPages.push(newPageData)
-                  existingPageMap.set(pageId, newPageData)
-                  hasChanges = true
-                }
-              }
-
-              if (hasChanges) {
-                updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
-              }
+              accumulator.selectedPages = await applyPointerHighlights(orderedPointers, accumulator.selectedPages)
+              updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
+              setWorkspacePages(cloneSelectedPages(accumulator.selectedPages))
             }
           }
+
           // Handle resolve_highlights - merge highlights into existing pages
-          else if (data.tool === 'resolve_highlights') {
+          if (data.tool === 'resolve_highlights') {
             const result = data.result as {
               highlights?: Array<{
                 page_id: string
@@ -647,10 +1099,102 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
               if (hasChanges) {
                 updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
+                setWorkspacePages(cloneSelectedPages(accumulator.selectedPages))
               }
             }
           }
         }
+        break
+      }
+
+      case 'workspace_update': {
+        const action = typeof data.action === 'string' ? data.action : ''
+        const incomingWorkspaceState = normalizeWorkspaceState(
+          (data.workspace_state as RawWorkspaceState | null | undefined),
+        )
+        if (incomingWorkspaceState) {
+          setWorkspaceState(incomingWorkspaceState)
+        }
+
+        if (action === 'add_pages') {
+          const resultPages = Array.isArray(data.pages)
+            ? data.pages as Array<{
+              page_id: string
+              page_name?: string
+              file_path?: string
+              discipline_id?: string
+            }>
+            : []
+
+          let pagesToApply = resultPages
+          if (pagesToApply.length === 0 && Array.isArray(data.page_ids)) {
+            pagesToApply = (data.page_ids as unknown[])
+              .filter((pageId): pageId is string => typeof pageId === 'string')
+              .map((pageId) => ({ page_id: pageId }))
+          }
+
+          if (pagesToApply.length > 0) {
+            accumulator.selectedPages = await applyWorkspacePageAdditions(pagesToApply, accumulator.selectedPages)
+          }
+        } else if (action === 'remove_pages') {
+          const pageIds = Array.isArray(data.page_ids)
+            ? (data.page_ids as unknown[]).filter((pageId): pageId is string => typeof pageId === 'string')
+            : []
+          accumulator.selectedPages = removeWorkspacePages(pageIds, accumulator.selectedPages)
+        } else if (action === 'highlight_pointers') {
+          const resultPointers = Array.isArray(data.pointers)
+            ? data.pointers as Array<{
+              pointer_id: string
+              title?: string
+              page_id: string
+              bbox_x?: number
+              bbox_y?: number
+              bbox_width?: number
+              bbox_height?: number
+            }>
+            : []
+
+          let pointersToApply = resultPointers
+          if (pointersToApply.length === 0 && Array.isArray(data.pointer_ids)) {
+            const pointerIds = (data.pointer_ids as unknown[]).filter((pointerId): pointerId is string => typeof pointerId === 'string')
+            const resolvedPointers = await Promise.all(
+              pointerIds.map(async (pointerId) => {
+                try {
+                  const pointer = await api.pointers.get(pointerId)
+                  return {
+                    pointer_id: pointer.id,
+                    title: pointer.title,
+                    page_id: pointer.pageId,
+                    bbox_x: pointer.bboxX,
+                    bbox_y: pointer.bboxY,
+                    bbox_width: pointer.bboxWidth,
+                    bbox_height: pointer.bboxHeight,
+                  }
+                } catch {
+                  return null
+                }
+              }),
+            )
+            pointersToApply = resolvedPointers.filter((pointer): pointer is NonNullable<typeof pointer> => pointer !== null)
+          }
+
+          if (pointersToApply.length > 0) {
+            accumulator.selectedPages = await applyPointerHighlights(pointersToApply, accumulator.selectedPages)
+          }
+        }
+
+        if (incomingWorkspaceState?.displayedPages?.length) {
+          const order = incomingWorkspaceState.displayedPages
+          const pageMap = new Map(accumulator.selectedPages.map((page) => [page.pageId, page]))
+          const ordered = order
+            .map((pageId) => pageMap.get(pageId))
+            .filter((page): page is AgentSelectedPage => Boolean(page))
+          const extras = accumulator.selectedPages.filter((page) => !order.includes(page.pageId))
+          accumulator.selectedPages = [...ordered, ...extras]
+        }
+
+        updateQuery(queryId, { selectedPages: [...accumulator.selectedPages] })
+        setWorkspacePages(cloneSelectedPages(accumulator.selectedPages))
         break
       }
 
@@ -861,6 +1405,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
           })
           return newMap
         })
+        setWorkspacePages(cloneSelectedPages(accumulator.selectedPages))
         break
       }
 
@@ -944,7 +1489,17 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         break
       }
     }
-  }, [updateQuery, markComplete, dismissToast, renderedPages, pageMetadata, contextPointers])
+  }, [
+    updateQuery,
+    markComplete,
+    dismissToast,
+    renderedPages,
+    pageMetadata,
+    contextPointers,
+    applyWorkspacePageAdditions,
+    applyPointerHighlights,
+    removeWorkspacePages,
+  ])
 
   // Submit a new query
   const submitQuery = useCallback((
@@ -953,12 +1508,20 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     viewingPageId?: string | null,
     mode: QueryMode = 'fast'
   ): string | null => {
+    if (!sessionId) {
+      console.warn('No active V3 workspace session')
+      setSessionError('No active workspace session. Please create or switch to a workspace.')
+      return null
+    }
+
     // Check concurrent limit
     const runningCount = Array.from(queries.values()).filter(q => q.status === 'streaming').length
     if (runningCount >= MAX_CONCURRENT_QUERIES) {
       console.warn(`Max concurrent queries (${MAX_CONCURRENT_QUERIES}) reached`)
       return null
     }
+
+    setSessionError(null)
 
     // Generate IDs
     const queryId = `query-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -969,12 +1532,13 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         id: queryId,
         queryText,
         mode,
+        sessionId,
         conversationId: conversationId ?? null,
         viewingPageId: viewingPageId ?? null,
         toastId,
         status: 'streaming',
         trace: [],
-        selectedPages: [],
+        selectedPages: cloneSelectedPages(workspacePages),
         annotatedImages: [],
         thinkingText: '',
         finalAnswer: '',
@@ -1002,7 +1566,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     streamQuery(queryId, queryState)
 
     return queryId
-  }, [queries, addToast, streamQuery])
+  }, [sessionId, queries, addToast, streamQuery, workspacePages])
 
   // Get state of a specific query
   const getQueryState = useCallback((queryId: string): QueryState | null => {
@@ -1017,24 +1581,8 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
   // Reset everything
   const reset = useCallback(() => {
-    // Abort all running queries
-    controllersRef.current.forEach((controller) => {
-      controller.abortController.abort()
-      clearTimeout(controller.timeoutId)
-    })
-    controllersRef.current.clear()
-
-    // Dismiss all toasts
-    queries.forEach((query) => {
-      if (query.toastId) {
-        dismissToast(query.toastId)
-      }
-    })
-
-    setQueries(new Map())
-    setActiveQueryId(null)
-    pageDataCacheRef.current.clear()
-  }, [queries, dismissToast])
+    clearAllQueriesState()
+  }, [clearAllQueriesState])
 
   // Restore state for a completed query (for QueryStack navigation)
   const restore = useCallback((
@@ -1049,6 +1597,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       id: queryId,
       queryText: '',
       mode: 'fast',
+      sessionId,
       conversationId: null,
       viewingPageId: null,
       toastId: '',
@@ -1073,13 +1622,15 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
     setQueries((prev) => new Map(prev).set(queryId, queryState))
     setActiveQueryId(queryId)
-  }, [])
+    setWorkspacePages(cloneSelectedPages(queryState.selectedPages))
+  }, [sessionId])
 
   // Load pages directly
   const loadPages = useCallback((pages: AgentSelectedPage[]) => {
     if (activeQueryId) {
       updateQuery(activeQueryId, { selectedPages: pages })
     }
+    setWorkspacePages(cloneSelectedPages(pages))
   }, [activeQueryId, updateQuery])
 
   return {
@@ -1094,5 +1645,14 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     reset,
     restore,
     loadPages,
+    sessionId,
+    workspaceState,
+    workspaces,
+    workspacePages,
+    isSessionLoading,
+    sessionError,
+    createWorkspace,
+    switchWorkspace,
+    refreshWorkspaces,
   }
 }
