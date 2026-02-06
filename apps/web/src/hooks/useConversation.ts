@@ -1,108 +1,130 @@
 import { useCallback, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ConversationResponse } from '../lib/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, QueryResponse, V3SessionSummaryResponse, V3SessionTurnResponse } from '../lib/api';
 
-/**
- * Hook for managing conversation state with explicit binding.
- *
- * Key concepts:
- * - `activeConversationId`: The conversation the user is currently bound to (null = ready for new)
- * - `activeConversation`: The full conversation object if bound, null otherwise
- * - Fresh load starts with null binding (welcome state)
- * - First query creates a new conversation and binds to it
- * - Plus button clears binding (returns to null/welcome state)
- * - History restore binds to the selected conversation
- */
-export function useConversation(projectId: string | undefined) {
-  const queryClient = useQueryClient();
+interface WorkspaceConversation {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
-  // Explicit binding state: null means "ready for new conversation" (welcome state)
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+interface WorkspaceConversationWithQueries extends WorkspaceConversation {
+  queries: QueryResponse[];
+}
 
-  // Query for all conversations (for history panel, etc.)
-  const {
-    data: conversations,
-    isLoading: isLoadingConversations,
-  } = useQuery({
-    queryKey: ['conversations', projectId],
-    queryFn: () => api.conversations.list(projectId!),
-    enabled: !!projectId,
-    staleTime: 60 * 1000, // 1 minute
-  });
+const SESSION_QUERY_KEY = 'workspace-sessions';
 
-  // Derive the active conversation from the binding
-  const activeConversation = activeConversationId
-    ? (conversations?.find(c => c.id === activeConversationId) ?? null)
-    : null;
-
-  // Mutation to create a new conversation
-  const createConversationMutation = useMutation({
-    mutationFn: (projId: string) => api.conversations.create(projId),
-    onSuccess: (newConversation) => {
-      // Add the new conversation to the cache at the front of the list
-      queryClient.setQueryData<ConversationResponse[]>(
-        ['conversations', projectId],
-        (old) => [newConversation, ...(old ?? [])]
-      );
-    },
-  });
-
-  // Bind to a specific conversation (used when restoring from history)
-  const bindToConversation = useCallback((conversationId: string) => {
-    setActiveConversationId(conversationId);
-  }, []);
-
-  // Start a new conversation: clears binding to null state (welcome screen)
-  // Does NOT create a conversation - that happens on first query
-  const startNewConversation = useCallback(() => {
-    setActiveConversationId(null);
-  }, []);
-
-  // Create a new conversation AND bind to it (used on first query)
-  const createAndBindConversation = useCallback(async () => {
-    if (!projectId) {
-      console.warn('Cannot create conversation: no projectId');
-      return null;
-    }
-    const newConversation = await createConversationMutation.mutateAsync(projectId);
-    setActiveConversationId(newConversation.id);
-    return newConversation;
-  }, [projectId, createConversationMutation]);
-
+function toWorkspaceConversation(session: V3SessionSummaryResponse): WorkspaceConversation {
+  const timestamp = session.last_active_at ?? new Date().toISOString();
   return {
-    // State
-    activeConversationId,
-    activeConversation,
-    conversations,
-    isLoading: isLoadingConversations,
-    isCreating: createConversationMutation.isPending,
+    id: session.session_id,
+    title: session.workspace_name ?? null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
 
-    // Actions
-    bindToConversation,
-    startNewConversation,
-    createAndBindConversation,
+function toQueryResponse(
+  sessionId: string,
+  projectId: string | undefined,
+  updatedAt: string,
+  turn: V3SessionTurnResponse,
+): QueryResponse {
+  return {
+    id: `${sessionId}-turn-${turn.turn_number}`,
+    userId: '',
+    projectId,
+    conversationId: sessionId,
+    queryText: turn.user,
+    responseText: turn.response,
+    displayTitle: turn.user.trim().slice(0, 80) || null,
+    sequenceOrder: turn.turn_number,
+    trace: [],
+    pages: [],
+    createdAt: updatedAt,
   };
 }
 
 /**
- * Hook to get a conversation with all its queries.
+ * Hook for managing workspace session binding in Maestro Mode.
  */
-export function useConversationWithQueries(conversationId: string | undefined) {
+export function useConversation(projectId: string | undefined) {
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  const {
+    data: conversations,
+    isLoading: isLoadingConversations,
+  } = useQuery({
+    queryKey: [SESSION_QUERY_KEY, projectId],
+    queryFn: async () => {
+      const sessions = await api.v3Sessions.list(projectId!, {
+        sessionType: 'workspace',
+        status: 'active',
+      });
+      return sessions.map(toWorkspaceConversation);
+    },
+    enabled: !!projectId,
+    staleTime: 60 * 1000,
+  });
+
+  const activeConversation = activeConversationId
+    ? (conversations?.find((conversation) => conversation.id === activeConversationId) ?? null)
+    : null;
+
+  const bindToConversation = useCallback((conversationId: string) => {
+    setActiveConversationId(conversationId);
+  }, []);
+
+  const startNewConversation = useCallback(() => {
+    setActiveConversationId(null);
+  }, []);
+
+  return {
+    activeConversationId,
+    activeConversation,
+    conversations,
+    isLoading: isLoadingConversations,
+    bindToConversation,
+    startNewConversation,
+  };
+}
+
+/**
+ * Hook to fetch a workspace session history mapped into query-shaped rows.
+ */
+export function useConversationWithQueries(conversationId: string | undefined, projectId?: string) {
   return useQuery({
-    queryKey: ['conversation', conversationId],
-    queryFn: () => api.conversations.get(conversationId!),
+    queryKey: ['workspace-session-history', conversationId, projectId],
+    queryFn: async (): Promise<WorkspaceConversationWithQueries> => {
+      const [session, history] = await Promise.all([
+        api.v3Sessions.get(conversationId!),
+        api.v3Sessions.history(conversationId!),
+      ]);
+
+      const updatedAt = session.last_active_at ?? new Date().toISOString();
+      return {
+        id: session.session_id,
+        title: session.workspace_name ?? null,
+        createdAt: updatedAt,
+        updatedAt,
+        queries: history.turns.map((turn) =>
+          toQueryResponse(session.session_id, projectId, updatedAt, turn),
+        ),
+      };
+    },
     enabled: !!conversationId,
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 30 * 1000,
   });
 }
 
 /**
- * Hook to invalidate conversation cache when data changes.
+ * Hook to invalidate workspace session cache when data changes.
  */
 export function useInvalidateConversations() {
   const queryClient = useQueryClient();
 
   return useCallback((projectId: string) => {
-    queryClient.invalidateQueries({ queryKey: ['conversations', projectId] });
+    queryClient.invalidateQueries({ queryKey: [SESSION_QUERY_KEY, projectId] });
   }, [queryClient]);
 }

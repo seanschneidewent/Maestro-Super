@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 export interface AgentToastItem {
   id: string;
   queryText: string;
-  conversationId: string | null;
+  queryId: string;
   status: 'working' | 'complete';
   createdAt: number;
   completedAt?: number;
@@ -11,7 +11,7 @@ export interface AgentToastItem {
 
 interface AgentToastContextValue {
   toasts: AgentToastItem[];
-  addToast: (queryText: string, conversationId: string | null) => string;
+  addToast: (queryText: string, queryId: string) => string;
   markComplete: (toastId: string) => void;
   dismissToast: (toastId: string) => void;
 }
@@ -46,12 +46,12 @@ export const AgentToastProvider: React.FC<AgentToastProviderProps> = ({ children
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
   }, []);
 
-  const addToast = useCallback((queryText: string, conversationId: string | null): string => {
+  const addToast = useCallback((queryText: string, queryId: string): string => {
     const id = `agent-toast-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const newToast: AgentToastItem = {
       id,
       queryText,
-      conversationId,
+      queryId,
       status: 'working',
       createdAt: Date.now(),
     };

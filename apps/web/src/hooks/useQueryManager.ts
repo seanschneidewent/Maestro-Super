@@ -97,7 +97,6 @@ export interface QueryState {
   queryText: string
   mode: QueryMode
   sessionId: string | null
-  conversationId: string | null
   viewingPageId: string | null
   toastId: string
   status: QueryStatus
@@ -133,7 +132,6 @@ interface UseQueryManagerReturn {
   // Submit a new query (doesn't abort existing ones)
   submitQuery: (
     query: string,
-    conversationId?: string,
     viewingPageId?: string | null,
     mode?: QueryMode
   ) => string | null
@@ -1504,7 +1502,6 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
   // Submit a new query
   const submitQuery = useCallback((
     queryText: string,
-    conversationId?: string,
     viewingPageId?: string | null,
     mode: QueryMode = 'fast'
   ): string | null => {
@@ -1525,7 +1522,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
     // Generate IDs
     const queryId = `query-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const toastId = addToast(queryText, conversationId ?? null)
+    const toastId = addToast(queryText, queryId)
 
     // Create initial state
     const queryState: QueryState = {
@@ -1533,7 +1530,6 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         queryText,
         mode,
         sessionId,
-        conversationId: conversationId ?? null,
         viewingPageId: viewingPageId ?? null,
         toastId,
         status: 'streaming',
@@ -1598,7 +1594,6 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       queryText: '',
       mode: 'fast',
       sessionId,
-      conversationId: null,
       viewingPageId: null,
       toastId: '',
       status: 'complete',

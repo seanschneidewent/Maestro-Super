@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { AppMode, DisciplineInHierarchy, ContextPointer, QueryWithPages, AgentTraceStep, AgentConceptResponse, AgentFinding, AgentCrossReference } from '../../types';
 import { QueryTraceStep } from '../../lib/api';
 import { PlansPanel } from './PlansPanel';
@@ -18,8 +17,7 @@ import {
   SuggestedPrompts,
 } from '.';
 import { useQueryManager, AgentSelectedPage, CompletedQuery } from '../../hooks/useQueryManager';
-import { QueryResponse, QueryPageResponse, ConversationResponse } from '../../lib/api';
-import { useConversation } from '../../hooks/useConversation';
+import { QueryResponse, QueryPageResponse } from '../../lib/api';
 import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentToastStack } from './AgentToastStack';
 import { ConversationIndicator } from './ConversationIndicator';
@@ -231,7 +229,6 @@ interface MaestroModeProps {
 }
 
 export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, projectId, onGetStarted }) => {
-  const queryClient = useQueryClient();
   const { showError } = useToast();
   const { currentStep, completeStep, advanceStep, isActive: tutorialActive, hasCompleted, skipTutorial } = useTutorial();
 
@@ -255,16 +252,6 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const [renderedPages] = useState<Map<string, string>>(new Map());
   const [pageMetadata] = useState<Map<string, { title: string; pageNumber: number }>>(new Map());
   const [contextPointers] = useState<Map<string, ContextPointer[]>>(new Map());
-
-  // Conversation management
-  const {
-    activeConversationId,
-    activeConversation,
-    startNewConversation,
-    createAndBindConversation,
-    bindToConversation,
-    isCreating: isCreatingConversation,
-  } = useConversation(projectId);
 
   // Track completed queries in the current conversation for QueryStack
   const [conversationQueries, setConversationQueries] = useState<QueryWithPages[]>([]);
@@ -300,7 +287,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const handleQueryComplete = useCallback((query: CompletedQuery) => {
     const newQuery: QueryWithPages = {
       id: query.queryId,
-      conversationId: activeConversationId,
+      conversationId: null,
       displayTitle: query.displayTitle,
       sequenceOrder: conversationQueries.length + 1,
       queryText: query.queryText,
@@ -318,19 +305,9 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     queryPagesCache.set(query.queryId, query.pages);
     queryTraceCache.set(query.queryId, query.trace);
 
-    // Update conversation title in cache and local state if provided
-    if (query.conversationTitle && activeConversationId) {
-      // Update local state immediately for reliable display
+    // Update conversation title in local state if provided
+    if (query.conversationTitle) {
       setLocalConversationTitle(query.conversationTitle);
-      // Also update cache for persistence
-      queryClient.setQueryData<ConversationResponse[]>(
-        ['conversations', projectId],
-        (old) => old?.map(c =>
-          c.id === activeConversationId
-            ? { ...c, title: query.conversationTitle }
-            : c
-        ) ?? []
-      );
     }
 
     // Sync workspace pages from query results and mark done
@@ -376,7 +353,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
     setConversationQueries((prev) => [...prev, newQuery]);
     setActiveQueryId(query.queryId);
-  }, [activeConversationId, conversationQueries.length, queryPagesCache, queryTraceCache, queryClient, projectId, syncWorkspacePages, markWorkspaceDone]);
+  }, [conversationQueries.length, queryPagesCache, queryTraceCache, syncWorkspacePages, markWorkspaceDone]);
 
   // Multi-query manager - supports concurrent background queries
   const {
@@ -461,19 +438,12 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   }, [isStreaming, pageAgentStates, syncFromPageAgentStates]);
 
   // Handle suggested prompt selection - auto-submit
-  const handleSuggestedPrompt = useCallback(async (prompt: string) => {
+  const handleSuggestedPrompt = useCallback((prompt: string) => {
     if (isStreaming) return;
 
     // Tutorial: advance from 'prompt-suggestions' to 'background-task'
     if (tutorialActive && currentStep === 'prompt-suggestions') {
       advanceStep(); // → 'background-task'
-    }
-
-    // If no active conversation, create one first
-    let conversationId = activeConversationId;
-    if (!conversationId) {
-      const newConv = await createAndBindConversation();
-      conversationId = newConv?.id ?? null;
     }
 
     // Add user query to feed
@@ -489,8 +459,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     setSubmittedQuery(prompt);
     setIsQueryExpanded(false);
     // Toast management handled by useQueryManager
-    submitQuery(prompt, conversationId ?? undefined, selectedPageId, 'deep');
-  }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
+    submitQuery(prompt, selectedPageId, 'deep');
+  }, [isStreaming, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
 
   const resetUiForWorkspaceSwitch = useCallback(() => {
     resetStream();
@@ -504,8 +474,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     queryPagesCache.clear();
     queryTraceCache.clear();
     clearWorkspace();
-    startNewConversation();
-  }, [resetStream, clearWorkspace, queryPagesCache, queryTraceCache, startNewConversation]);
+  }, [resetStream, clearWorkspace, queryPagesCache, queryTraceCache]);
 
   const handleCreateWorkspace = useCallback(async (workspaceName?: string) => {
     const createdId = await createWorkspace(workspaceName);
@@ -532,10 +501,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     selectedQueryId: string
   ) => {
     // Clear local title to avoid stale title from previous conversation
-    // Will fall back to activeConversation?.title from cache
+    // Will fall back to active workspace title when available.
     setLocalConversationTitle(null);
-    // Bind to the restored conversation
-    bindToConversation(conversationId);
     // Convert QueryResponse[] to QueryWithPages[] for the QueryStack
     const restoredQueries: QueryWithPages[] = queries.map((q, idx) => {
       // Use API responseText, or extract from trace as fallback
@@ -702,48 +669,40 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     );
   };
 
-  // Handle navigation from agent toast (fetch conversation and restore)
-  const handleToastNavigate = useCallback(async (conversationId: string) => {
+  // Handle navigation from agent toast (restore query from local cache)
+  const handleToastNavigate = useCallback((queryId: string) => {
     // Tutorial: advance from 'complete-task' to 'result-page' when user clicks Complete
     if (tutorialActive && currentStep === 'complete-task') {
       advanceStep(); // → 'result-page'
     }
 
-    // If we're already on this conversation, show the conversation content
-    // by filtering out standalone-page items (the user was browsing pages)
-    if (activeConversationId === conversationId && conversationQueries.length > 0) {
-      setShowWorkspaces(false);
-      // Remove standalone-page items to show conversation content
-      setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
-      // Force scroll to top
-      setTimeout(() => {
-        const scrollContainer = document.querySelector('[data-scroll-container]');
-        scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' });
-      }, 100);
+    const query = conversationQueries.find((candidate) => candidate.id === queryId);
+    if (!query) {
+      showError('Failed to load conversation. Please try again.');
       return;
     }
 
-    // Otherwise fetch from API and restore
-    try {
-      const conversation = await api.conversations.get(conversationId);
-      if (conversation.queries && conversation.queries.length > 0) {
-        // Navigate to the most recent query in the conversation
-        const lastQuery = conversation.queries[conversation.queries.length - 1];
-        handleRestoreConversation(conversationId, conversation.queries, lastQuery.id);
-      }
-      // Set title AFTER restore (which clears it) so we have the fetched title
-      setLocalConversationTitle(conversation.title ?? null);
+    setShowWorkspaces(false);
+    setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
+    setActiveQueryId(queryId);
+    setSubmittedQuery(query.queryText);
+    setIsQueryExpanded(false);
 
-      // Force scroll to top when navigating from toast
-      setTimeout(() => {
-        const scrollContainer = document.querySelector('[data-scroll-container]');
-        scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' });
-      }, 100);
-    } catch (err) {
-      console.error('Failed to navigate to conversation:', err);
-      showError('Failed to load conversation. Please try again.');
-    }
-  }, [activeConversationId, conversationQueries.length, handleRestoreConversation, showError, tutorialActive, currentStep, advanceStep]);
+    const cachedPages = queryPagesCache.get(queryId);
+    const cachedTrace = queryTraceCache.get(queryId);
+    restore(
+      cachedTrace || [],
+      query.responseText || '',
+      query.displayTitle || null,
+      cachedPages,
+    );
+
+    // Force scroll to top when navigating from toast
+    setTimeout(() => {
+      const scrollContainer = document.querySelector('[data-scroll-container]');
+      scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 100);
+  }, [conversationQueries, queryPagesCache, queryTraceCache, restore, showError, tutorialActive, currentStep, advanceStep]);
 
   // Handle visible page change from scrolling in multi-page mode
   const handleVisiblePageChange = (pageId: string, disciplineId: string) => {
@@ -887,7 +846,6 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
   // Handle starting a new conversation (clears query stack)
   const handleNewConversation = () => {
-    startNewConversation();
     resetStream();
     setQueryInput('');
     setSubmittedQuery(null);
@@ -943,7 +901,10 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   // Compute whether toast or conversation indicator is visible for button positioning
   const isToastVisible = toasts.length > 0 && shouldShowToast;
   // Indicator shows when: in conversation, not streaming, and all toasts auto-dismissed
-  const isIndicatorVisible = activeConversationId !== null && !isStreaming && toasts.length === 0;
+  const isIndicatorVisible = activeWorkspaceSessionId !== null && !isStreaming && toasts.length === 0;
+  const activeWorkspaceName = workspaces.find(
+    (workspace) => workspace.sessionId === activeWorkspaceSessionId,
+  )?.workspaceName ?? null;
   const hasTopLeftOverlay = isToastVisible || isIndicatorVisible;
 
   return (
@@ -1048,16 +1009,9 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
                 <QueryInput
                   value={queryInput}
                   onChange={setQueryInput}
-                  onSubmit={async () => {
+                  onSubmit={() => {
                     if (queryInput.trim() && !isStreaming) {
                       const trimmedQuery = queryInput.trim();
-
-                      // If no active conversation, create one first
-                      let conversationId = activeConversationId;
-                      if (!conversationId) {
-                        const newConv = await createAndBindConversation();
-                        conversationId = newConv?.id ?? null;
-                      }
 
                       // Add user query to feed
                       setFeedItems((prev) => [
@@ -1072,7 +1026,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
                       setSubmittedQuery(trimmedQuery);
                       setIsQueryExpanded(false);
                       // Toast management handled by useQueryManager
-                      submitQuery(trimmedQuery, conversationId ?? undefined, selectedPageId, 'deep');
+                      submitQuery(trimmedQuery, selectedPageId, 'deep');
                       setQueryInput('');
                     }
                   }}
@@ -1084,7 +1038,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
               </div>
               <NewConversationButton
                 onClick={handleNewConversation}
-                disabled={isStreaming || isCreatingConversation}
+                disabled={isStreaming}
               />
             </div>
           </div>
@@ -1103,8 +1057,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
         {/* Conversation indicator - shows when bound to conversation and idle */}
         <ConversationIndicator
-          conversationTitle={localConversationTitle ?? activeConversation?.title ?? null}
-          isVisible={activeConversationId !== null && !isStreaming && toasts.length === 0}
+          conversationTitle={localConversationTitle ?? activeWorkspaceName}
+          isVisible={activeWorkspaceSessionId !== null && !isStreaming && toasts.length === 0}
         />
 
         {/* Error display */}
