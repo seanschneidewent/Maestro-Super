@@ -20,6 +20,11 @@ from app.database.session import get_db
 from app.models.experience_file import ExperienceFile
 from app.models.project import Project
 from app.models.session import MaestroSession
+from app.services.v3.benchmark_report import (
+    generate_evolution_report,
+    get_dimension_summary,
+    get_recent_corrections,
+)
 from app.services.v3.maestro_agent import run_maestro_turn
 from app.services.v3.session_manager import SessionManager
 
@@ -396,3 +401,56 @@ def read_experience(
     if not row:
         raise HTTPException(status_code=404, detail="Experience file not found")
     return {"path": row.path, "content": row.content}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Phase 7: Admin Benchmark Endpoints
+# ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("/admin/benchmark")
+def get_benchmark_report(
+    project_id: UUID,
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Get benchmark evolution report for a project.
+
+    Returns scoring dimension trends, correction rates, and insights over time.
+    This is an admin endpoint for developers to evaluate Maestro quality.
+    """
+    _verify_project(project_id, user, db)
+    return generate_evolution_report(project_id, days=days, db=db)
+
+
+@router.get("/admin/benchmark/dimensions")
+def get_benchmark_dimensions(
+    project_id: UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Get summary of all scoring dimensions for a project.
+
+    Returns average, min, max, and count for each emergent dimension.
+    """
+    _verify_project(project_id, user, db)
+    return {"dimensions": get_dimension_summary(project_id, db=db)}
+
+
+@router.get("/admin/benchmark/corrections")
+def get_benchmark_corrections(
+    project_id: UUID,
+    limit: int = 10,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Get recent interactions where the user corrected Maestro.
+
+    Useful for reviewing what Maestro got wrong.
+    """
+    _verify_project(project_id, user, db)
+    return {"corrections": get_recent_corrections(project_id, limit=limit, db=db)}

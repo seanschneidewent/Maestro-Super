@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     heartbeat_schedule: str = "06:30,12:00"  # comma-separated HH:MM
     heartbeat_timezone: str = "America/Chicago"
 
+    # Benchmark System (Phase 7)
+    benchmark_enabled: bool = True  # Log all interactions for emergent scoring
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""

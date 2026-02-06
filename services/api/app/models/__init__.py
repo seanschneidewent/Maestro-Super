@@ -19,6 +19,7 @@ from .project_memory import ProjectMemoryFile, LearningEvent
 from .experience_file import ExperienceFile
 from .session import MaestroSession
 from .telegram_user import TelegramUser
+from .benchmark_log import BenchmarkLog
 
 __all__ = [
     # Event type constants
@@ -44,4 +45,5 @@ __all__ = [
     "ExperienceFile",
     "MaestroSession",
     "TelegramUser",
+    "BenchmarkLog",
 ]

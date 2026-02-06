@@ -17,3 +17,4 @@ class InteractionPackage:
     turn_number: int
     timestamp: float
     is_heartbeat: bool = False
+    benchmark_id: str | None = None  # Phase 7: links to benchmark_logs entry

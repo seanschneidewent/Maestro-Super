@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session as DBSession
 
 from app.config import get_settings
+from app.services.v3.benchmark import update_benchmark_learning
 from app.services.v3.learning_tool_executor import execute_learning_tool
 from app.services.v3.providers import chat_completion
 from app.types.learning import InteractionPackage
@@ -154,6 +155,36 @@ LEARNING_TOOLS: list[dict[str, Any]] = [
 ]
 
 
+BENCHMARK_EVALUATION_INSTRUCTIONS = """
+## Benchmark Evaluation (Phase 7)
+
+After evaluating each interaction, provide a structured assessment in your final summary.
+
+Format your final response as:
+```
+ASSESSMENT: [2-3 sentence evaluation of this interaction]
+
+SCORES: {
+  "dimension_name": score (0-1),
+  ...
+}
+
+ACTIONS: [list of actions taken: Experience writes, Knowledge edits, or "none"]
+```
+
+Scoring dimensions should EMERGE from what you observe - don't use a fixed rubric.
+Common dimensions (use what applies):
+- retrieval_relevance: Did Maestro find the right Pointers?
+- response_accuracy: Was the answer correct?
+- gap_identification: Did Maestro flag what it didn't know?
+- confidence_calibration: Was Maestro's confidence appropriate?
+- workspace_assembly_quality: Did Maestro build a useful workspace? (if applicable)
+- experience_application: Did routing rules help? (if applicable)
+
+Let the interaction tell you what matters. Don't force dimensions that don't apply.
+"""
+
+
 def _build_learning_system_prompt() -> str:
     return "\n\n".join(
         [
@@ -175,6 +206,7 @@ def _build_learning_system_prompt() -> str:
             "",
             "When creating a new extended Experience file, ALWAYS update routing_rules.md so Maestro can find it.",
             "Be surgical and concise. Avoid verbose commentary.",
+            BENCHMARK_EVALUATION_INSTRUCTIONS,
         ]
     ).strip()
 
@@ -185,6 +217,83 @@ def _format_interaction(interaction: InteractionPackage) -> str:
     else:
         payload = asdict(interaction)
     return "Interaction package:\n" + json.dumps(payload, indent=2)
+
+
+def _parse_learning_assessment(response_text: str) -> tuple[dict, dict, list]:
+    """
+    Parse Learning's structured assessment from its response.
+
+    Returns:
+        (assessment_dict, scores_dict, actions_list)
+    """
+    import re
+
+    assessment = {}
+    scores = {}
+    actions: list[str] = []
+
+    # Parse ASSESSMENT section
+    assessment_match = re.search(
+        r"ASSESSMENT:\s*(.+?)(?=\nSCORES:|$)",
+        response_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if assessment_match:
+        assessment["summary"] = assessment_match.group(1).strip()
+
+    # Parse SCORES section - look for JSON object
+    scores_match = re.search(
+        r"SCORES:\s*\{([^}]+)\}",
+        response_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if scores_match:
+        try:
+            scores_text = "{" + scores_match.group(1) + "}"
+            # Clean up the JSON - handle trailing commas and comments
+            scores_text = re.sub(r",\s*}", "}", scores_text)
+            scores_text = re.sub(r"//[^\n]*", "", scores_text)
+            parsed = json.loads(scores_text)
+            if isinstance(parsed, dict):
+                # Ensure all values are floats in 0-1 range
+                for key, value in parsed.items():
+                    try:
+                        score = float(value)
+                        if 0 <= score <= 1:
+                            scores[key] = score
+                    except (ValueError, TypeError):
+                        pass
+        except json.JSONDecodeError:
+            # Try line-by-line parsing
+            for line in scores_match.group(1).splitlines():
+                line = line.strip().strip(",")
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    key = parts[0].strip().strip('"').strip("'")
+                    try:
+                        value = float(parts[1].strip().strip(","))
+                        if 0 <= value <= 1:
+                            scores[key] = value
+                    except (ValueError, TypeError):
+                        pass
+
+    # Parse ACTIONS section
+    actions_match = re.search(
+        r"ACTIONS:\s*(.+?)(?=\n[A-Z]+:|$)",
+        response_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if actions_match:
+        actions_text = actions_match.group(1).strip()
+        # Handle list format or comma-separated
+        if actions_text.startswith("["):
+            actions_text = actions_text.strip("[]")
+        for item in re.split(r"[,\n]", actions_text):
+            item = item.strip().strip("-").strip("*").strip()
+            if item and item.lower() != "none":
+                actions.append(item)
+
+    return assessment, scores, actions
 
 
 def _thinking_event(
@@ -253,13 +362,17 @@ async def run_learning_turn(
     db: DBSession,
 ) -> AsyncIterator[dict[str, Any]]:
     turn_number = 0
+    benchmark_id = None
+
     if isinstance(interaction, dict):
         try:
             turn_number = int(interaction.get("turn_number") or 0)
         except Exception:
             turn_number = 0
+        benchmark_id = interaction.get("benchmark_id")
     else:
         turn_number = interaction.turn_number
+        benchmark_id = interaction.benchmark_id
 
     session.learning_messages.append(
         {"role": "user", "content": _format_interaction(interaction)}
@@ -275,6 +388,11 @@ async def run_learning_turn(
 
     settings = get_settings()
     model = settings.learning_model
+
+    # Phase 7: Track tool usage for benchmark updates
+    experience_updates: list[dict[str, Any]] = []
+    knowledge_edits: list[dict[str, Any]] = []
+    full_response_text = ""
 
     while True:
         iteration_text = ""
@@ -299,6 +417,8 @@ async def run_learning_turn(
                 )
             elif event_type == "done":
                 break
+
+        full_response_text += iteration_text
 
         if tool_calls:
             assistant_message = {
@@ -328,8 +448,19 @@ async def run_learning_turn(
                 panel = None
                 if call["name"] in {"write_file", "edit_file"}:
                     panel = "learning"
+                    # Track Experience updates
+                    experience_updates.append({
+                        "tool": call["name"],
+                        "path": call["arguments"].get("path"),
+                    })
                 elif call["name"] in {"edit_pointer", "edit_page", "update_cross_references", "trigger_reground"}:
                     panel = "knowledge_update"
+                    # Track Knowledge edits
+                    knowledge_edits.append({
+                        "tool": call["name"],
+                        "target": call["arguments"].get("pointer_id") or call["arguments"].get("page_id"),
+                        "field": call["arguments"].get("field"),
+                    })
 
                 if panel:
                     summary = _tool_summary(call["name"], call["arguments"], result)
@@ -347,6 +478,19 @@ async def run_learning_turn(
         session.learning_messages.append(
             {"role": "assistant", "content": iteration_text}
         )
+
+        # Phase 7: Parse assessment and update benchmark
+        if benchmark_id and settings.benchmark_enabled:
+            assessment, scores, _ = _parse_learning_assessment(full_response_text)
+            if assessment or scores:
+                update_benchmark_learning(
+                    benchmark_id=benchmark_id,
+                    assessment=assessment,
+                    scores=scores,
+                    experience_updates=experience_updates if experience_updates else None,
+                    knowledge_edits=knowledge_edits if knowledge_edits else None,
+                    db=db,
+                )
         session.dirty = True
         session.last_active = time.time()
 

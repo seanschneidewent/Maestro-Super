@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.config import get_settings
 from app.models.project import Project
+from app.services.v3.benchmark import (
+    get_last_benchmark_id,
+    log_benchmark,
+    update_benchmark_user_signals,
+)
 from app.services.v3.experience import read_experience_for_query
 from app.services.v3.providers import chat_completion
 from app.services.v3.tool_executor import execute_maestro_tool
@@ -206,6 +211,16 @@ Requirements:
 - Your message should read like a text from a knowledgeable colleague, not software."""
 
 
+CONFIDENCE_INSTRUCTIONS = """Confidence awareness:
+- When highly confident (verified by multiple Pointers, clear cross-references): say so naturally
+- When uncertain (single source, Pointer not fully enriched, no cross-reference): flag it
+- Use natural language, not scores:
+  - High: "I'm confident about this - three details confirm it"
+  - Medium: "Based on what I found..." or "The plans show..."
+  - Low: "I found one reference but you should double-check against the specs"
+- Never fabricate confidence. If you're unsure, say so."""
+
+
 def build_maestro_system_prompt(
     session_type: str,
     workspace_state: dict[str, Any] | None,
@@ -251,6 +266,7 @@ Communication style for Telegram:
         project_line,
         workspace_line,
         heartbeat_block,
+        CONFIDENCE_INSTRUCTIONS,
         "Experience context (read-only):",
         experience_block,
         "Use tools to search knowledge, read pointers, and update the workspace when needed.",
@@ -304,10 +320,28 @@ async def run_maestro_turn(
         sum(1 for message in session.maestro_messages if message.get("role") == "user")
         + 1
     )
+
+    # Phase 7: Update previous benchmark with user signals from this message
+    settings = get_settings()
+    if settings.benchmark_enabled and turn_number > 1:
+        prev_benchmark_id = get_last_benchmark_id(str(session.session_id), db)
+        if prev_benchmark_id:
+            # Get the previous assistant response
+            prev_response = ""
+            for msg in reversed(session.maestro_messages):
+                if msg.get("role") == "assistant":
+                    prev_response = msg.get("content", "")
+                    break
+            if prev_response:
+                update_benchmark_user_signals(
+                    prev_benchmark_id, prev_response, user_message, db
+                )
+
     session.maestro_messages.append(
         {"role": "user", "content": user_message, "turn_number": turn_number}
     )
     session.last_active = time.time()
+    turn_start_time = time.time()
 
     panel_state = _create_panel_state()
 
@@ -482,6 +516,23 @@ async def run_maestro_turn(
         session.dirty = True
         session.last_active = time.time()
 
+        # Phase 7: Log benchmark
+        latency_ms = int((time.time() - turn_start_time) * 1000)
+        benchmark_id = log_benchmark(
+            session_id=str(session.session_id),
+            project_id=str(session.project_id),
+            turn_number=turn_number,
+            user_query=user_message,
+            maestro_response=iteration_text,
+            model=model,
+            latency_ms=latency_ms,
+            experience_paths_read=paths_read,
+            pointers_retrieved=pointers_retrieved,
+            workspace_actions=workspace_actions,
+            is_heartbeat=is_heartbeat,
+            db=db,
+        )
+
         interaction_package = InteractionPackage(
             user_query=user_message,
             maestro_response=iteration_text,
@@ -491,6 +542,7 @@ async def run_maestro_turn(
             turn_number=turn_number,
             timestamp=time.time(),
             is_heartbeat=is_heartbeat,
+            benchmark_id=benchmark_id,
         )
         try:
             session.learning_queue.put_nowait(interaction_package)
