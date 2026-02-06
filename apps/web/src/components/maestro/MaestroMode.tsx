@@ -13,7 +13,7 @@ import { useTutorial } from '../../hooks/useTutorial';
 import {
   QueryInput,
   SessionControls,
-  QueryHistoryPanel,
+  WorkspacesPanel,
   NewConversationButton,
   SuggestedPrompts,
 } from '.';
@@ -240,7 +240,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const [selectedDisciplineId, setSelectedDisciplineId] = useState<string | null>(null);
 
   // UI state
-  const [showHistory, setShowHistory] = useState(false);
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [queryInput, setQueryInput] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [isQueryExpanded, setIsQueryExpanded] = useState(false);
@@ -386,6 +386,15 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     reset: resetStream,
     restore,
     loadPages,
+    sessionId: activeWorkspaceSessionId,
+    workspaceState: activeWorkspaceState,
+    workspaces,
+    workspacePages: sessionWorkspacePages,
+    isSessionLoading,
+    sessionError,
+    createWorkspace,
+    switchWorkspace,
+    refreshWorkspaces,
   } = useQueryManager({
     projectId,
     renderedPages,
@@ -401,9 +410,10 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
   const displayTitle = activeQuery?.displayTitle ?? null;
   const currentQueryId = activeQuery?.id ?? null;
   const trace = activeQuery?.trace ?? [];
-  const selectedPages = activeQuery?.selectedPages ?? [];
+  const selectedPages = activeQuery?.selectedPages ?? sessionWorkspacePages;
+  const workspacePagesForPanel = selectedPages.length > 0 ? selectedPages : sessionWorkspacePages;
   const currentTool = activeQuery?.currentTool ?? null;
-  const error = activeQuery?.error ?? null;
+  const error = activeQuery?.error ?? sessionError ?? null;
   const codeBboxes = activeQuery?.codeBboxes ?? {};
   const pageAgentStates = activeQuery?.pageAgentStates ?? [];
   const learningNotes = activeQuery?.learningNotes ?? [];
@@ -414,12 +424,14 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
   // Toast management is now handled internally by useQueryManager
 
-  // Real-time workspace sync: update workspace pages as agent selects pages during streaming
+  // Keep workspace cards synced with current session state and streaming updates.
   useEffect(() => {
-    if (isStreaming && selectedPages.length > 0) {
+    if (selectedPages.length > 0) {
       syncWorkspacePages(selectedPages);
+    } else if (!isStreaming && activeWorkspaceState && activeWorkspaceState.displayedPages.length === 0) {
+      clearWorkspace();
     }
-  }, [isStreaming, selectedPages, syncWorkspacePages]);
+  }, [isStreaming, selectedPages, syncWorkspacePages, activeWorkspaceState, clearWorkspace]);
 
   // Reset per-page bbox push counters when active query changes.
   useEffect(() => {
@@ -479,6 +491,39 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     // Toast management handled by useQueryManager
     submitQuery(prompt, conversationId ?? undefined, selectedPageId, 'deep');
   }, [isStreaming, activeConversationId, createAndBindConversation, submitQuery, selectedPageId, tutorialActive, currentStep, advanceStep]);
+
+  const resetUiForWorkspaceSwitch = useCallback(() => {
+    resetStream();
+    setFeedItems([]);
+    setSubmittedQuery(null);
+    setIsQueryExpanded(false);
+    setQueryInput('');
+    setConversationQueries([]);
+    setActiveQueryId(null);
+    setLocalConversationTitle(null);
+    queryPagesCache.clear();
+    queryTraceCache.clear();
+    clearWorkspace();
+    startNewConversation();
+  }, [resetStream, clearWorkspace, queryPagesCache, queryTraceCache, startNewConversation]);
+
+  const handleCreateWorkspace = useCallback(async (workspaceName?: string) => {
+    const createdId = await createWorkspace(workspaceName);
+    if (createdId) {
+      resetUiForWorkspaceSwitch();
+      setShowWorkspaces(false);
+    }
+    return createdId;
+  }, [createWorkspace, resetUiForWorkspaceSwitch]);
+
+  const handleSwitchWorkspace = useCallback(async (workspaceSessionId: string) => {
+    const switched = await switchWorkspace(workspaceSessionId);
+    if (switched) {
+      resetUiForWorkspaceSwitch();
+      setShowWorkspaces(false);
+    }
+    return switched;
+  }, [switchWorkspace, resetUiForWorkspaceSwitch]);
 
   // Handle restoring a previous conversation from history
   const handleRestoreConversation = (
@@ -630,7 +675,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
     // Restore stream state with full query data (trace, response, pages)
     setQueryInput('');
-    setShowHistory(false);
+    setShowWorkspaces(false);
 
     const cachedPages = queryPagesCache.get(selectedQueryId);
     if (cachedPages && cachedPages.length > 0) {
@@ -667,7 +712,7 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
     // If we're already on this conversation, show the conversation content
     // by filtering out standalone-page items (the user was browsing pages)
     if (activeConversationId === conversationId && conversationQueries.length > 0) {
-      setShowHistory(false);
+      setShowWorkspaces(false);
       // Remove standalone-page items to show conversation content
       setFeedItems((prev) => prev.filter((item) => item.type !== 'standalone-page'));
       // Force scroll to top
@@ -1047,8 +1092,8 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
 
         {/* Floating controls */}
         <SessionControls
-          onToggleHistory={() => setShowHistory(!showHistory)}
-          isHistoryOpen={showHistory}
+          onToggleHistory={() => setShowWorkspaces(!showWorkspaces)}
+          isHistoryOpen={showWorkspaces}
           showSkipTutorial={tutorialActive}
           onSkipTutorial={skipTutorial}
         />
@@ -1070,12 +1115,20 @@ export const MaestroMode: React.FC<MaestroModeProps> = ({ mode, setMode, project
         )}
       </div>
 
-      {/* History panel - slides in from right */}
-      <QueryHistoryPanel
+      {/* Workspaces panel - slides in from right */}
+      <WorkspacesPanel
         projectId={projectId}
-        isOpen={showHistory}
-        onClose={() => setShowHistory(false)}
-        onRestoreConversation={handleRestoreConversation}
+        isOpen={showWorkspaces}
+        onClose={() => setShowWorkspaces(false)}
+        workspaces={workspaces}
+        activeSessionId={activeWorkspaceSessionId}
+        workspaceState={activeWorkspaceState}
+        workspacePages={workspacePagesForPanel}
+        isLoading={isSessionLoading}
+        error={sessionError}
+        onRefresh={refreshWorkspaces}
+        onCreateWorkspace={handleCreateWorkspace}
+        onSwitchWorkspace={handleSwitchWorkspace}
       />
     </div>
   );

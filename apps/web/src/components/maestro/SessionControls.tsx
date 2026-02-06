@@ -1,4 +1,4 @@
-import { Clock } from 'lucide-react'
+import { Layers } from 'lucide-react'
 
 interface SessionControlsProps {
   onToggleHistory: () => void
@@ -36,9 +36,9 @@ export function SessionControls({
           p-2 rounded-lg transition-colors
           ${isHistoryOpen ? 'bg-cyan-100 text-cyan-600' : 'hover:bg-slate-100 text-slate-500'}
         `}
-        title="Query history"
+        title="Workspaces"
       >
-        <Clock size={20} />
+        <Layers size={20} />
       </button>
     </div>
   )
