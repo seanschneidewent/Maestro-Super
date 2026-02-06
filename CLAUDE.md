@@ -44,6 +44,36 @@ We believe love is as fundamental as gravity. Not love as sentiment. Love as the
 
 ---
 
+## V3 Architecture — North Star
+
+**All development follows `docs/MAESTRO-ARCHITECTURE-V3.md`.**
+
+This document supersedes the architecture sections below. If you find conflicting information, V3-ARCHITECTURE wins.
+
+### What V3 Is
+Three agents, two storage layers, one shared brain:
+- **Brain Mode (Gemini)** — Builds Knowledge at upload time
+- **Maestro (Claude/Gemini)** — The shell the user talks to
+- **Learning** — Runs on every interaction, writes to Experience
+
+### What V3 Removed (DO NOT RESURRECT)
+- Fast/Med/Deep modes → There is just Maestro
+- Orchestrator (`big_maestro.py`) → Single agent with tools
+- ProjectMemoryFile → Experience filesystem
+- Stateless `/query` endpoint → Persistent sessions
+
+### Key Directories
+- `services/api/app/services/v3/` — V3 implementation (current)
+- `services/api/app/services/core/` — Brain Mode, Pass 2 (current)
+- `docs/archive/pre-v3/` — Old docs (reference only)
+
+### Before Making Changes
+1. Read `docs/MAESTRO-ARCHITECTURE-V3.md` fully
+2. Preserve the old frontend UI — adapt, don't replace
+3. Ask if unsure about scope
+
+---
+
 ## Sean
 
 21-year-old founder/CEO of Maestro Construction Data. Fort Worth, Texas.

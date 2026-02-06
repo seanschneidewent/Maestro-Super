@@ -1,9 +1,12 @@
 """Pull page_embedding from Supabase and insert into local Postgres."""
+import os
 import requests
 import psycopg2
 
-SUPABASE_URL = "https://ybyqobdyvbmsiehdmxwp.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlieXFvYmR5dmJtc2llaGRteHdwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NzExOTQ5OSwiZXhwIjoyMDgyNjk1NDk5fQ.qGIVjk8Ay9nnyXgHfDVKHGGDWEbeB7oZI9XPtIoJ1Vo"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ybyqobdyvbmsiehdmxwp.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+if not SUPABASE_KEY:
+    raise ValueError("SUPABASE_SERVICE_KEY environment variable required")
 HEADERS = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
 
 conn = psycopg2.connect(host='localhost', port=5432, user='postgres', password='maestro', dbname='maestro')
