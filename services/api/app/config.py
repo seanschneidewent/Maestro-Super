@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # Benchmark System (Phase 7)
     benchmark_enabled: bool = True  # Log all interactions for emergent scoring
 
+    # Legacy flags (V3 removes these, but keep for backwards compat with .env files)
+    maestro_orchestrator: bool = False  # Deprecated: V3 has no orchestrator
+
     @property
     def is_dev_mode(self) -> bool:
         """Check if running in dev mode with auth bypass."""
