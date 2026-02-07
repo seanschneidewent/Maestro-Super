@@ -3,7 +3,7 @@ import { useAgentToast } from '../../contexts/AgentToastContext';
 import { AgentWorkingToast } from './AgentWorkingToast';
 
 interface AgentToastStackProps {
-  onNavigate: (conversationId: string) => void;
+  onNavigate: (queryId: string) => void;
   shouldShow?: boolean;
 }
 
@@ -21,11 +21,7 @@ export const AgentToastStack: React.FC<AgentToastStackProps> = ({ onNavigate, sh
           <AgentWorkingToast
             toast={toast}
             onDismiss={() => dismissToast(toast.id)}
-            onNavigate={() => {
-              if (toast.conversationId) {
-                onNavigate(toast.conversationId);
-              }
-            }}
+            onNavigate={() => onNavigate(toast.queryId)}
           />
         </div>
       ))}

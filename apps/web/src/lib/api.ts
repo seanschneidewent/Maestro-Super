@@ -463,18 +463,41 @@ export interface QueryResponse {
   createdAt: string;
 }
 
-// Conversation types (matching backend schema)
-export interface ConversationResponse {
-  id: string;
-  userId: string;
-  projectId: string;
-  createdAt: string;
-  updatedAt: string;
-  title?: string | null;
+// V3 session types (matching backend schema)
+export interface V3WorkspaceStateResponse {
+  displayed_pages: string[];
+  highlighted_pointers: string[];
+  pinned_pages: string[];
 }
 
-export interface ConversationWithQueriesResponse extends ConversationResponse {
-  queries: QueryResponse[];
+export interface V3SessionSummaryResponse {
+  session_id: string;
+  session_type: 'workspace' | 'telegram';
+  workspace_name?: string | null;
+  status?: string;
+  last_active_at?: string | null;
+  last_message_preview?: string | null;
+}
+
+export interface V3SessionResponse extends V3SessionSummaryResponse {
+  maestro_messages?: Array<Record<string, unknown>>;
+  workspace_state?: V3WorkspaceStateResponse | null;
+}
+
+export interface V3SessionTurnResponse {
+  turn_number: number;
+  user: string;
+  response: string;
+  panels: {
+    workspace_assembly: string;
+    learning: string;
+    knowledge_update: string;
+  };
+}
+
+export interface V3SessionHistoryResponse {
+  session_id: string;
+  turns: V3SessionTurnResponse[];
 }
 
 // Processing types
@@ -617,15 +640,50 @@ export const api = {
     hide: (queryId: string) => request<void>(`/queries/${queryId}/hide`, { method: 'PATCH' }),
   },
 
-  conversations: {
-    list: (projectId: string) =>
-      request<ConversationResponse[]>(`/projects/${projectId}/conversations`),
-    create: (projectId: string) =>
-      request<ConversationResponse>(`/projects/${projectId}/conversations`, { method: 'POST' }),
-    get: (conversationId: string) =>
-      request<ConversationWithQueriesResponse>(`/conversations/${conversationId}`),
-    delete: (conversationId: string) =>
-      request<void>(`/conversations/${conversationId}`, { method: 'DELETE' }),
+  v3Sessions: {
+    create: (data: {
+      projectId: string;
+      sessionType: 'workspace' | 'telegram';
+      workspaceName?: string;
+    }) => request<V3SessionResponse>('/v3/sessions', {
+      method: 'POST',
+      body: {
+        project_id: data.projectId,
+        session_type: data.sessionType,
+        workspace_name: data.workspaceName,
+      },
+    }),
+    list: (
+      projectId: string,
+      options?: {
+        sessionType?: 'workspace' | 'telegram';
+        status?: string;
+      },
+    ) => {
+      const params = new URLSearchParams({ project_id: projectId });
+      if (options?.sessionType) {
+        params.set('session_type', options.sessionType);
+      }
+      if (options?.status) {
+        params.set('status', options.status);
+      }
+      return request<V3SessionSummaryResponse[]>(`/v3/sessions?${params.toString()}`);
+    },
+    get: (sessionId: string) =>
+      request<V3SessionResponse>(`/v3/sessions/${sessionId}`),
+    rename: (sessionId: string, workspaceName: string) =>
+      request<{ session_id: string; workspace_name: string }>(`/v3/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: { workspace_name: workspaceName },
+      }),
+    history: (sessionId: string) =>
+      request<V3SessionHistoryResponse>(`/v3/sessions/${sessionId}/history`),
+    close: (sessionId: string) =>
+      request<{ status: string }>(`/v3/sessions/${sessionId}`, { method: 'DELETE' }),
+    reset: (sessionId: string) =>
+      request<{ session_id: string }>(`/v3/sessions/${sessionId}/reset`, { method: 'POST' }),
+    compact: (sessionId: string) =>
+      request<{ status: string }>(`/v3/sessions/${sessionId}/compact`, { method: 'POST' }),
   },
 
   processing: {
