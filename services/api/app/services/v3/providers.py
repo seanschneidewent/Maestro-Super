@@ -247,13 +247,14 @@ def _gemini_messages(messages: list[dict[str, Any]]) -> tuple[str, list[types.Co
                 parsed = content
             else:
                 parsed = {"content": str(content or "")}
+            response_payload = parsed if isinstance(parsed, dict) else {"results": parsed}
             contents.append(
                 types.Content(
                     role="user",
                     parts=[
                         types.Part.from_function_response(
                             name=str(tool_name),
-                            response={"results": parsed} if isinstance(parsed, list) else parsed,
+                            response=response_payload,
                         )
                     ],
                 )

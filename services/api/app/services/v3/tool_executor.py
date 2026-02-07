@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session as DBSession
 
+from app.models.discipline import Discipline
 from app.models.experience_file import ExperienceFile
 from app.models.page import Page
 from app.models.pointer import Pointer
@@ -13,33 +16,113 @@ from app.models.session import MaestroSession
 from app.services.utils.search import search_pointers
 from app.types.session import LiveSession
 
+logger = logging.getLogger(__name__)
+
+
+def _pointer_result_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "pointer_id": item.get("pointer_id"),
+        "title": item.get("title"),
+        "description_snippet": item.get("relevance_snippet"),
+        "page_name": item.get("page_name"),
+        "page_id": item.get("page_id"),
+        "confidence": item.get("score"),
+    }
+
+
+def _fallback_search_pointers(
+    db: DBSession,
+    project_id: str,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    query_text = query.strip()
+    token_patterns = [f"%{token}%" for token in query_text.split() if token]
+    full_pattern = f"%{query_text}%" if query_text else None
+
+    fallback_query = (
+        db.query(Pointer, Page)
+        .join(Page, Pointer.page_id == Page.id)
+        .join(Discipline, Page.discipline_id == Discipline.id)
+        .filter(Discipline.project_id == project_id)
+    )
+
+    filters = []
+    if full_pattern:
+        filters.extend([Pointer.title.ilike(full_pattern), Pointer.description.ilike(full_pattern)])
+    for pattern in token_patterns:
+        filters.extend([Pointer.title.ilike(pattern), Pointer.description.ilike(pattern)])
+    if filters:
+        fallback_query = fallback_query.filter(or_(*filters))
+
+    if full_pattern:
+        relevance_sort = case(
+            (
+                or_(Pointer.title.ilike(full_pattern), Pointer.description.ilike(full_pattern)),
+                1,
+            ),
+            else_=0,
+        ).desc()
+        fallback_query = fallback_query.order_by(relevance_sort, Pointer.updated_at.desc())
+    else:
+        fallback_query = fallback_query.order_by(Pointer.updated_at.desc())
+
+    rows = fallback_query.limit(limit).all()
+    return [
+        {
+            "pointer_id": pointer.id,
+            "title": pointer.title,
+            "page_id": pointer.page_id,
+            "page_name": page.page_name if page else None,
+            "relevance_snippet": (pointer.description or "")[:200],
+            "score": None,
+        }
+        for pointer, page in rows
+    ]
+
 
 async def execute_maestro_tool(
     tool_name: str,
     tool_args: dict[str, Any],
     session: LiveSession,
     db: DBSession,
-) -> dict[str, Any] | list[dict[str, Any]]:
+) -> dict[str, Any]:
     if tool_name == "search_knowledge":
         query = str(tool_args.get("query") or "").strip()
-        limit = int(tool_args.get("limit") or 10)
-        results = await search_pointers(
+        limit = max(1, min(int(tool_args.get("limit") or 10), 50))
+        hybrid_results = await search_pointers(
             db=db,
             query=query,
             project_id=str(session.project_id),
             limit=limit,
         )
-        return [
-            {
-                "pointer_id": r.get("pointer_id"),
-                "title": r.get("title"),
-                "description_snippet": r.get("relevance_snippet"),
-                "page_name": r.get("page_name"),
-                "page_id": r.get("page_id"),
-                "confidence": r.get("score"),
-            }
-            for r in results
-        ]
+        fallback_results: list[dict[str, Any]] = []
+        used_fallback = False
+        if not hybrid_results:
+            fallback_results = _fallback_search_pointers(
+                db=db,
+                project_id=str(session.project_id),
+                query=query,
+                limit=limit,
+            )
+            used_fallback = bool(fallback_results)
+        selected_results = hybrid_results or fallback_results
+        payload_results = [_pointer_result_payload(item) for item in selected_results]
+        logger.info(
+            "search_knowledge project_id=%s query=%r limit=%d hybrid_count=%d fallback_count=%d used_fallback=%s",
+            str(session.project_id),
+            query,
+            limit,
+            len(hybrid_results),
+            len(fallback_results),
+            used_fallback,
+        )
+        return {
+            "query": query,
+            "count": len(payload_results),
+            "used_fallback": used_fallback,
+            "results": payload_results,
+        }
 
     if tool_name == "read_pointer":
         pointer_id = str(tool_args.get("pointer_id") or "")
@@ -72,13 +155,14 @@ async def execute_maestro_tool(
             .order_by(ExperienceFile.path.asc())
             .all()
         )
-        return [
+        results = [
             {
                 "path": row.path,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             }
             for row in rows
         ]
+        return {"results": results, "count": len(results)}
 
     if tool_name == "add_pages":
         page_ids = [str(pid) for pid in (tool_args.get("page_ids") or []) if pid]
@@ -160,7 +244,7 @@ async def execute_maestro_tool(
             .order_by(MaestroSession.updated_at.desc())
             .all()
         )
-        return [
+        results = [
             {
                 "session_id": row.id,
                 "workspace_name": row.workspace_name,
@@ -168,6 +252,7 @@ async def execute_maestro_tool(
             }
             for row in rows
         ]
+        return {"results": results, "count": len(results)}
 
     if tool_name == "workspace_action":
         action = str(tool_args.get("action") or "")

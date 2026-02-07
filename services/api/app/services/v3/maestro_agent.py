@@ -58,6 +58,17 @@ def _format_tool_event(kind: str, name: str, payload: dict[str, Any] | list[Any]
     return f"**Tool {kind}**: {name}\n{formatted}"
 
 
+def _search_knowledge_items(result: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if isinstance(result, dict):
+        maybe_items = result.get("results")
+        if isinstance(maybe_items, list):
+            return [item for item in maybe_items if isinstance(item, dict)]
+        return []
+    if isinstance(result, list):
+        return [item for item in result if isinstance(item, dict)]
+    return []
+
+
 WORKSPACE_TOOLS = [
     {
         "name": "search_knowledge",
@@ -451,10 +462,8 @@ async def run_maestro_turn(
                     _format_tool_event("result", call["name"], result),
                 )
 
-                if call["name"] == "search_knowledge" and isinstance(result, list):
-                    for item in result:
-                        if not isinstance(item, dict):
-                            continue
+                if call["name"] == "search_knowledge":
+                    for item in _search_knowledge_items(result):
                         pointer_id = item.get("pointer_id")
                         if not pointer_id or pointer_id in retrieved_ids:
                             continue
