@@ -663,14 +663,9 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
         setWorkspaces(sessions)
 
-        const preferredSession = sessions[0]
-        if (preferredSession) {
-          const switched = await switchWorkspace(preferredSession.sessionId)
-          if (!switched) throw new Error('Failed to restore existing workspace')
-          return
-        }
-
-        const defaultName = 'Workspace 1'
+        // Always start fresh on app load/refresh.
+        // Keep older active workspaces available in the panel, but don't auto-restore them.
+        const defaultName = `Workspace ${sessions.length + 1}`
         const createdSessionId = await createWorkspace(defaultName)
         if (!createdSessionId) {
           throw new Error('Failed to create initial workspace')
@@ -691,7 +686,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
     return () => {
       cancelled = true
     }
-  }, [projectId, fetchWorkspaceSessions, createWorkspace, switchWorkspace])
+  }, [projectId, fetchWorkspaceSessions, createWorkspace])
 
   // Helper to update a specific query's state
   const updateQuery = useCallback((queryId: string, updates: Partial<QueryState>) => {
