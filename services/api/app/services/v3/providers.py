@@ -166,6 +166,7 @@ async def _anthropic_chat_completion(
             "id": call["id"],
             "name": call["name"],
             "arguments": call["arguments"],
+            "thought_signature": call.get("thought_signature"),
         }
 
     if text_chunks:
@@ -227,10 +228,20 @@ def _gemini_messages(messages: list[dict[str, Any]]) -> tuple[str, list[types.Co
                 parts.append(types.Part.from_text(text=str(content)))
             tool_calls = msg.get("tool_calls") or []
             for call in tool_calls:
+                function_call = types.FunctionCall(
+                    id=str(call.get("id")) if call.get("id") else None,
+                    name=str(call.get("name") or ""),
+                    args=call.get("arguments") or {},
+                )
+                thought_signature = call.get("thought_signature")
+                if isinstance(thought_signature, str):
+                    thought_signature = thought_signature.encode("utf-8")
+                if not isinstance(thought_signature, (bytes, bytearray)):
+                    thought_signature = None
                 parts.append(
-                    types.Part.from_function_call(
-                        name=str(call.get("name")),
-                        args=call.get("arguments") or {},
+                    types.Part(
+                        function_call=function_call,
+                        thought_signature=bytes(thought_signature) if thought_signature else None,
                     )
                 )
             if parts:
@@ -295,6 +306,7 @@ async def _gemini_chat_completion(
                             "id": part.function_call.id or str(uuid4()),
                             "name": part.function_call.name,
                             "arguments": part.function_call.args or {},
+                            "thought_signature": part.thought_signature,
                         }
                     )
                 if part.text:
@@ -309,6 +321,7 @@ async def _gemini_chat_completion(
             "id": call["id"],
             "name": call["name"],
             "arguments": call["arguments"],
+            "thought_signature": call.get("thought_signature"),
         }
 
     if text_chunks:

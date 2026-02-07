@@ -192,6 +192,34 @@ def test_gemini_messages_wraps_non_dict_tool_payloads():
         assert response == expected
 
 
+def test_gemini_messages_preserves_tool_call_thought_signature():
+    signature = b"thought-signature"
+    _, contents = _gemini_messages(
+        [
+            {"role": "system", "content": "sys"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "search_knowledge",
+                        "arguments": {"query": "equipment floor plan"},
+                        "thought_signature": signature,
+                    }
+                ],
+            },
+        ]
+    )
+
+    part = contents[0].parts[0]
+    assert part.function_call is not None
+    assert part.function_call.id == "call-1"
+    assert part.function_call.name == "search_knowledge"
+    assert part.function_call.args == {"query": "equipment floor plan"}
+    assert part.thought_signature == signature
+
+
 def test_search_knowledge_item_extraction_supports_new_and_legacy_shapes():
     wrapped = {"results": [{"pointer_id": "a"}, {"pointer_id": "b"}]}
     legacy = [{"pointer_id": "c"}]

@@ -413,6 +413,7 @@ async def run_learning_turn(
                         "id": chunk.get("id") or str(uuid4()),
                         "name": chunk.get("name"),
                         "arguments": chunk.get("arguments") or {},
+                        "thought_signature": chunk.get("thought_signature"),
                     }
                 )
             elif event_type == "done":

@@ -69,6 +69,31 @@ def _search_knowledge_items(result: dict[str, Any] | list[dict[str, Any]]) -> li
     return []
 
 
+def _normalize_search_query(tool_args: Any, user_message: str) -> str:
+    if isinstance(tool_args, dict):
+        raw_query = str(tool_args.get("query") or "").strip()
+    else:
+        raw_query = ""
+    user_text = str(user_message or "").strip()
+
+    if not raw_query:
+        return user_text
+    if not user_text:
+        return raw_query
+
+    query_lower = raw_query.lower()
+    user_lower = user_text.lower()
+
+    # Guard against known sample-query leakage into live turns.
+    normalized_query = query_lower.replace("-", " ")
+    query_tokens = [token for token in normalized_query.split() if token]
+    if query_tokens in (["walk", "in", "cooler"], ["walk", "cooler"]):
+        if "walk" not in user_lower and "cooler" not in user_lower:
+            return user_text
+
+    return raw_query
+
+
 WORKSPACE_TOOLS = [
     {
         "name": "search_knowledge",
@@ -409,11 +434,26 @@ async def run_maestro_turn(
                         "content": content,
                     }
             elif event_type == "tool_call":
+                tool_name = chunk.get("name")
+                raw_arguments = chunk.get("arguments")
+                arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+                thought_signature = chunk.get("thought_signature")
+                if tool_name == "search_knowledge":
+                    normalized_query = _normalize_search_query(arguments, user_message)
+                    if normalized_query != str(arguments.get("query") or "").strip():
+                        logger.warning(
+                            "Normalized search_knowledge query from %r to %r for user message %r",
+                            arguments.get("query"),
+                            normalized_query,
+                            user_message,
+                        )
+                    arguments = {**arguments, "query": normalized_query}
                 tool_calls.append(
                     {
                         "id": chunk.get("id") or str(uuid4()),
-                        "name": chunk.get("name"),
-                        "arguments": chunk.get("arguments") or {},
+                        "name": tool_name,
+                        "arguments": arguments,
+                        "thought_signature": thought_signature,
                     }
                 )
                 _append_panel(
@@ -421,14 +461,14 @@ async def run_maestro_turn(
                     "workspace_assembly",
                     _format_tool_event(
                         "call",
-                        str(chunk.get("name") or ""),
-                        chunk.get("arguments") or {},
+                        str(tool_name or ""),
+                        arguments,
                     ),
                 )
                 yield {
                     "type": "tool_call",
-                    "tool": chunk.get("name"),
-                    "arguments": chunk.get("arguments") or {},
+                    "tool": tool_name,
+                    "arguments": arguments,
                 }
             elif event_type == "done":
                 break
