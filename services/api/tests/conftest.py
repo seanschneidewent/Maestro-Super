@@ -1,10 +1,14 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import ARRAY, create_engine, event
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database.base import Base
+import app.models  # noqa: F401 - ensure all model tables are registered on Base.metadata
+from app.models.project import Project
 
 
 def _set_sqlite_pragma(dbapi_connection, connection_record):
@@ -14,26 +18,27 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.close()
 
 
-from app.models import (
-    ContextPointer,
-    DisciplineContext,
-    PageContext,
-    Project,
-    ProjectFile,
-    Query,
-    UsageEvent,
-)
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(type_, compiler, **kw):
+    """Allow PostgreSQL JSONB columns to be created in SQLite test DBs."""
+    return "JSON"
 
-# Ensure all models are imported so they're registered with Base.metadata
-__all__ = [
-    "ContextPointer",
-    "DisciplineContext",
-    "PageContext",
-    "Project",
-    "ProjectFile",
-    "Query",
-    "UsageEvent",
-]
+
+@compiles(ARRAY, "sqlite")
+def _compile_array_sqlite(type_, compiler, **kw):
+    """Allow PostgreSQL ARRAY columns to be created in SQLite test DBs."""
+    return "JSON"
+
+
+try:
+    from pgvector.sqlalchemy.vector import VECTOR
+
+    @compiles(VECTOR, "sqlite")
+    def _compile_vector_sqlite(type_, compiler, **kw):
+        """Allow pgvector columns to be created in SQLite test DBs."""
+        return "BLOB"
+except Exception:
+    pass
 
 
 @pytest.fixture
@@ -79,57 +84,14 @@ def test_user_id() -> str:
 @pytest.fixture
 def sample_project(session: Session, test_user_id: str) -> Project:
     """Create a sample project for testing."""
-    from app.models.enums import ProjectStatus
-
     project = Project(
         user_id=test_user_id,
         name="Test Project",
-        status=ProjectStatus.SETUP,
     )
     session.add(project)
     session.commit()
     session.refresh(project)
     return project
-
-
-@pytest.fixture
-def sample_file(session: Session, sample_project: Project) -> ProjectFile:
-    """Create a sample PDF file for testing."""
-    from app.models.enums import FileType
-
-    file = ProjectFile(
-        project_id=sample_project.id,
-        name="test-plans.pdf",
-        file_type=FileType.PDF,
-        page_count=10,
-        is_folder=False,
-    )
-    session.add(file)
-    session.commit()
-    session.refresh(file)
-    return file
-
-
-@pytest.fixture
-def sample_pointer(session: Session, sample_file: ProjectFile) -> ContextPointer:
-    """Create a sample context pointer for testing."""
-    from app.models.enums import PointerStatus
-
-    pointer = ContextPointer(
-        file_id=sample_file.id,
-        page_number=1,
-        x_norm=0.1,
-        y_norm=0.2,
-        w_norm=0.3,
-        h_norm=0.4,
-        title="Test Pointer",
-        description="A test context pointer",
-        status=PointerStatus.COMPLETE,
-    )
-    session.add(pointer)
-    session.commit()
-    session.refresh(pointer)
-    return pointer
 
 
 @pytest.fixture

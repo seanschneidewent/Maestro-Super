@@ -4,7 +4,10 @@ import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from app.models.discipline import Discipline
 from app.models.experience_file import ExperienceFile
+from app.models.page import Page
+from app.models.pointer import Pointer
 from app.models.session import MaestroSession
 from app.services.v3.maestro_agent import _search_knowledge_items
 from app.services.v3.providers import _gemini_messages
@@ -134,6 +137,57 @@ def test_search_knowledge_uses_fallback_when_hybrid_raises(monkeypatch):
     assert result["used_fallback"] is True
     assert result["count"] == 1
     assert result["results"][0]["pointer_id"] == "p-fallback"
+
+
+def test_search_knowledge_uses_real_sql_fallback_when_hybrid_raises(
+    monkeypatch,
+    session,
+    sample_project,
+):
+    async def _broken_search_pointers(**kwargs):
+        raise RuntimeError("hybrid unavailable")
+
+    monkeypatch.setattr("app.services.v3.tool_executor.search_pointers", _broken_search_pointers)
+
+    discipline = Discipline(
+        project_id=sample_project.id,
+        name="structural",
+        display_name="Structural",
+    )
+    session.add(discipline)
+    session.flush()
+
+    page = Page(
+        discipline_id=discipline.id,
+        page_name="S1.01",
+        file_path="plans/S1.01.pdf",
+        page_index=0,
+    )
+    session.add(page)
+    session.flush()
+
+    pointer = Pointer(
+        page_id=page.id,
+        title="Anchor Bolt Layout",
+        description="Anchor bolt dimensions and placement at grid A-3.",
+        bbox_x=0.1,
+        bbox_y=0.2,
+        bbox_width=0.3,
+        bbox_height=0.4,
+    )
+    session.add(pointer)
+    session.commit()
+
+    live_session = SimpleNamespace(project_id=sample_project.id, workspace_state=None)
+    result = asyncio.run(
+        execute_maestro_tool("search_knowledge", {"query": "anchor bolt"}, live_session, session)
+    )
+
+    assert result["used_fallback"] is True
+    assert result["count"] == 1
+    assert result["results"][0]["pointer_id"] == pointer.id
+    assert result["results"][0]["title"] == "Anchor Bolt Layout"
+    assert result["results"][0]["page_name"] == "S1.01"
 
 
 def test_search_knowledge_coerces_bad_limit(monkeypatch):

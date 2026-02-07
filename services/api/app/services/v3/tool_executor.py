@@ -140,6 +140,18 @@ async def execute_maestro_tool(
 
         selected_results = hybrid_results or fallback_results
         payload_results = [_pointer_result_payload(item) for item in selected_results]
+        if used_fallback:
+            logger.warning(
+                "search_knowledge fallback engaged",
+                extra={
+                    "event": "v3_search_fallback",
+                    "project_id": str(session.project_id),
+                    "query": query,
+                    "hybrid_count": len(hybrid_results),
+                    "fallback_count": len(fallback_results),
+                    "used_fallback": used_fallback,
+                },
+            )
         logger.info(
             "search_knowledge project_id=%s query=%r limit=%d hybrid_count=%d fallback_count=%d used_fallback=%s",
             str(session.project_id),

@@ -362,10 +362,21 @@ async def query_session(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.exception("V3 session stream failed for %s: %s", session_id, exc)
+            logger.exception(
+                "V3 session stream failed",
+                extra={
+                    "event": "v3_stream_error",
+                    "session_id": str(session_id),
+                    "user_id": str(session.user_id),
+                    "project_id": str(session.project_id),
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
             yield _sse_payload(
                 {
                     "type": "error",
+                    "code": "stream_interrupted",
                     "message": "Maestro stream interrupted. Please retry.",
                 }
             )

@@ -56,12 +56,14 @@ Deployed on Railway with Supabase Postgres.
 | SUPABASE_JWT_SECRET | Prod | JWT validation secret |
 | SUPABASE_URL | Prod | Supabase project URL |
 | FRONTEND_URL | Prod | CORS origin for frontend |
+| MAESTRO_ORCHESTRATOR | No (Deprecated) | Legacy flag. V3 ignores it; remove from env config. |
 
 ### Deploy to Railway
 
 1. Connect your repo to Railway
 2. Set the root directory to `services/api`
 3. Set environment variables in Railway dashboard
+   - Ensure `MAESTRO_ORCHESTRATOR` is not set
 4. Railway will auto-deploy on push to main
 
 ### Verify Deployment

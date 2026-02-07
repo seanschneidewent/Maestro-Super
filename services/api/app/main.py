@@ -40,6 +40,11 @@ from app.routers import (
 
 settings = get_settings()
 
+if settings.maestro_orchestrator:
+    logger.warning(
+        "MAESTRO_ORCHESTRATOR is enabled but ignored in V3. Remove this env var to avoid confusion."
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -108,6 +108,7 @@ export interface QueryState {
   conversationTitle: string | null
   currentTool: string | null
   error: string | null
+  errorCode: string | null
   startTime: number
   response: FieldResponse | null
   conceptResponse?: AgentConceptResponse
@@ -736,6 +737,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       updateQuery(queryId, {
         status: 'error',
         error: 'Request timed out after 90 seconds',
+        errorCode: null,
       })
       const query = queries.get(queryId)
       if (query?.toastId) {
@@ -862,6 +864,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       updateQuery(queryId, {
         status: 'error',
         error: message,
+        errorCode: null,
       })
 
       const query = queries.get(queryId)
@@ -1489,6 +1492,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
 
       case 'error': {
         const message = typeof data.message === 'string' ? data.message : 'An error occurred'
+        const code = typeof data.code === 'string' ? data.code : null
 
         setQueries((prev) => {
           const query = prev.get(queryId)
@@ -1504,6 +1508,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             ...query,
             status: 'error',
             error: message,
+            errorCode: code,
             currentTool: null,
           })
           return newMap
@@ -1566,6 +1571,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
         conversationTitle: null,
         currentTool: null,
         error: null,
+        errorCode: null,
         startTime: Date.now(),
         response: null,
         conceptResponse: undefined,
@@ -1630,6 +1636,7 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       conversationTitle: null,
       currentTool: null,
       error: null,
+      errorCode: null,
       startTime: Date.now(),
       response: null,
       pageAgentStates: [],

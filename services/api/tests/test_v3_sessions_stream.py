@@ -26,7 +26,7 @@ def _parse_sse_events(raw_body: str) -> list[dict]:
 
 
 def _create_workspace_session(client: TestClient) -> str:
-    project = client.post("/projects/", json={"name": "SSE Test Project"}).json()
+    project = client.post("/projects", json={"name": "SSE Test Project"}).json()
     response = client.post(
         "/v3/sessions",
         json={"project_id": project["id"], "session_type": "workspace"},
@@ -61,6 +61,11 @@ def test_v3_query_stream_emits_error_event_when_turn_crashes(
     assert any(
         event.get("type") == "error"
         and "interrupted" in str(event.get("message", "")).lower()
+        for event in events
+    )
+    assert any(
+        event.get("type") == "error"
+        and event.get("code") == "stream_interrupted"
         for event in events
     )
 
