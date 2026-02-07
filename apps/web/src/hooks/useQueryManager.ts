@@ -754,6 +754,8 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
       codeBboxes: {} as Record<string, BoundingBox[]>,
       lastToolResultIndex: -1,
     }
+    let receivedAnyEvent = false
+    let receivedTerminalEvent = false
 
     try {
       if (!queryState.sessionId) {
@@ -804,6 +806,12 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
               if (jsonStr) {
                 try {
                   const data = JSON.parse(jsonStr)
+                  if (typeof data?.type === 'string') {
+                    receivedAnyEvent = true
+                    if (data.type === 'done' || data.type === 'error') {
+                      receivedTerminalEvent = true
+                    }
+                  }
                   await processEvent(queryId, data, accumulator)
                 } catch {
                   console.warn('Failed to parse SSE event:', jsonStr)
@@ -823,6 +831,12 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             if (jsonStr) {
               try {
                 const data = JSON.parse(jsonStr)
+                if (typeof data?.type === 'string') {
+                  receivedAnyEvent = true
+                  if (data.type === 'done' || data.type === 'error') {
+                    receivedTerminalEvent = true
+                  }
+                }
                 await processEvent(queryId, data, accumulator)
               } catch {
                 console.warn('Failed to parse remaining SSE event:', jsonStr)
@@ -830,6 +844,12 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
             }
           }
         }
+      }
+      if (!receivedTerminalEvent) {
+        const message = receivedAnyEvent
+          ? 'Stream ended before completion. Please retry.'
+          : 'No response events received. Please retry.'
+        throw new Error(message)
       }
 
     } catch (err) {
@@ -1334,6 +1354,15 @@ export function useQueryManager(options: UseQueryManagerOptions): UseQueryManage
           findings,
           crossReferences,
           gaps,
+        }
+        const hasStructuredContent = findings.length > 0
+          || crossReferences.length > 0
+          || gaps.length > 0
+          || Boolean(summary)
+          || Boolean(conceptName)
+
+        if (!extractedAnswer.trim() && !hasStructuredContent) {
+          extractedAnswer = 'I could not generate a response this turn. Please try again.'
         }
 
         // Get the query state to access other data

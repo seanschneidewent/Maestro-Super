@@ -47,6 +47,10 @@ def _drain_event_bus(session) -> list[dict]:
     return events
 
 
+def _sse_payload(event: dict) -> str:
+    return f"data: {json.dumps(event)}\n\n"
+
+
 def _last_message_preview(messages: list[dict]) -> str | None:
     for message in reversed(messages or []):
         if not isinstance(message, dict):
@@ -346,19 +350,34 @@ async def query_session(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     async def event_generator():
-        for queued in _drain_event_bus(session):
-            yield f"data: {json.dumps(queued)}\n\n"
-        async for event in run_maestro_turn(session, data.message, db):
-            yield f"data: {json.dumps(event)}\n\n"
+        # Force immediate stream flush through proxies/browser buffers.
+        yield ": connected\n\n"
+        try:
+            async for event in run_maestro_turn(session, data.message, db):
+                yield _sse_payload(event)
+                for queued in _drain_event_bus(session):
+                    yield _sse_payload(queued)
             for queued in _drain_event_bus(session):
-                yield f"data: {json.dumps(queued)}\n\n"
-        for queued in _drain_event_bus(session):
-            yield f"data: {json.dumps(queued)}\n\n"
+                yield _sse_payload(queued)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("V3 session stream failed for %s: %s", session_id, exc)
+            yield _sse_payload(
+                {
+                    "type": "error",
+                    "message": "Maestro stream interrupted. Please retry.",
+                }
+            )
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
