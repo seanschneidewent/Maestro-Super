@@ -19,6 +19,14 @@ from app.types.session import LiveSession
 logger = logging.getLogger(__name__)
 
 
+def _coerce_limit(raw: Any, default: int = 10, min_value: int = 1, max_value: int = 50) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(value, max_value))
+
+
 def _pointer_result_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "pointer_id": item.get("pointer_id"),
@@ -89,23 +97,47 @@ async def execute_maestro_tool(
 ) -> dict[str, Any]:
     if tool_name == "search_knowledge":
         query = str(tool_args.get("query") or "").strip()
-        limit = max(1, min(int(tool_args.get("limit") or 10), 50))
-        hybrid_results = await search_pointers(
-            db=db,
-            query=query,
-            project_id=str(session.project_id),
-            limit=limit,
-        )
+        limit = _coerce_limit(tool_args.get("limit"), default=10)
+        hybrid_results: list[dict[str, Any]] = []
         fallback_results: list[dict[str, Any]] = []
         used_fallback = False
+
+        if query:
+            try:
+                hybrid_results = await search_pointers(
+                    db=db,
+                    query=query,
+                    project_id=str(session.project_id),
+                    limit=limit,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "search_knowledge hybrid search failed project_id=%s query=%r limit=%d: %s",
+                    str(session.project_id),
+                    query,
+                    limit,
+                    exc,
+                )
+
         if not hybrid_results:
-            fallback_results = _fallback_search_pointers(
-                db=db,
-                project_id=str(session.project_id),
-                query=query,
-                limit=limit,
-            )
+            try:
+                fallback_results = _fallback_search_pointers(
+                    db=db,
+                    project_id=str(session.project_id),
+                    query=query,
+                    limit=limit,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "search_knowledge fallback search failed project_id=%s query=%r limit=%d: %s",
+                    str(session.project_id),
+                    query,
+                    limit,
+                    exc,
+                )
+                fallback_results = []
             used_fallback = bool(fallback_results)
+
         selected_results = hybrid_results or fallback_results
         payload_results = [_pointer_result_payload(item) for item in selected_results]
         logger.info(

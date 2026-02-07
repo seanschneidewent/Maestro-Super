@@ -21,6 +21,14 @@ from app.types.session import LiveSession
 logger = logging.getLogger(__name__)
 
 
+def _coerce_limit(raw: Any, default: int = 10, min_value: int = 1, max_value: int = 50) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(value, max_value))
+
+
 def _parse_reference_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
@@ -168,13 +176,23 @@ async def execute_learning_tool(
 
     if tool_name == "search_knowledge":
         query = str(tool_args.get("query") or "").strip()
-        limit = int(tool_args.get("limit") or 10)
-        results = await search_pointers(
-            db=db,
-            query=query,
-            project_id=str(session.project_id),
-            limit=limit,
-        )
+        limit = _coerce_limit(tool_args.get("limit"), default=10)
+        try:
+            results = await search_pointers(
+                db=db,
+                query=query,
+                project_id=str(session.project_id),
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Learning search_knowledge failed project_id=%s query=%r limit=%d: %s",
+                str(session.project_id),
+                query,
+                limit,
+                exc,
+            )
+            results = []
         return [
             {
                 "pointer_id": r.get("pointer_id"),

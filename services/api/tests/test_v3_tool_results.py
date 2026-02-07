@@ -107,6 +107,55 @@ def test_search_knowledge_uses_fallback_when_hybrid_empty(monkeypatch):
     assert result["results"][0]["pointer_id"] == "p-fallback"
 
 
+def test_search_knowledge_uses_fallback_when_hybrid_raises(monkeypatch):
+    async def _broken_search_pointers(**kwargs):
+        raise RuntimeError("hybrid unavailable")
+
+    def _fake_fallback(*args, **kwargs):
+        return [
+            {
+                "pointer_id": "p-fallback",
+                "title": "Fallback Match",
+                "relevance_snippet": "Recovered by fallback",
+                "page_name": "A1.01",
+                "page_id": "pg-9",
+                "score": None,
+            }
+        ]
+
+    monkeypatch.setattr("app.services.v3.tool_executor.search_pointers", _broken_search_pointers)
+    monkeypatch.setattr("app.services.v3.tool_executor._fallback_search_pointers", _fake_fallback)
+    session = SimpleNamespace(project_id="proj-1", workspace_state=None)
+
+    result = asyncio.run(
+        execute_maestro_tool("search_knowledge", {"query": "equipment"}, session, _FakeDB())
+    )
+
+    assert result["used_fallback"] is True
+    assert result["count"] == 1
+    assert result["results"][0]["pointer_id"] == "p-fallback"
+
+
+def test_search_knowledge_coerces_bad_limit(monkeypatch):
+    captured = {}
+
+    async def _fake_search_pointers(**kwargs):
+        captured["limit"] = kwargs.get("limit")
+        return []
+
+    monkeypatch.setattr("app.services.v3.tool_executor.search_pointers", _fake_search_pointers)
+    monkeypatch.setattr("app.services.v3.tool_executor._fallback_search_pointers", lambda *a, **k: [])
+    session = SimpleNamespace(project_id="proj-1", workspace_state=None)
+
+    result = asyncio.run(
+        execute_maestro_tool("search_knowledge", {"query": "equipment", "limit": "not-a-number"}, session, _FakeDB())
+    )
+
+    assert captured["limit"] == 10
+    assert result["count"] == 0
+    assert result["used_fallback"] is False
+
+
 def test_list_tools_return_dict_envelopes():
     now = datetime.now(timezone.utc)
     db = _FakeDB(
